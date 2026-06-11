@@ -1,0 +1,43 @@
+# Dependencies
+node_modules/
+
+# Environment files (secrets must never be committed - C4/C11)
+.env
+.env.*
+!.env.example
+
+# Next.js
+.next/
+out/
+next-env.d.ts
+
+# NestJS / TypeScript build output
+dist/
+*.tsbuildinfo
+
+# Tests & coverage
+coverage/
+.nyc_output/
+
+# Prisma generated client
+apps/api/generated/
+
+# Service worker build output (compiled from sw.ts)
+apps/web/public/sw.js
+apps/web/public/sw.js.map
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# Misc
+.cache/
+.turbo/

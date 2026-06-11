@@ -1,0 +1,7 @@
+node_modules
+dist
+.next
+coverage
+apps/api/generated
+apps/web/public/sw.js
+package-lock.json

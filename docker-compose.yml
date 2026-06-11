@@ -1,0 +1,24 @@
+# Local development database - PostgreSQL + PostGIS (geospatial support, C6/C9).
+# Credentials come from the root .env file (never committed - C4/C11).
+# First run: copy .env.example to .env, then `docker compose up -d`.
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    container_name: urbanflow-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-urbanflow}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-urbanflow}
+    ports:
+      - '${POSTGRES_PORT:-5432}:5432'
+    volumes:
+      - urbanflow_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-urbanflow} -d ${POSTGRES_DB:-urbanflow}']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  urbanflow_pgdata:

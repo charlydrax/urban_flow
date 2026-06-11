@@ -1,0 +1,47 @@
+@import 'tailwindcss';
+
+/*
+ * Palette UrbanFlow — contrastes vérifiés AA (C7) :
+ * - texte #1a2e22 sur fond #f6faf7 : ratio > 13:1
+ * - blanc sur --color-primary (#1d6f42) : ratio ≈ 5.5:1
+ */
+@theme {
+  --color-primary: #1d6f42;
+  --color-primary-dark: #14532d;
+  --color-surface: #f6faf7;
+  --color-ink: #1a2e22;
+}
+
+/* Focus visible renforcé sur tous les éléments interactifs (C7 — WCAG 2.4.7) */
+:focus-visible {
+  outline: 3px solid var(--color-primary-dark);
+  outline-offset: 2px;
+}
+
+/* Respect des préférences utilisateur en matière d'animations (C7 / éco-conception C5) */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Lien d'évitement : caché jusqu'au focus clavier (C7 — WCAG 2.4.1) */
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  z-index: 100;
+  padding: 0.75rem 1.25rem;
+  background: var(--color-primary-dark);
+  color: #ffffff;
+  border-radius: 0 0 0.5rem 0;
+}
+
+.skip-link:focus {
+  left: 0;
+}

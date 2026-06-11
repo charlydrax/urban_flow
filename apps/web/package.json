@@ -1,0 +1,35 @@
+{
+  "name": "@urbanflow/web",
+  "version": "0.1.0",
+  "private": true,
+  "description": "UrbanFlow Mobility - PWA client (Next.js App Router + MapLibre GL JS)",
+  "scripts": {
+    "dev": "npm run build:sw && next dev",
+    "build": "npm run build:sw && next build",
+    "start": "next start",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "build:sw": "esbuild sw.ts --bundle --minify --outfile=public/sw.js",
+    "typecheck:sw": "tsc -p tsconfig.sw.json --noEmit"
+  },
+  "dependencies": {
+    "maplibre-gl": "^5.6.0",
+    "next": "^15.3.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@eslint/eslintrc": "^3.3.0",
+    "@tailwindcss/postcss": "^4.1.0",
+    "@types/node": "^22.10.0",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "esbuild": "^0.25.0",
+    "eslint-config-next": "^15.3.0",
+    "postcss": "^8.5.0",
+    "tailwindcss": "^4.1.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.1.0"
+  }
+}

@@ -1,0 +1,90 @@
+// Schéma Prisma — UrbanFlow Mobility.
+//
+// Base PostgreSQL + extension PostGIS (activée par la migration initiale :
+// `CREATE EXTENSION IF NOT EXISTS postgis`). Les requêtes géospatiales
+// (ex. ST_DWithin pour les pistes cyclables) passeront par $queryRaw car
+// Prisma ne couvre pas nativement les types geometry.
+//
+// RGPD (C8) : chaque champ contenant une donnée personnelle est annoté.
+// Le droit à l'effacement est garanti par les suppressions en cascade :
+// supprimer un User efface son profil de mobilité et tout son historique.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/// Compte utilisateur (F1).
+/// RGPD (C8) : table de données personnelles — minimisation appliquée,
+/// seuls l'email et le hash du mot de passe sont stockés.
+model User {
+  id           String   @id @default(uuid()) @db.Uuid
+  /// RGPD (C8) : donnée personnelle (identifiant de contact). Jamais journalisée (C11).
+  email        String   @unique
+  /// Hash argon2 du mot de passe (C4) — jamais le mot de passe en clair.
+  passwordHash String   @map("password_hash")
+  /// RGPD (C8) : horodatage du consentement explicite (géolocalisation, CGU).
+  consentAt    DateTime? @map("consent_at")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  mobilityProfile MobilityProfile?
+  searchHistory   SearchHistory[]
+
+  @@map("users")
+}
+
+/// Préférences de mobilité (F1), lues par le planificateur (F2) à l'étape 3 du flux.
+model MobilityProfile {
+  id     String @id @default(uuid()) @db.Uuid
+  /// Cascade : l'effacement du compte emporte le profil (droit à l'effacement — C8).
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId String @unique @map("user_id") @db.Uuid
+
+  /// Modes acceptés (valeurs de l'enum TransportMode côté API).
+  preferredModes  String[] @map("preferred_modes")
+  /// RGPD (C8) : donnée sensible (situation de handicap) — collectée uniquement
+  /// pour proposer des itinéraires accessibles PMR (C12), jamais journalisée (C11).
+  reducedMobility Boolean  @default(false) @map("reduced_mobility")
+  /// Marche maximale acceptée par segment, en minutes.
+  maxWalkMinutes  Int      @default(15) @map("max_walk_minutes")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@map("mobility_profiles")
+}
+
+/// Historique des recherches d'itinéraires (étape 7 du flux) — alimente le
+/// tableau de bord carbone personnel.
+/// RGPD (C8) : les déplacements sont des données personnelles sensibles par
+/// recoupement — accès restreint au propriétaire, purge en cascade avec le compte,
+/// politique de rétention à définir (C11 : chiffrement au repos côté hébergeur).
+model SearchHistory {
+  id     String @id @default(uuid()) @db.Uuid
+  /// Cascade : droit à l'effacement (C8).
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId String @map("user_id") @db.Uuid
+
+  /// RGPD (C8) : lieu de départ saisi (donnée de déplacement).
+  fromLabel String  @map("from_label")
+  /// Latitude/longitude WGS84 du départ (géolocalisation — C6).
+  fromLat   Float?  @map("from_lat")
+  fromLng   Float?  @map("from_lng")
+  /// RGPD (C8) : lieu d'arrivée saisi (donnée de déplacement).
+  toLabel   String  @map("to_label")
+  toLat     Float?  @map("to_lat")
+  toLng     Float?  @map("to_lng")
+
+  /// Résumé de l'itinéraire retenu (ex. "Marche + Métro B").
+  selectedSummary String? @map("selected_summary")
+  /// Empreinte CO₂ de l'option retenue, en grammes — alimente le dashboard carbone.
+  carbonGrams     Int?    @map("carbon_grams")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([userId, createdAt])
+  @@map("search_history")
+}

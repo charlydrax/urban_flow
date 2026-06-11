@@ -1,0 +1,42 @@
+import { Module } from '@nestjs/common';
+import { ConfigModule } from '@nestjs/config';
+import { APP_FILTER, APP_GUARD } from '@nestjs/core';
+
+import { AppController } from './app.controller';
+import { GlobalExceptionFilter } from './common/filters/global-exception.filter';
+import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
+import { validateEnv } from './config/env.validation';
+import { AuthModule } from './modules/auth/auth.module';
+import { CarbonModule } from './modules/carbon/carbon.module';
+import { RoutesModule } from './modules/routes/routes.module';
+import { TransportModule } from './modules/transport/transport.module';
+import { UsersModule } from './modules/users/users.module';
+import { PrismaModule } from './prisma/prisma.module';
+
+/**
+ * Module racine de l'API Gateway (monolithe modulaire — cf. CLAUDE.md section 2).
+ *
+ * - Le guard JWT est appliqué GLOBALEMENT : tout endpoint est protégé par défaut,
+ *   sauf opt-out explicite via `@Public()` (sécurité par défaut — C4).
+ * - Le filtre d'exceptions global normalise les erreurs et journalise sans
+ *   données personnelles (C11).
+ * - La configuration est chargée depuis .env et validée au démarrage : l'API
+ *   refuse de démarrer si une variable obligatoire manque (fail-fast, C4).
+ */
+@Module({
+  imports: [
+    ConfigModule.forRoot({ isGlobal: true, validate: validateEnv }),
+    PrismaModule,
+    AuthModule,
+    UsersModule,
+    RoutesModule,
+    TransportModule,
+    CarbonModule,
+  ],
+  controllers: [AppController],
+  providers: [
+    { provide: APP_GUARD, useClass: JwtAuthGuard },
+    { provide: APP_FILTER, useClass: GlobalExceptionFilter },
+  ],
+})
+export class AppModule {}
