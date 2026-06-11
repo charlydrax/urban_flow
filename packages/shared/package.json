@@ -1,0 +1,20 @@
+{
+  "name": "@urbanflow/shared",
+  "version": "0.1.0",
+  "private": true,
+  "description": "UrbanFlow Mobility - shared TypeScript contracts (DTO interfaces, itinerary types) used by apps/web and apps/api",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsc -p tsconfig.json --watch",
+    "lint": "eslint src",
+    "prepare": "npm run build"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0"
+  }
+}

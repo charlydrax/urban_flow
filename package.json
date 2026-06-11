@@ -4,19 +4,23 @@
   "private": true,
   "description": "UrbanFlow Mobility - multimodal urban mobility platform (T6 CDSD - RNCP 36146)",
   "workspaces": [
-    "apps/*"
+    "apps/*",
+    "packages/*"
   ],
   "scripts": {
+    "dev": "npm run build:shared && concurrently -k -n api,web -c blue,green \"npm run dev:api\" \"npm run dev:web\"",
     "dev:web": "npm run dev --workspace apps/web",
     "dev:api": "npm run start:dev --workspace apps/api",
-    "build": "npm run build --workspace apps/api && npm run build --workspace apps/web",
-    "lint": "npm run lint --workspace apps/api && npm run lint --workspace apps/web",
+    "build:shared": "npm run build --workspace packages/shared",
+    "build": "npm run build:shared && npm run build --workspace apps/api && npm run build --workspace apps/web",
+    "lint": "npm run lint --workspace packages/shared && npm run lint --workspace apps/api && npm run lint --workspace apps/web",
     "test": "npm run test --workspace apps/api && npm run test --workspace apps/web",
-    "format": "prettier --write \"apps/**/*.{ts,tsx,js,json,md,css}\"",
-    "format:check": "prettier --check \"apps/**/*.{ts,tsx,js,json,md,css}\""
+    "format": "prettier --write \"apps/**/*.{ts,tsx,js,json,md,css}\" \"packages/**/*.{ts,js,json,md}\"",
+    "format:check": "prettier --check \"apps/**/*.{ts,tsx,js,json,md,css}\" \"packages/**/*.{ts,js,json,md}\""
   },
   "devDependencies": {
     "@eslint/js": "^9.39.0",
+    "concurrently": "^9.1.0",
     "eslint": "^9.39.0",
     "eslint-config-prettier": "^10.1.0",
     "prettier": "^3.6.0",

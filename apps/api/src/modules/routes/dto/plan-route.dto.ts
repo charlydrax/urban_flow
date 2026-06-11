@@ -1,4 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import type { Place, PlanRouteRequest } from '@urbanflow/shared';
 import { Type } from 'class-transformer';
 import {
   IsLatitude,
@@ -16,7 +17,7 @@ import {
  * Le label permet la saisie texte (« Part-Dieu ») ; les coordonnées proviennent
  * de la Geolocation API du client (étape 1 du flux de référence — C6).
  */
-export class PlaceDto {
+export class PlaceDto implements Place {
   /** Nom du lieu tel que saisi ou résolu (ex. "Part-Dieu"). */
   @ApiProperty({ example: 'Part-Dieu' })
   @IsString()
@@ -45,7 +46,7 @@ export class PlaceDto {
  * mais le service utilise TOUJOURS l'identité du JWT vérifié — jamais ce champ —
  * pour lire les préférences et écrire l'historique (anti-IDOR).
  */
-export class PlanRouteDto {
+export class PlanRouteDto implements PlanRouteRequest {
   /** Point de départ. */
   @ApiProperty({ type: PlaceDto })
   @ValidateNested()
