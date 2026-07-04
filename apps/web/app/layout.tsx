@@ -11,6 +11,11 @@ export const metadata: Metadata = {
   manifest: '/manifest.json',
   applicationName: 'UrbanFlow Mobility',
   appleWebApp: { capable: true, title: 'UrbanFlow', statusBarStyle: 'default' },
+  // iOS ignore les icônes du manifest : apple-touch-icon requis pour l'écran d'accueil (C1)
+  icons: {
+    icon: '/icons/icon-192.png',
+    apple: '/icons/icon-192.png',
+  },
 };
 
 export const viewport: Viewport = {
