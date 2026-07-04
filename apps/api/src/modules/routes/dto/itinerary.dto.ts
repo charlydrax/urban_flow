@@ -1,12 +1,15 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import type { Itinerary, PlanRoutesResponse, RouteSegment } from '@urbanflow/shared';
 
 import { TransportMode } from '../../../common/enums/transport-mode.enum';
 
 /**
  * Segment d'un itinéraire multimodal (une portion effectuée avec un seul mode).
  * Le CO₂ est calculé segment par segment par le Service Carbone (étape 6 du flux).
+ * Implémente le contrat partagé `RouteSegment` (@urbanflow/shared) : toute
+ * divergence front/back est détectée à la compilation (C9).
  */
-export class RouteSegmentDto {
+export class RouteSegmentDto implements RouteSegment {
   /** Mode de transport du segment. */
   @ApiProperty({ enum: TransportMode, example: TransportMode.METRO })
   mode!: TransportMode;
@@ -37,7 +40,7 @@ export class RouteSegmentDto {
 }
 
 /** Itinéraire multimodal complet, prêt à être affiché et trié par le client. */
-export class ItineraryDto {
+export class ItineraryDto implements Itinerary {
   /** Identifiant de l'itinéraire dans la réponse (référence pour l'historique). */
   @ApiProperty({ example: 'itin-1' })
   id!: string;
@@ -83,7 +86,7 @@ export class ItineraryDto {
 }
 
 /** Réponse de `POST /api/routes/plan` (étape 8 du flux : 200 + itinéraires + CO₂). */
-export class PlanRoutesResponseDto {
+export class PlanRoutesResponseDto implements PlanRoutesResponse {
   /** Itinéraires proposés, triés par empreinte carbone croissante (mobilité douce d'abord). */
   @ApiProperty({ type: [ItineraryDto] })
   itineraries!: ItineraryDto[];

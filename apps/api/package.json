@@ -25,6 +25,7 @@
     "@nestjs/platform-express": "^11.0.0",
     "@nestjs/swagger": "^11.0.0",
     "@prisma/client": "^6.8.0",
+    "@urbanflow/shared": "*",
     "argon2": "^0.41.0",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.1",
@@ -62,7 +63,7 @@
     "rootDir": "src",
     "testRegex": ".*\\.spec\\.ts$",
     "transform": {
-      "^.+\\.(t|j)s$": "ts-jest"
+      "^.+\\.ts$": "ts-jest"
     },
     "collectCoverageFrom": [
       "**/*.(t|j)s"

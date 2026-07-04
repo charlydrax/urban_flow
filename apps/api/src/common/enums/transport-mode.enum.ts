@@ -1,14 +1,6 @@
 /**
- * Modes de transport gérés par le planificateur multimodal (F2/F3).
- * Vocabulaire commun aux modules `users` (préférences), `routes` (segments)
- * et `carbon` (facteurs d'émission) — interopérabilité interne (C9).
+ * Modes de transport du planificateur multimodal (F2/F3).
+ * Défini dans `@urbanflow/shared` (vocabulaire commun front/back — C9) et
+ * ré-exporté ici pour conserver des imports relatifs courts dans les modules.
  */
-export enum TransportMode {
-  WALK = 'WALK',
-  BIKE = 'BIKE',
-  SCOOTER = 'SCOOTER',
-  BUS = 'BUS',
-  TRAM = 'TRAM',
-  METRO = 'METRO',
-  CARPOOL = 'CARPOOL',
-}
+export { TransportMode } from '@urbanflow/shared';

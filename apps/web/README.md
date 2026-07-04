@@ -15,7 +15,7 @@ authentification (F1), préférences de mobilité et tableau de bord carbone.
 - **Accessibilité (C7)** : layout sémantique, skip-link, focus visible, contrastes AA,
   `prefers-reduced-motion`.
 - **API** : client typé `lib/api-client.ts` (cookies httpOnly — C11),
-  types miroirs dans `lib/api-types.ts`.
+  contrats partagés importés depuis `@urbanflow/shared` (mêmes types que les DTO NestJS — C9).
 
 ## Structure
 

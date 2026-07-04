@@ -3,7 +3,7 @@ import type {
   CarbonDashboard,
   PlanRouteRequest,
   PlanRoutesResponse,
-} from './api-types';
+} from '@urbanflow/shared';
 
 /** Erreur API normalisée (corps du filtre d'exceptions global côté NestJS). */
 export class ApiError extends Error {
