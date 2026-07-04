@@ -52,6 +52,8 @@ cp apps/api/.env.example apps/api/.env  # API (DATABASE_URL, JWT_SECRET...)
 cp apps/web/.env.example apps/web/.env  # Front (NEXT_PUBLIC_API_URL)
 
 # 3. Lancer la base PostGIS (Docker Desktop doit tourner)
+#    Au premier démarrage, docker/initdb/ active l'extension PostGIS
+#    automatiquement (CREATE EXTENSION IF NOT EXISTS postgis)
 docker compose up -d
 
 # 4. Appliquer les migrations (active aussi l'extension PostGIS)
