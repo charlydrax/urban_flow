@@ -57,7 +57,7 @@ cp apps/web/.env.example apps/web/.env  # Front (NEXT_PUBLIC_API_URL)
 docker compose up -d
 
 # 4. Appliquer les migrations (active aussi l'extension PostGIS)
-npm run prisma:migrate --workspace apps/api
+npm run db:migrate
 
 # 5. Démarrer l'API (http://localhost:3001) ET le front (http://localhost:3000)
 #    dans un seul terminal (concurrently) — Swagger sur http://localhost:3001/api/docs
@@ -104,7 +104,9 @@ Les serveurs applicatifs restent lancés via npm (`npm run dev:api` / `npm run d
 | `npm run lint` | Lint strict (ESLint + typescript-eslint) du monorepo |
 | `npm run test` | Tests (Jest côté API, Vitest côté web) |
 | `npm run format` | Formate tout le code avec Prettier |
-| `npx prisma studio` (dans `apps/api`) | Explorateur visuel de la base |
+| `npm run db:migrate` | Applique les migrations Prisma (crée la migration en dev si besoin) |
+| `npm run db:generate` | Régénère le client Prisma après modification du schéma |
+| `npm run db:studio` | Explorateur visuel de la base (Prisma Studio) |
 
 ## Fonctionnalités (périmètre MVP)
 
