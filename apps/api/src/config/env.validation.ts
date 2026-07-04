@@ -45,7 +45,15 @@ export function validateEnv(config: Record<string, unknown>): EnvironmentVariabl
   const errors = validateSync(validated, { skipMissingProperties: false });
 
   if (errors.length > 0) {
-    throw new Error(`Invalid environment configuration:\n${errors.toString()}`);
+    // Message explicite variable par variable : indique quoi corriger et où,
+    // sans jamais journaliser la valeur reçue (un secret pourrait fuiter — C11).
+    const details = errors
+      .map((error) => `  - ${error.property}: ${Object.values(error.constraints ?? {}).join(', ')}`)
+      .join('\n');
+    throw new Error(
+      'Invalid environment configuration - the API refuses to start (fail-fast, C4).\n' +
+        `Fix the following variables in apps/api/.env (see apps/api/.env.example):\n${details}`,
+    );
   }
   return validated;
 }

@@ -16,7 +16,23 @@ export class ApiError extends Error {
   }
 }
 
-const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001/api';
+/**
+ * Résout l'URL de base de l'API depuis l'environnement (UF-004) : jamais en dur.
+ * En production, une variable absente est une erreur de configuration explicite
+ * (fail-fast, C4) ; en développement seulement, repli sur l'API locale.
+ */
+function resolveBaseUrl(): string {
+  const url = process.env.NEXT_PUBLIC_API_URL;
+  if (url) return url;
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error(
+      'NEXT_PUBLIC_API_URL is not defined - set it in apps/web/.env (see apps/web/.env.example)',
+    );
+  }
+  return 'http://localhost:3001/api';
+}
+
+const BASE_URL = resolveBaseUrl();
 
 /**
  * Appel générique vers l'API Gateway.
