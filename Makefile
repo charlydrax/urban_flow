@@ -67,15 +67,15 @@ db-wait:
 
 ## migrate: Applique les migrations Prisma (db doit tourner — voir `make up`).
 migrate: up db-wait
-	npm run prisma:migrate --workspace apps/api
+	npm run db:migrate
 
 ## generate: Régénère le client Prisma.
 generate:
-	npm run prisma:generate --workspace apps/api
+	npm run db:generate
 
 ## studio: Lance Prisma Studio (UI base de données).
 studio:
-	npm run prisma:studio --workspace apps/api
+	npm run db:studio
 
 ## reset: Détruit la base (volume inclus) puis la recrée à vide.
 reset:
