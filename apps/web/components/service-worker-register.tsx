@@ -10,9 +10,13 @@ import { useEffect } from 'react';
 export function ServiceWorkerRegister() {
   useEffect(() => {
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/sw.js').catch((error: unknown) => {
-        console.error('Service worker registration failed', error);
-      });
+      // updateViaCache: 'none' — sw.js n'est jamais servi depuis le cache HTTP,
+      // les nouvelles versions du worker sont détectées dès la visite suivante (C1)
+      navigator.serviceWorker
+        .register('/sw.js', { updateViaCache: 'none' })
+        .catch((error: unknown) => {
+          console.error('Service worker registration failed', error);
+        });
     }
   }, []);
 
