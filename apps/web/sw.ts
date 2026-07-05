@@ -14,9 +14,15 @@
 declare const self: ServiceWorkerGlobalScope & typeof globalThis;
 export {};
 
-const SHELL_CACHE = 'urbanflow-shell-v1';
-const ASSETS_CACHE = 'urbanflow-assets-v1';
-const ROUTE_CACHE = 'urbanflow-last-route-v1';
+/*
+ * v2 : purge les caches v1 qui ont pu être remplis en développement avec des
+ * chunks webpack périmés (le SW n'est plus enregistré qu'en production).
+ * Le navigateur re-télécharge sw.js à chaque navigation (updateViaCache: 'none'),
+ * donc cette purge s'applique même si le JS de la page ne peut plus s'exécuter.
+ */
+const SHELL_CACHE = 'urbanflow-shell-v2';
+const ASSETS_CACHE = 'urbanflow-assets-v2';
+const ROUTE_CACHE = 'urbanflow-last-route-v2';
 
 /** Clé synthétique : l'API Cache ne stocke pas les requêtes POST directement. */
 const LAST_ROUTE_KEY = '/__offline/last-route';
