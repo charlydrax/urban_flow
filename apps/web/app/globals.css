@@ -1,20 +1,70 @@
 @import 'tailwindcss';
 
 /*
- * Palette UrbanFlow — contrastes vérifiés AA (C7) :
- * - texte #1a2e22 sur fond #f6faf7 : ratio > 13:1
- * - blanc sur --color-primary (#1d6f42) : ratio ≈ 5.5:1
+ * Design tokens UrbanFlow — extraits de la maquette Figma « 01 · Charte graphique » (UF-007).
+ * Miroir TypeScript (carte MapLibre, tests) : lib/design-tokens.ts — garder les deux en phase.
+ *
+ * Contrastes sur fond blanc vérifiés par lib/design-tokens.test.ts
+ * (C7 — WCAG 2.1 AA : texte courant ≥ 4.5:1, composants UI ≥ 3:1).
  */
 @theme {
-  --color-primary: #1d6f42;
-  --color-primary-dark: #14532d;
-  --color-surface: #f6faf7;
-  --color-ink: #1a2e22;
+  /* Primaires — vert « Saône » (mobilité douce), bleu « Rhône » (transport public) */
+  --color-primary: #1fa85c;
+  --color-primary-dark: #0e7a3f;
+  --color-action: #1e66e0;
+  --color-action-dark: #0e47a8;
+
+  /* Neutres — échelle Ink */
+  --color-ink: #0a1525;
+  --color-ink-700: #2c3850;
+  --color-ink-500: #5a6478;
+  --color-ink-200: #e4e8f0;
+  --color-placeholder: #9aa3b5;
+  --color-surface: #f6f8fb;
+  --color-surface-muted: #f1f3f8;
+
+  /* Système & gamification */
+  --color-success: #0e7a3f;
+  --color-warning: #8a5300;
+  --color-error: #c62828;
+  --color-gold: #9a6a00;
+
+  /* Modes de transport (badges, tracés MapLibre — C6/C9) */
+  --color-mode-bike: #1fa85c;
+  --color-mode-scooter: #b85000;
+  --color-mode-bus: #1e66e0;
+  --color-mode-metro: #7a2ebf;
+  --color-mode-tram: #00746a;
+
+  /* Fonds teintés (badges, halos de focus) */
+  --color-tint-neutral: #f1f3f8;
+  --color-tint-green: #e8f7ee;
+  --color-tint-blue: #e8f1ff;
+  --color-tint-gold: #fbf3e0;
+  --color-tint-orange: #fbefe5;
+  --color-tint-red: #fceaea;
+  --color-tint-violet: #f3eafb;
+  --color-tint-teal: #e0f2f0;
+
+  /* Typographies — chargées via next/font dans app/layout.tsx (self-hosted : C5, pas de requête CDN) */
+  --font-sans: var(--font-plus-jakarta), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-bricolage), var(--font-plus-jakarta), ui-sans-serif, sans-serif;
+  --font-mono: var(--font-jetbrains), ui-monospace, 'Courier New', monospace;
+
+  /* Rayons de la charte : 6 / 10 / 14 / 20 */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+
+  /* Ombres */
+  --shadow-card: 0 1px 1.5px rgba(10, 21, 37, 0.08);
+  --shadow-raised: 0 4px 7px rgba(10, 21, 37, 0.1);
 }
 
 /* Focus visible renforcé sur tous les éléments interactifs (C7 — WCAG 2.4.7) */
 :focus-visible {
-  outline: 3px solid var(--color-primary-dark);
+  outline: 3px solid var(--color-action);
   outline-offset: 2px;
 }
 
@@ -37,7 +87,7 @@
   top: 0;
   z-index: 100;
   padding: 0.75rem 1.25rem;
-  background: var(--color-primary-dark);
+  background: var(--color-action-dark);
   color: #ffffff;
   border-radius: 0 0 0.5rem 0;
 }
