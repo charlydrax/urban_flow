@@ -10,7 +10,7 @@ export default function HomePage() {
   return (
     <div className="flex flex-col gap-6">
       <section aria-labelledby="planner-title">
-        <h1 id="planner-title" className="mb-2 text-2xl font-bold text-primary-dark">
+        <h1 id="planner-title" className="mb-2 font-display text-2xl font-bold text-primary-dark">
           Où allez-vous aujourd&apos;hui&nbsp;?
         </h1>
         <p className="mb-4 max-w-prose">
