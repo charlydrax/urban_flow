@@ -69,11 +69,11 @@ npm run dev
 
 ### Vérifier que tout tourne
 
-| Service | URL / commande | Attendu |
-|---------|----------------|---------|
-| Base PostGIS | `docker compose ps` | conteneur `urbanflow-db` **healthy**, port `5433` |
-| API Gateway | http://localhost:3001/api/docs | Swagger (200) |
-| Front PWA | http://localhost:3000 | page d'accueil UrbanFlow (200) |
+| Service      | URL / commande                 | Attendu                                           |
+| ------------ | ------------------------------ | ------------------------------------------------- |
+| Base PostGIS | `docker compose ps`            | conteneur `urbanflow-db` **healthy**, port `5433` |
+| API Gateway  | http://localhost:3001/api/docs | Swagger (200)                                     |
+| Front PWA    | http://localhost:3000          | page d'accueil UrbanFlow (200)                    |
 
 > ℹ️ La base est exposée sur le **port hôte 5433** (et non 5432) pour éviter un conflit
 > avec un PostgreSQL déjà installé localement — voir `POSTGRES_PORT` dans `.env` et la
@@ -95,27 +95,33 @@ Les serveurs applicatifs restent lancés via npm (`npm run dev:api` / `npm run d
 
 ## Commandes utiles
 
-| Commande | Description |
-|---|---|
-| `npm run dev` | Démarre l'API (port 3001) **et** le front (port 3000) dans un seul terminal |
-| `npm run dev:api` / `npm run dev:web` | Démarre l'API / le front séparément |
-| `npm run build` | Build de `packages/shared` puis des deux applications |
-| `npm run build:shared` | Recompile uniquement les types partagés (`@urbanflow/shared`) |
-| `npm run lint` | Lint strict (ESLint + typescript-eslint) du monorepo |
-| `npm run test` | Tests (Jest côté API, Vitest côté web) |
-| `npm run format` | Formate tout le code avec Prettier |
-| `npm run db:migrate` | Applique les migrations Prisma (crée la migration en dev si besoin) |
-| `npm run db:generate` | Régénère le client Prisma après modification du schéma |
-| `npm run db:studio` | Explorateur visuel de la base (Prisma Studio) |
+| Commande                              | Description                                                                 |
+| ------------------------------------- | --------------------------------------------------------------------------- |
+| `npm run dev`                         | Démarre l'API (port 3001) **et** le front (port 3000) dans un seul terminal |
+| `npm run dev:api` / `npm run dev:web` | Démarre l'API / le front séparément                                         |
+| `npm run build`                       | Build de `packages/shared` puis des deux applications                       |
+| `npm run build:shared`                | Recompile uniquement les types partagés (`@urbanflow/shared`)               |
+| `npm run lint`                        | Lint strict (ESLint + typescript-eslint) du monorepo                        |
+| `npm run test`                        | Tests (Jest côté API, Vitest côté web)                                      |
+| `npm run format`                      | Formate tout le code avec Prettier                                          |
+| `npm run db:migrate`                  | Applique les migrations Prisma (crée la migration en dev si besoin)         |
+| `npm run db:generate`                 | Régénère le client Prisma après modification du schéma                      |
+| `npm run db:studio`                   | Explorateur visuel de la base (Prisma Studio)                               |
 
 ## Fonctionnalités (périmètre MVP)
 
-| ID | Fonctionnalité | Statut |
-|----|----------------|--------|
-| F1 | Inscription / connexion + profils de mobilité | squelette (stubs) |
-| F2 | Planificateur d'itinéraires multimodal | squelette (stubs) |
-| F3 | Intégration GTFS + GBFS | squelette (stubs) |
-| — | Calculateur d'empreinte carbone + suivi personnel | squelette (stubs) |
+| ID  | Fonctionnalité                                    | Statut            |
+| --- | ------------------------------------------------- | ----------------- |
+| F1  | Inscription / connexion + profils de mobilité     | squelette (stubs) |
+| F2  | Planificateur d'itinéraires multimodal            | squelette (stubs) |
+| F3  | Intégration GTFS + GBFS                           | squelette (stubs) |
+| —   | Calculateur d'empreinte carbone + suivi personnel | squelette (stubs) |
+
+## Qualité de code & contribution
+
+Lint strict (ESLint + Prettier partagés), hooks Git (Husky : lint-staged en `pre-commit`,
+commitlint en `commit-msg`) et convention **Conventional Commits** — voir
+[`CONTRIBUTING.md`](CONTRIBUTING.md) et [`docs/git-workflow.md`](docs/git-workflow.md).
 
 ## Contraintes techniques
 

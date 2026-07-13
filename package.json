@@ -19,13 +19,21 @@
     "lint": "npm run lint --workspace packages/shared && npm run lint --workspace apps/api && npm run lint --workspace apps/web",
     "test": "npm run test --workspace apps/api && npm run test --workspace apps/web",
     "format": "prettier --write \"apps/**/*.{ts,tsx,js,json,md,css}\" \"packages/**/*.{ts,js,json,md}\"",
-    "format:check": "prettier --check \"apps/**/*.{ts,tsx,js,json,md,css}\" \"packages/**/*.{ts,js,json,md}\""
+    "format:check": "prettier --check \"apps/**/*.{ts,tsx,js,json,md,css}\" \"packages/**/*.{ts,js,json,md}\"",
+    "prepare": "husky"
+  },
+  "lint-staged": {
+    "*.{js,mjs,cjs,json,md,yml,yaml,css}": "prettier --write"
   },
   "devDependencies": {
+    "@commitlint/cli": "^21.2.1",
+    "@commitlint/config-conventional": "^21.2.0",
     "@eslint/js": "^9.39.0",
     "concurrently": "^9.1.0",
     "eslint": "^9.39.0",
     "eslint-config-prettier": "^10.1.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.4.0",
     "prettier": "^3.6.0",
     "typescript-eslint": "^8.46.0"
   },

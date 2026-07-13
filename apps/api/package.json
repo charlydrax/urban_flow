@@ -17,6 +17,13 @@
     "db:migrate:deploy": "prisma migrate deploy",
     "db:studio": "prisma studio"
   },
+  "lint-staged": {
+    "*.ts": [
+      "eslint --fix",
+      "prettier --write"
+    ],
+    "*.{js,mjs,json,md}": "prettier --write"
+  },
   "dependencies": {
     "@nestjs/common": "^11.0.0",
     "@nestjs/config": "^4.0.0",
