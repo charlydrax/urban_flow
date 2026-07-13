@@ -1,0 +1,72 @@
+# UF-009 — CI minimale : valide chaque push et chaque PR vers main.
+# Pipeline : install → lint → build (front + back), + job de test (sprints suivants).
+name: CI
+
+on:
+  push:
+  pull_request:
+    branches: [main]
+
+# Un push rapide sur la même branche annule le run précédent (éco-conception C5 :
+# pas de minutes CI gaspillées sur des commits déjà obsolètes).
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint-build:
+    name: Lint & Build (web + api)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Le client Prisma doit être généré avant lint/build de l'API
+      # (les types @prisma/client sont importés par les services NestJS).
+      # `prisma generate` ne nécessite pas de base de données.
+      - name: Generate Prisma client
+        run: npm run db:generate --workspace apps/api
+
+      - name: Lint (shared + api + web)
+        run: npm run lint
+
+      - name: Build (shared + api + web)
+        run: npm run build
+        env:
+          # next build tourne en NODE_ENV=production : l'URL de l'API doit être
+          # fournie (fail-fast UF-004). Valeur factice suffisante pour compiler.
+          NEXT_PUBLIC_API_URL: http://localhost:3001/api
+
+  test:
+    name: Tests (api + web)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: npm run db:generate --workspace apps/api
+
+      - name: Build shared package
+        run: npm run build:shared
+
+      - name: Run tests (jest + vitest)
+        run: npm run test

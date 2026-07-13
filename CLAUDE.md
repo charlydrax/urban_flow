@@ -145,7 +145,7 @@ urbanflow/
 
 - **Langue** : code et commits en anglais ; UI en français ; commentaires métier en français acceptés.
 - **Commits** : Conventional Commits (`feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `chore:`).
-- **Branches** : `main` (stable), `dev`, `feature/<nom>`.
+- **Branches** : `main` (stable, protégée), branches de ticket `feat/uf-xxx-description` (voir `docs/git-workflow.md`).
 - **Nommage** : `camelCase` (vars/fonctions), `PascalCase` (composants/classes/types), `kebab-case` (fichiers).
 - **TypeScript strict** : pas de `any` non justifié.
 - **Validation serveur systématique** de toute entrée (class-validator / zod) — C4.
