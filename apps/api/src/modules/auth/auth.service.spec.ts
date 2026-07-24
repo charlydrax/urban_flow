@@ -1,0 +1,80 @@
+import { ConflictException } from '@nestjs/common';
+import { Test } from '@nestjs/testing';
+import { JwtService } from '@nestjs/jwt';
+import { Prisma } from '@prisma/client';
+import * as argon2 from 'argon2';
+
+import { PrismaService } from '../../prisma/prisma.service';
+import { AuthService } from './auth.service';
+import { RegisterDto } from './dto/register.dto';
+
+/**
+ * Tests du Service d'authentification — inscription (UF-102).
+ * Fige les trois critères de recette du ticket :
+ *  1. un compte est créé avec un hash argon2 (jamais le mot de passe en clair) ;
+ *  2. un email déjà utilisé remonte un 409 (ConflictException), pas un 500 ;
+ *  3. l'email est normalisé (trim + minuscules) avant insertion.
+ */
+describe('AuthService.register', () => {
+  let service: AuthService;
+  let createUser: jest.Mock;
+
+  const dto: RegisterDto = { email: 'Marie@Example.com', password: 'Tr0p-Secret!2026' };
+
+  beforeEach(async () => {
+    createUser = jest.fn();
+
+    const moduleRef = await Test.createTestingModule({
+      providers: [
+        AuthService,
+        { provide: JwtService, useValue: { signAsync: jest.fn().mockResolvedValue('signed.jwt') } },
+        { provide: PrismaService, useValue: { user: { create: createUser } } },
+      ],
+    }).compile();
+
+    service = moduleRef.get(AuthService);
+  });
+
+  it('hashes the password with argon2 and stores the hash, never the plaintext', async () => {
+    createUser.mockResolvedValue({ id: 'user-1', email: 'marie@example.com' });
+
+    const result = await service.register(dto);
+
+    const { data } = createUser.mock.calls[0][0] as {
+      data: { email: string; passwordHash: string };
+    };
+    expect(data.passwordHash).not.toBe(dto.password);
+    // Le hash produit est bien vérifiable et correspond au mot de passe fourni.
+    await expect(argon2.verify(data.passwordHash, dto.password)).resolves.toBe(true);
+    expect(result).toEqual({
+      accessToken: 'signed.jwt',
+      user: { id: 'user-1', email: 'marie@example.com' },
+    });
+  });
+
+  it('normalizes the email (trim + lowercase) before persisting', async () => {
+    createUser.mockResolvedValue({ id: 'user-1', email: 'marie@example.com' });
+
+    await service.register({ email: '  Marie@Example.com  ', password: dto.password });
+
+    const { data } = createUser.mock.calls[0][0] as { data: { email: string } };
+    expect(data.email).toBe('marie@example.com');
+  });
+
+  it('throws a 409 ConflictException when the email is already taken (P2002)', async () => {
+    createUser.mockRejectedValue(
+      new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+        code: 'P2002',
+        clientVersion: 'test',
+      }),
+    );
+
+    await expect(service.register(dto)).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('rethrows unexpected persistence errors (not swallowed as 409)', async () => {
+    createUser.mockRejectedValue(new Error('database unreachable'));
+
+    await expect(service.register(dto)).rejects.toThrow('database unreachable');
+  });
+});

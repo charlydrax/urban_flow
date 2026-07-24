@@ -1,5 +1,11 @@
 import { Body, Controller, HttpCode, HttpStatus, Post, Res } from '@nestjs/common';
-import { ApiCreatedResponse, ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
+import {
+  ApiConflictResponse,
+  ApiCreatedResponse,
+  ApiOkResponse,
+  ApiOperation,
+  ApiTags,
+} from '@nestjs/swagger';
 import { Response } from 'express';
 
 import { Public } from '../../common/decorators/public.decorator';
@@ -21,11 +27,12 @@ import { RegisterDto } from './dto/register.dto';
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
-  /** Inscription d'un nouvel utilisateur (stub — voir AuthService). */
+  /** Inscription d'un nouvel utilisateur : mot de passe haché en argon2, compte persisté (UF-102). */
   @Public()
   @Post('register')
-  @ApiOperation({ summary: 'Inscription (stub squelette : aucune écriture en base)' })
+  @ApiOperation({ summary: 'Inscription : crée le compte (hash argon2) et émet un JWT' })
   @ApiCreatedResponse({ description: 'Compte créé, JWT émis (cookie httpOnly + corps).' })
+  @ApiConflictResponse({ description: 'Email déjà utilisé.' })
   async register(
     @Body() dto: RegisterDto,
     @Res({ passthrough: true }) res: Response,
