@@ -22,15 +22,15 @@ datasource db {
 /// RGPD (C8) : table de données personnelles — minimisation appliquée,
 /// seuls l'email et le hash du mot de passe sont stockés.
 model User {
-  id           String   @id @default(uuid()) @db.Uuid
+  id           String    @id @default(uuid()) @db.Uuid
   /// RGPD (C8) : donnée personnelle (identifiant de contact). Jamais journalisée (C11).
-  email        String   @unique
+  email        String    @unique
   /// Hash argon2 du mot de passe (C4) — jamais le mot de passe en clair.
-  passwordHash String   @map("password_hash")
+  passwordHash String    @map("password_hash")
   /// RGPD (C8) : horodatage du consentement explicite (géolocalisation, CGU).
   consentAt    DateTime? @map("consent_at")
-  createdAt    DateTime @default(now()) @map("created_at")
-  updatedAt    DateTime @updatedAt @map("updated_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
 
   mobilityProfile MobilityProfile?
   searchHistory   SearchHistory[]
@@ -47,6 +47,11 @@ model MobilityProfile {
 
   /// Modes acceptés (valeurs de l'enum TransportMode côté API).
   preferredModes  String[] @map("preferred_modes")
+  /// Priorité de calcul d'itinéraire (valeurs de l'enum RoutePriority côté API) :
+  /// FASTEST (rapide) ou GREENEST (écolo). Lue par le planificateur (F2, étape 3
+  /// du flux) pour trier les options. Défaut « écolo », cohérent avec la
+  /// proposition de valeur du produit (orienter vers les mobilités douces).
+  priority        String   @default("GREENEST") @map("priority")
   /// RGPD (C8) : donnée sensible (situation de handicap) — collectée uniquement
   /// pour proposer des itinéraires accessibles PMR (C12), jamais journalisée (C11).
   reducedMobility Boolean  @default(false) @map("reduced_mobility")
@@ -69,14 +74,14 @@ model SearchHistory {
   userId String @map("user_id") @db.Uuid
 
   /// RGPD (C8) : lieu de départ saisi (donnée de déplacement).
-  fromLabel String  @map("from_label")
+  fromLabel String @map("from_label")
   /// Latitude/longitude WGS84 du départ (géolocalisation — C6).
-  fromLat   Float?  @map("from_lat")
-  fromLng   Float?  @map("from_lng")
+  fromLat   Float? @map("from_lat")
+  fromLng   Float? @map("from_lng")
   /// RGPD (C8) : lieu d'arrivée saisi (donnée de déplacement).
-  toLabel   String  @map("to_label")
-  toLat     Float?  @map("to_lat")
-  toLng     Float?  @map("to_lng")
+  toLabel   String @map("to_label")
+  toLat     Float? @map("to_lat")
+  toLng     Float? @map("to_lng")
 
   /// Résumé de l'itinéraire retenu (ex. "Marche + Métro B").
   selectedSummary String? @map("selected_summary")
