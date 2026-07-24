@@ -1,4 +1,4 @@
-import { ConflictException, Injectable } from '@nestjs/common';
+import { ConflictException, Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { Prisma } from '@prisma/client';
 import * as argon2 from 'argon2';
@@ -17,21 +17,28 @@ export interface AuthResponse {
 /**
  * Service d'authentification (F1).
  *
- * `register` est branché sur la base (UF-102) : le mot de passe est haché en
- * argon2id (C4) puis l'utilisateur est inséré via Prisma ; un email déjà pris
- * remonte un 409 propre (jamais un 500). `login` reste un stub tant que UF-103
- * n'est pas fait.
+ * `register` (UF-102) hache le mot de passe en argon2id (C4) puis insère
+ * l'utilisateur via Prisma ; un email déjà pris remonte un 409 propre (jamais
+ * un 500). `login` (UF-103) vérifie l'email et le mot de passe en base et émet
+ * le JWT signé (JWT_SECRET du .env) ; tout échec remonte un 401 générique.
  *
- * Le JWT émis est RÉELLEMENT signé (JWT_SECRET du .env), ce qui permet de tester
- * le guard global et le flux complet de la section 4 via Swagger.
+ * Le JWT émis contient l'identifiant utilisateur (`sub`) et une expiration
+ * (`JWT_EXPIRES_IN`), ce qui permet de tester le guard global et le flux
+ * complet de la section 4 via Swagger.
  *
- * Couvre : F1, C4 (hash argon2, JWT signé/expirant), C11 (token destiné à un
- * cookie httpOnly).
+ * Couvre : F1, C4 (hash argon2, JWT signé/expirant, 401 générique anti-énumération),
+ * C11 (token destiné à un cookie httpOnly).
  */
 @Injectable()
 export class AuthService {
-  /** Identifiant factice stable, utilisé par le stub `login` tant que UF-103 n'est pas branché sur la base. */
-  static readonly MOCK_USER_ID = '00000000-0000-4000-8000-000000000001';
+  /**
+   * Hash argon2 factice, vérifié quand aucun compte ne correspond à l'email.
+   * On paie ainsi le même coût de calcul qu'une vraie vérification pour ne pas
+   * révéler par le temps de réponse si l'email existe (anti-énumération — C4/OWASP).
+   * Généré une fois via `argon2.hash('login-timing-equalizer')`.
+   */
+  private static readonly DUMMY_PASSWORD_HASH =
+    '$argon2id$v=19$m=65536,t=3,p=4$QMwbrcl6wSkHJfNRV7oLBg$sqaWa738QRHgUlnC0F4x9+pb77eUMZdOcA5KOOhtNQU';
 
   constructor(
     private readonly jwtService: JwtService,
@@ -68,13 +75,42 @@ export class AuthService {
   }
 
   /**
-   * Connecte un utilisateur existant (stub : accepte tout couple email/mot de passe valide).
+   * Connecte un utilisateur existant : vérifie l'email et le mot de passe en
+   * base, puis émet un JWT signé.
+   *
+   * Sécurité (C4 / OWASP) :
+   *  - un email inconnu et un mot de passe faux remontent le MÊME 401 générique
+   *    (« Invalid credentials »), sans révéler lequel est en cause ;
+   *  - quand l'email n'existe pas, on vérifie tout de même un hash factice pour
+   *    payer le même coût CPU qu'une vraie vérification et ne pas trahir
+   *    l'existence du compte par le temps de réponse (anti-énumération).
+   *
    * @param dto Identifiants validés par class-validator (C4)
-   * @returns Un token signé et le profil minimal
+   * @returns Un token signé (sub = userId, expiration) et le profil minimal
+   * @throws UnauthorizedException (401) si l'email ou le mot de passe est invalide
    */
   async login(dto: LoginDto): Promise<AuthResponse> {
-    // TODO(F1): vérification argon2 + erreur 401 générique si échec (C4)
-    return this.issueToken(AuthService.MOCK_USER_ID, dto.email);
+    // Même normalisation qu'à l'inscription (unicité insensible à la casse).
+    const email = dto.email.trim().toLowerCase();
+    const user = await this.prisma.user.findUnique({
+      where: { email },
+      select: { id: true, email: true, passwordHash: true },
+    });
+
+    // Toujours exécuter une vérification argon2, même sans compte, pour un temps
+    // de réponse constant (anti-énumération — C4).
+    const passwordMatches = await argon2.verify(
+      user?.passwordHash ?? AuthService.DUMMY_PASSWORD_HASH,
+      dto.password,
+    );
+
+    if (!user || !passwordMatches) {
+      // Message générique : ne révèle jamais si c'est l'email ou le mot de passe
+      // qui est faux (recette UF-103 / bonne pratique OWASP — C4).
+      throw new UnauthorizedException('Invalid credentials');
+    }
+
+    return this.issueToken(user.id, user.email);
   }
 
   /** Signe un access token JWT pour l'utilisateur donné (expiration courte — C4). */
