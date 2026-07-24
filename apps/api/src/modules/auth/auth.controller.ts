@@ -5,6 +5,7 @@ import {
   ApiOkResponse,
   ApiOperation,
   ApiTags,
+  ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
 import { Response } from 'express';
 
@@ -42,12 +43,13 @@ export class AuthController {
     return auth;
   }
 
-  /** Connexion d'un utilisateur existant (stub — accepte tout identifiant bien formé). */
+  /** Connexion d'un utilisateur existant : vérifie email + mot de passe, émet un JWT (UF-103). */
   @Public()
   @Post('login')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Connexion (stub squelette : signe un vrai JWT de test)' })
+  @ApiOperation({ summary: 'Connexion : vérifie email + mot de passe et émet un JWT signé' })
   @ApiOkResponse({ description: 'Connexion réussie, JWT émis (cookie httpOnly + corps).' })
+  @ApiUnauthorizedResponse({ description: 'Identifiants invalides (message générique, C4/OWASP).' })
   async login(
     @Body() dto: LoginDto,
     @Res({ passthrough: true }) res: Response,
