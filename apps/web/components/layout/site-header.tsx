@@ -53,11 +53,7 @@ export function SiteHeader() {
               strokeWidth="2"
               strokeLinecap="round"
             >
-              {menuOpen ? (
-                <path d="M6 6l12 12M18 6L6 18" />
-              ) : (
-                <path d="M4 7h16M4 12h16M4 17h16" />
-              )}
+              {menuOpen ? <path d="M6 6l12 12M18 6L6 18" /> : <path d="M4 7h16M4 12h16M4 17h16" />}
             </svg>
           </button>
         </div>
@@ -79,7 +75,7 @@ export function SiteHeader() {
           ))}
           <li className="mt-1 md:mt-0">
             <Link
-              href="/"
+              href="/login"
               onClick={closeMenu}
               className="block rounded-md bg-primary px-4 py-2 text-center font-bold text-white hover:bg-primary-dark"
             >
