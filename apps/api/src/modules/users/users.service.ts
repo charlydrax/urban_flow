@@ -1,66 +1,223 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
+import type { MobilityProfile, Prisma } from '@prisma/client';
 
-import { TransportMode, UpdateMobilityProfileDto } from './dto/update-mobility-profile.dto';
+import { PrismaService } from '../../prisma/prisma.service';
+import {
+  MobilityPreferencesDto,
+  RoutePriority,
+  TransportMode,
+  UpdateUserProfileDto,
+} from './dto/update-user-profile.dto';
 
-/** Profil de mobilité tel qu'exposé par l'API. */
-export interface MobilityProfileView {
+/** Préférences de mobilité telles qu'exposées par l'API. */
+export interface MobilityPreferencesView {
   preferredModes: TransportMode[];
+  priority: RoutePriority;
   reducedMobility: boolean;
   maxWalkMinutes: number;
 }
 
-/** Vue minimale d'un compte utilisateur (minimisation des données — C8). */
-export interface UserView {
+/** Profil complet du compte connecté (minimisation des données — C8). */
+export interface UserProfileView {
   id: string;
   email: string;
+  createdAt: string;
+  geolocationConsentAt: string | null;
+  preferences: MobilityPreferencesView;
 }
 
 /**
- * Service utilisateurs (F1).
+ * Préférences servies aux comptes qui n'ont pas encore enregistré les leurs.
  *
- * ⚠️ SQUELETTE : réponses mock en mémoire, aucune lecture/écriture Prisma.
- * Implémentation cible : lecture/écriture des modèles `User` et
- * `MobilityProfile` (PostGIS), droit à l'effacement (C8).
+ * Le défaut « écolo » est un choix produit assumé : orienter vers les mobilités
+ * douces est la proposition de valeur d'UrbanFlow. Les valeurs sont alignées
+ * sur les `@default` du schéma Prisma, pour qu'un profil implicite et un profil
+ * fraîchement créé se comportent exactement pareil.
+ */
+export const DEFAULT_PREFERENCES: MobilityPreferencesView = {
+  preferredModes: [TransportMode.WALK, TransportMode.METRO, TransportMode.BIKE],
+  priority: RoutePriority.GREENEST,
+  reducedMobility: false,
+  maxWalkMinutes: 15,
+};
+
+/** Compte + profil de mobilité tels que lus en base (colonnes strictement utiles — C8). */
+type UserWithProfile = Prisma.UserGetPayload<{
+  select: {
+    id: true;
+    email: true;
+    createdAt: true;
+    consentAt: true;
+    mobilityProfile: true;
+  };
+}>;
+
+/**
+ * Colonnes lues pour construire un profil. Sélection explicite : le
+ * `passwordHash` ne doit jamais quitter la couche d'accès aux données (C11),
+ * et on ne transporte pas d'octets inutiles (C5).
+ */
+const PROFILE_SELECT = {
+  id: true,
+  email: true,
+  createdAt: true,
+  consentAt: true,
+  mobilityProfile: true,
+} as const;
+
+/**
+ * Service utilisateurs (F1, UF-107) — profil de compte et préférences de mobilité.
  *
- * Couvre : F1, C8 (exposition minimale des données), C12 (préférence PMR).
+ * **Règle d'isolation** : toute méthode prend un `userId` issu du JWT vérifié et
+ * l'utilise comme clé de la requête Prisma. Il n'existe volontairement aucune
+ * méthode « lire le profil de X » : un utilisateur ne peut donc accéder qu'à
+ * SON profil, quelles que soient les données envoyées (C4 / OWASP A01 —
+ * recette 2 du ticket).
+ *
+ * Couvre : F1, C4 (identité issue du token), C8 (minimisation + consentement
+ * géoloc révocable), C11 (le hash de mot de passe n'est jamais sélectionné),
+ * C12 (préférence PMR transmise au planificateur).
  */
 @Injectable()
 export class UsersService {
+  constructor(private readonly prisma: PrismaService) {}
+
   /**
-   * Retourne le profil du compte courant (stub).
+   * Retourne le profil du compte connecté.
+   *
+   * Une lecture n'écrit jamais : un compte sans ligne `MobilityProfile` reçoit
+   * les préférences par défaut sans que rien ne soit créé en base (C5 —
+   * pas d'écriture inutile ; la ligne naît au premier enregistrement réel).
+   *
    * @param userId Identifiant issu du JWT vérifié (jamais du corps de requête — C4)
+   * @returns Identité minimale, état du consentement et préférences effectives
+   * @throws NotFoundException (404) si le compte n'existe plus (token encore
+   *   valide après suppression du compte — droit à l'effacement, C8)
    */
-  async getMe(userId: string): Promise<UserView> {
-    // TODO(F1): SELECT en base via Prisma
-    return { id: userId, email: 'marie@example.com' };
+  async getProfile(userId: string): Promise<UserProfileView> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: PROFILE_SELECT,
+    });
+
+    if (!user) throw new NotFoundException('User not found');
+
+    return UsersService.toProfileView(user);
   }
 
   /**
-   * Retourne les préférences de mobilité (stub).
-   * Ces préférences sont lues par le Service Itinéraire à l'étape 3 du flux de référence.
+   * Met à jour le profil du compte connecté (`PATCH` : mise à jour partielle).
+   *
+   * Les deux écritures possibles (consentement RGPD et préférences) sont faites
+   * dans **une seule transaction** : un profil à moitié enregistré serait pire
+   * que pas d'enregistrement du tout, notamment pour la traçabilité du
+   * consentement (C8).
+   *
+   * Le consentement géolocalisation n'est ré-horodaté que lorsqu'il change
+   * réellement : ré-enregistrer ses préférences ne doit pas réécrire la date du
+   * consentement initial, qui fait foi en cas de contrôle (C8).
+   *
+   * @param userId Identifiant issu du JWT vérifié (C4)
+   * @param dto Champs à modifier, validés par class-validator (C4)
+   * @returns Le profil complet **relu après écriture** (l'UI affiche l'état réel en base)
+   * @throws NotFoundException (404) si le compte n'existe plus
    */
-  async getMobilityProfile(_userId: string): Promise<MobilityProfileView> {
-    // TODO(F1): lecture du MobilityProfile en base
+  async updateProfile(userId: string, dto: UpdateUserProfileDto): Promise<UserProfileView> {
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const current = await tx.user.findUnique({
+        where: { id: userId },
+        select: PROFILE_SELECT,
+      });
+
+      if (!current) throw new NotFoundException('User not found');
+
+      if (dto.geolocationConsent !== undefined) {
+        const alreadyGranted = current.consentAt !== null;
+        if (dto.geolocationConsent !== alreadyGranted) {
+          await tx.user.update({
+            where: { id: userId },
+            // Révocation = effacement de la trace de consentement (C8).
+            data: { consentAt: dto.geolocationConsent ? new Date() : null },
+          });
+        }
+      }
+
+      if (dto.preferences) {
+        const patch = UsersService.toPreferencesPatch(dto.preferences);
+        await tx.mobilityProfile.upsert({
+          where: { userId },
+          // Premier enregistrement : les champs non fournis prennent les défauts produit.
+          create: { userId, ...DEFAULT_PREFERENCES, ...patch },
+          update: patch,
+        });
+      }
+
+      return tx.user.findUniqueOrThrow({ where: { id: userId }, select: PROFILE_SELECT });
+    });
+
+    return UsersService.toProfileView(updated);
+  }
+
+  /**
+   * Préférences effectives d'un utilisateur, prêtes à être consommées par le
+   * planificateur (F2, étape 3 du flux de référence).
+   * @param userId Identifiant issu du JWT vérifié (C4)
+   */
+  async getPreferences(userId: string): Promise<MobilityPreferencesView> {
+    const profile = await this.prisma.mobilityProfile.findUnique({ where: { userId } });
+    return UsersService.toPreferencesView(profile);
+  }
+
+  /** Projette une ligne base en vue d'API (dates sérialisées en ISO 8601 — C9). */
+  private static toProfileView(user: UserWithProfile): UserProfileView {
     return {
-      preferredModes: [TransportMode.WALK, TransportMode.METRO, TransportMode.BIKE],
-      reducedMobility: false,
-      maxWalkMinutes: 15,
+      id: user.id,
+      email: user.email,
+      createdAt: user.createdAt.toISOString(),
+      geolocationConsentAt: user.consentAt?.toISOString() ?? null,
+      preferences: UsersService.toPreferencesView(user.mobilityProfile),
     };
   }
 
   /**
-   * Met à jour les préférences de mobilité (stub : renvoie l'écho validé).
-   * @param dto Préférences validées par class-validator (C4)
+   * Préférences d'une ligne `MobilityProfile`, ou les défauts si elle n'existe pas.
+   *
+   * `preferredModes` et `priority` sont stockés en `String`/`String[]` (Prisma ne
+   * partage pas l'enum TypeScript avec PostgreSQL) : les valeurs relues sont
+   * donc re-filtrées ici. Une valeur devenue inconnue (mode retiré du catalogue)
+   * est ignorée au lieu de propager une chaîne invalide jusqu'au front.
    */
-  async updateMobilityProfile(
-    _userId: string,
-    dto: UpdateMobilityProfileDto,
-  ): Promise<MobilityProfileView> {
-    // TODO(F1): upsert du MobilityProfile en base
+  private static toPreferencesView(profile: MobilityProfile | null): MobilityPreferencesView {
+    if (!profile) return { ...DEFAULT_PREFERENCES };
+
+    const modes = profile.preferredModes.filter((mode): mode is TransportMode =>
+      Object.values(TransportMode).includes(mode as TransportMode),
+    );
+
     return {
-      preferredModes: dto.preferredModes,
-      reducedMobility: dto.reducedMobility ?? false,
-      maxWalkMinutes: dto.maxWalkMinutes ?? 15,
+      preferredModes: modes.length > 0 ? modes : [...DEFAULT_PREFERENCES.preferredModes],
+      priority: Object.values(RoutePriority).includes(profile.priority as RoutePriority)
+        ? (profile.priority as RoutePriority)
+        : DEFAULT_PREFERENCES.priority,
+      reducedMobility: profile.reducedMobility,
+      maxWalkMinutes: profile.maxWalkMinutes,
     };
+  }
+
+  /**
+   * Ne retient que les champs réellement fournis.
+   * Sans ce filtrage, un `undefined` explicite écraserait la colonne côté
+   * `create` de l'upsert — le `PATCH` cesserait d'être partiel.
+   */
+  private static toPreferencesPatch(
+    preferences: MobilityPreferencesDto,
+  ): Partial<MobilityPreferencesView> {
+    const patch: Partial<MobilityPreferencesView> = {};
+    if (preferences.preferredModes !== undefined) patch.preferredModes = preferences.preferredModes;
+    if (preferences.priority !== undefined) patch.priority = preferences.priority;
+    if (preferences.reducedMobility !== undefined)
+      patch.reducedMobility = preferences.reducedMobility;
+    if (preferences.maxWalkMinutes !== undefined) patch.maxWalkMinutes = preferences.maxWalkMinutes;
+    return patch;
   }
 }
