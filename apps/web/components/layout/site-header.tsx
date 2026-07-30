@@ -3,6 +3,8 @@
 import Link from 'next/link';
 import { useState } from 'react';
 
+import { useSession } from '../../features/auth/session-provider';
+
 const navLinks = [
   { href: '/', label: 'Itinéraires' },
   { href: '/', label: 'Mon impact CO₂' },
@@ -14,13 +16,30 @@ const navLinks = [
  * Sur mobile : bouton hamburger qui déplie le menu sous la barre ;
  * à partir de `md` : liens en ligne, bouton masqué.
  *
+ * Reflète l'**état de session** (UF-106) : compte connecté + bouton
+ * « Déconnexion », ou lien « Connexion ». Les liens de navigation privés ne
+ * sont affichés qu'aux utilisateurs connectés — inutile de proposer des liens
+ * qui se solderaient par une redirection vers l'écran de connexion.
+ *
  * Accessibilité (C7) : `aria-expanded`/`aria-controls` sur le bouton,
  * libellé explicite pour lecteurs d'écran, zone tactile ≥ 44 px,
  * fermeture du menu à la navigation.
  */
 export function SiteHeader() {
   const [menuOpen, setMenuOpen] = useState(false);
+  const { user, signOut } = useSession();
+  const [signingOut, setSigningOut] = useState(false);
   const closeMenu = () => setMenuOpen(false);
+
+  const handleSignOut = async () => {
+    closeMenu();
+    setSigningOut(true);
+    try {
+      await signOut();
+    } finally {
+      setSigningOut(false);
+    }
+  };
 
   return (
     <header className="border-b border-ink-200 bg-white">
@@ -62,26 +81,48 @@ export function SiteHeader() {
           id="menu-principal"
           className={`${menuOpen ? 'flex' : 'hidden'} flex-col gap-1 border-t border-ink-200 py-3 text-sm md:flex md:flex-row md:items-center md:gap-5 md:border-t-0 md:py-0`}
         >
-          {navLinks.map((link) => (
-            <li key={link.label}>
+          {user &&
+            navLinks.map((link) => (
+              <li key={link.label}>
+                <Link
+                  href={link.href}
+                  onClick={closeMenu}
+                  className="block rounded-md px-3 py-2 hover:bg-surface-muted md:px-1 md:py-1 md:underline-offset-4 md:hover:bg-transparent md:hover:underline"
+                >
+                  {link.label}
+                </Link>
+              </li>
+            ))}
+
+          {user ? (
+            <>
+              {/* Identité du compte : confirme visuellement l'état connecté (C7). */}
+              <li className="px-3 py-2 text-ink-700 md:px-0 md:py-0">
+                <span className="sr-only">Connecté en tant que&nbsp;: </span>
+                <span className="font-medium break-all">{user.email}</span>
+              </li>
+              <li className="mt-1 md:mt-0">
+                <button
+                  type="button"
+                  onClick={handleSignOut}
+                  disabled={signingOut}
+                  className="block w-full min-h-11 rounded-md border-2 border-primary px-4 py-2 text-center font-bold text-primary-dark hover:bg-surface-muted disabled:opacity-60 md:min-h-0"
+                >
+                  {signingOut ? 'Déconnexion…' : 'Déconnexion'}
+                </button>
+              </li>
+            </>
+          ) : (
+            <li className="mt-1 md:mt-0">
               <Link
-                href={link.href}
+                href="/login"
                 onClick={closeMenu}
-                className="block rounded-md px-3 py-2 hover:bg-surface-muted md:px-1 md:py-1 md:underline-offset-4 md:hover:bg-transparent md:hover:underline"
+                className="block rounded-md bg-primary px-4 py-2 text-center font-bold text-white hover:bg-primary-dark"
               >
-                {link.label}
+                Connexion
               </Link>
             </li>
-          ))}
-          <li className="mt-1 md:mt-0">
-            <Link
-              href="/login"
-              onClick={closeMenu}
-              className="block rounded-md bg-primary px-4 py-2 text-center font-bold text-white hover:bg-primary-dark"
-            >
-              Connexion
-            </Link>
-          </li>
+          )}
         </ul>
       </nav>
     </header>

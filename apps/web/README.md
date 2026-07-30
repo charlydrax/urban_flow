@@ -16,15 +16,20 @@ authentification (F1), préférences de mobilité et tableau de bord carbone.
   `prefers-reduced-motion`.
 - **API** : client typé `lib/api-client.ts` (cookies httpOnly — C11),
   contrats partagés importés depuis `@urbanflow/shared` (mêmes types que les DTO NestJS — C9).
+- **Session (C4/C11, UF-106)** : toutes les pages sont **privées par défaut**
+  (`middleware.ts`) sauf `/login` et `/register` ; un `401` de l'API purge la session et
+  renvoie vers la connexion en mémorisant la page demandée. Détail et périmètre de
+  confiance : `features/auth/README.md`.
 
 ## Structure
 
 ```
-app/         # App Router (layout accessible, pages)
-components/  # UI transverse (carte, enregistrement SW)
-features/    # auth/ (câblé — UF-105), planner/, profile/, carbon/ (stubs)
-lib/         # client API, géolocalisation (C6), helpers
-sw.ts        # service worker (C1, C10)
+app/           # App Router (layout accessible, pages)
+components/    # UI transverse (carte, enregistrement SW)
+features/      # auth/ (câblé — UF-105/106), planner/, profile/, carbon/ (stubs)
+lib/           # client API, session, géolocalisation (C6), helpers
+middleware.ts  # protection des routes privées (UF-106)
+sw.ts          # service worker (C1, C10)
 ```
 
 ## Commandes

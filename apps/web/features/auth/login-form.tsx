@@ -6,11 +6,19 @@ import { FormEvent, useState } from 'react';
 import { Button } from '../../components/ui/button';
 import { InputField } from '../../components/ui/input-field';
 import { ApiError, apiClient } from '../../lib/api-client';
+import { DEFAULT_AFTER_LOGIN } from '../../lib/session';
 import { PasswordField } from './password-field';
 import { validateEmail } from './validation';
 
-/** Destination après authentification réussie : l'espace connecté (planificateur). */
-const AFTER_AUTH_REDIRECT = '/';
+export interface LoginFormProps {
+  /**
+   * Page privée demandée avant la redirection vers la connexion (UF-106).
+   * Déjà **assainie côté serveur** par `sanitizeNextPath` : ce composant ne
+   * reçoit qu'un chemin interne, jamais une URL absolue (anti-redirection
+   * ouverte — C4).
+   */
+  nextPath?: string | null;
+}
 
 /**
  * Formulaire de connexion (F1) — câblé sur `POST /api/auth/login`, mis en forme
@@ -25,8 +33,11 @@ const AFTER_AUTH_REDIRECT = '/';
  * associés (InputField), erreur de formulaire annoncée via `role="alert"` +
  * `aria-live`, bouton désactivé pendant l'envoi, `autoComplete` standards pour
  * les gestionnaires de mots de passe.
+ *
+ * Après succès, l'utilisateur revient sur la page qu'il demandait (`nextPath`)
+ * si elle est connue, sinon sur l'espace connecté (UF-106, recette 3).
  */
-export function LoginForm() {
+export function LoginForm({ nextPath }: LoginFormProps) {
   const router = useRouter();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -49,7 +60,9 @@ export function LoginForm() {
     try {
       await apiClient.login(email.trim(), password);
       // Le cookie httpOnly est posé : on rafraîchit pour recharger l'état serveur.
-      router.push(AFTER_AUTH_REDIRECT);
+      // `replace` : l'écran de connexion ne doit pas rester dans l'historique
+      // (un retour arrière y renverrait un utilisateur désormais connecté).
+      router.replace(nextPath ?? DEFAULT_AFTER_LOGIN);
       router.refresh();
     } catch (error) {
       // Message volontairement générique quelle que soit la cause (C4/OWASP).

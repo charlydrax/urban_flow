@@ -11,9 +11,24 @@ Inscription, connexion et émission des JWT vérifiés par le guard global de l'
 | ------- | -------------------- | ---------------------------------------- | ------------------------------------- |
 | POST    | `/api/auth/register` | Inscription (email + mot de passe fort)  | ✅ persistance + hash argon2 (UF-102) |
 | POST    | `/api/auth/login`    | Connexion (vérifie email + mot de passe) | ✅ vérification argon2 + JWT (UF-103) |
+| GET     | `/api/auth/me`       | Identité du compte connecté (protégée)   | ✅ sonde de session (UF-106)          |
+| POST    | `/api/auth/logout`   | Purge le cookie de session               | ✅ UF-106                             |
 
 Le token est posé en **cookie httpOnly** `access_token` (C11) et renvoyé dans le corps
 (confort de dev/Swagger — à restreindre avant la production).
+
+### Session (`/api/auth/me` et `/api/auth/logout`, UF-106)
+
+- `GET /auth/me` est la **seule route protégée du module** : le guard global répond `401`
+  si le cookie est absent, falsifié ou expiré. Le front s'en sert pour vérifier que sa
+  session est toujours vivante — il ne peut pas lire le token lui-même (`httpOnly`, C11).
+  À distinguer de `GET /users/me`, qui exposera le _profil applicatif_ lu en base :
+  ici l'identité vient uniquement du **token vérifié** (anti-usurpation — C4).
+- `POST /auth/logout` efface le cookie (`Set-Cookie` vide, mêmes attributs qu'à la pose).
+  C'est **indispensable côté serveur** : un cookie `httpOnly` est hors d'atteinte du
+  JavaScript, le front ne peut donc pas se déconnecter seul.
+  Volontairement `@Public()` et **idempotent** : purger une session déjà expirée doit
+  réussir, sinon le cas « 401 → purge → retour connexion » boucle sur lui-même.
 
 ### Connexion (`/api/auth/login`, UF-103)
 

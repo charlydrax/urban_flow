@@ -4,6 +4,8 @@ import Link from 'next/link';
 
 import { SiteHeader } from '../components/layout/site-header';
 import { ServiceWorkerRegister } from '../components/service-worker-register';
+import { SessionProvider } from '../features/auth/session-provider';
+import { getServerSession } from '../lib/session-server';
 import './globals.css';
 
 /*
@@ -56,34 +58,41 @@ export const viewport: Viewport = {
  *   focus visible (globals.css), contrastes AA (vérifiés par lib/design-tokens.test.ts).
  * - C2 : mobile-first (navigation repliable, viewport configuré).
  * - C1 : manifest lié + enregistrement du service worker.
+ * - C4/C11 (UF-106) : l'état de session est résolu **côté serveur** depuis le
+ *   cookie httpOnly et diffusé par `SessionProvider` — aucun token en JS, et
+ *   pas de flash « déconnecté » au chargement.
  */
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  const user = await getServerSession();
+
   return (
     <html
       lang="fr"
       className={`${plusJakarta.variable} ${bricolage.variable} ${jetbrains.variable}`}
     >
       <body className="min-h-dvh bg-surface font-sans text-ink antialiased">
-        <a href="#contenu" className="skip-link">
-          Aller au contenu principal
-        </a>
+        <SessionProvider initialUser={user}>
+          <a href="#contenu" className="skip-link">
+            Aller au contenu principal
+          </a>
 
-        <SiteHeader />
+          <SiteHeader />
 
-        <main id="contenu" className="mx-auto w-full max-w-5xl flex-1 px-4 py-6">
-          {children}
-        </main>
+          <main id="contenu" className="mx-auto w-full max-w-5xl flex-1 px-4 py-6">
+            {children}
+          </main>
 
-        <footer className="border-t border-ink-200 bg-white">
-          <div className="mx-auto max-w-5xl px-4 py-4 text-sm">
-            <p>UrbanFlow Mobility — prototype T6 CDSD. </p>
-            <Link href="/" className="underline underline-offset-4">
-              Politique de confidentialité (RGPD)
-            </Link>
-          </div>
-        </footer>
+          <footer className="border-t border-ink-200 bg-white">
+            <div className="mx-auto max-w-5xl px-4 py-4 text-sm">
+              <p>UrbanFlow Mobility — prototype T6 CDSD. </p>
+              <Link href="/" className="underline underline-offset-4">
+                Politique de confidentialité (RGPD)
+              </Link>
+            </div>
+          </footer>
 
-        <ServiceWorkerRegister />
+          <ServiceWorkerRegister />
+        </SessionProvider>
       </body>
     </html>
   );
