@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 
+import { AuthShell } from '../../features/auth/auth-shell';
 import { LoginForm } from '../../features/auth/login-form';
 
 export const metadata: Metadata = {
@@ -9,16 +10,26 @@ export const metadata: Metadata = {
 };
 
 /**
- * Page de connexion (F1) — carte centrée, mobile-first (C2).
+ * Page de connexion (F1) — reprise de la maquette Figma « 2. CONNEXION F1 »,
+ * carte centrée mobile-first (C2).
  * Le formulaire est un composant client câblé sur l'API ; cette page reste
  * un Server Component pour porter les métadonnées SEO/onglet.
  */
 export default function LoginPage() {
   return (
-    <div className="mx-auto w-full max-w-sm">
-      <div className="rounded-lg border border-ink-200 bg-white p-6 shadow-card">
-        <LoginForm />
-      </div>
-    </div>
+    <AuthShell
+      titleId="login-title"
+      title={
+        <>
+          Bon retour <span aria-hidden="true">👋</span>
+        </>
+      }
+      subtitle="Connectez-vous pour reprendre vos trajets là où vous les avez laissés."
+      switchPrompt="Pas encore de compte ?"
+      switchHref="/register"
+      switchLabel="S'inscrire"
+    >
+      <LoginForm />
+    </AuthShell>
   );
 }

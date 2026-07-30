@@ -6,6 +6,7 @@ import { FormEvent, useState } from 'react';
 import { Button } from '../../components/ui/button';
 import { InputField } from '../../components/ui/input-field';
 import { ApiError, apiClient } from '../../lib/api-client';
+import { PasswordField } from './password-field';
 import { PASSWORD_HINT, validateEmail, validatePassword } from './validation';
 
 /** Destination après inscription réussie : l'espace connecté (planificateur). */
@@ -13,6 +14,11 @@ const AFTER_AUTH_REDIRECT = '/';
 
 /**
  * Formulaire d'inscription (F1) — câblé sur `POST /api/auth/register`.
+ *
+ * La maquette Figma ne comporte pas d'écran d'inscription : cet écran est
+ * **dérivé** de « 2. CONNEXION F1 » (mêmes champs, mêmes gabarits, même bloc
+ * bas de carte), la ligne « Se souvenir de moi » étant remplacée par la
+ * politique de mot de passe.
  *
  * Applique la politique de mot de passe OWASP côté client (retour immédiat),
  * la validation serveur restant la source de vérité (C4). Le JWT est posé en
@@ -64,12 +70,8 @@ export function RegisterForm() {
       onSubmit={handleSubmit}
       noValidate
       aria-labelledby="register-title"
-      className="flex flex-col gap-4"
+      className="mt-6 flex flex-col gap-3.5"
     >
-      <h1 id="register-title" className="font-display text-2xl font-bold text-primary-dark">
-        Créer un compte
-      </h1>
-
       {formError && (
         <p
           role="alert"
@@ -84,18 +86,20 @@ export function RegisterForm() {
         id="register-email"
         name="email"
         type="email"
+        inputMode="email"
         autoComplete="email"
+        placeholder="marie.dupont@email.fr"
+        leadingIcon="✉"
         required
         value={email}
         error={emailError ?? undefined}
         onChange={(event) => setEmail(event.target.value)}
       />
 
-      <InputField
+      <PasswordField
         label="Mot de passe"
         id="register-password"
         name="password"
-        type="password"
         autoComplete="new-password"
         required
         hint={PASSWORD_HINT}
@@ -104,16 +108,15 @@ export function RegisterForm() {
         onChange={(event) => setPassword(event.target.value)}
       />
 
-      <Button type="submit" variant="primary" size="lg" disabled={submitting}>
+      <Button
+        type="submit"
+        variant="primary"
+        size="lg"
+        className="mt-0.5 w-full"
+        disabled={submitting}
+      >
         {submitting ? 'Création…' : 'Créer mon compte'}
       </Button>
-
-      <p className="text-sm text-ink-500">
-        Déjà inscrit ?{' '}
-        <a href="/login" className="font-semibold text-action-dark underline underline-offset-4">
-          Se connecter
-        </a>
-      </p>
     </form>
   );
 }

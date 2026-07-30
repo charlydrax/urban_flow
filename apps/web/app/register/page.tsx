@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 
+import { AuthShell } from '../../features/auth/auth-shell';
 import { RegisterForm } from '../../features/auth/register-form';
 
 export const metadata: Metadata = {
@@ -9,15 +10,25 @@ export const metadata: Metadata = {
 
 /**
  * Page d'inscription (F1) — carte centrée, mobile-first (C2).
- * Server Component qui porte les métadonnées ; le formulaire câblé est un
- * composant client (`RegisterForm`).
+ * Écran absent de la maquette Figma : décliné du gabarit « 2. CONNEXION F1 »
+ * (mêmes composants, même charte). Server Component qui porte les métadonnées ;
+ * le formulaire câblé est un composant client (`RegisterForm`).
  */
 export default function RegisterPage() {
   return (
-    <div className="mx-auto w-full max-w-sm">
-      <div className="rounded-lg border border-ink-200 bg-white p-6 shadow-card">
-        <RegisterForm />
-      </div>
-    </div>
+    <AuthShell
+      titleId="register-title"
+      title={
+        <>
+          Créer un compte <span aria-hidden="true">🚲</span>
+        </>
+      }
+      subtitle="Vélo'v, métro, tram, bus, trottinette : combinez tous les transports de Lyon en un seul geste."
+      switchPrompt="Déjà inscrit ?"
+      switchHref="/login"
+      switchLabel="Se connecter"
+    >
+      <RegisterForm />
+    </AuthShell>
   );
 }
