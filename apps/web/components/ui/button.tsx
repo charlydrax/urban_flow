@@ -1,6 +1,6 @@
 import type { ButtonHTMLAttributes } from 'react';
 
-export type ButtonVariant = 'primary' | 'secondary' | 'outline' | 'ghost';
+export type ButtonVariant = 'primary' | 'secondary' | 'outline' | 'neutral' | 'ghost';
 export type ButtonSize = 'sm' | 'md' | 'lg';
 
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
@@ -18,6 +18,8 @@ const variantClasses: Record<ButtonVariant, string> = {
   primary: 'bg-primary text-white hover:bg-primary-dark',
   secondary: 'bg-action text-white hover:bg-action-dark',
   outline: 'border-2 border-primary bg-white text-primary-dark hover:bg-tint-green',
+  // Bouton secondaire neutre de la maquette « 2. CONNEXION F1 » (bloc « ou continuer avec »)
+  neutral: 'border-2 border-ink-200 bg-white text-ink hover:bg-surface-muted',
   ghost: 'text-action-dark hover:bg-tint-blue',
 };
 

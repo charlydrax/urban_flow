@@ -22,7 +22,7 @@ authentification (F1), préférences de mobilité et tableau de bord carbone.
 ```
 app/         # App Router (layout accessible, pages)
 components/  # UI transverse (carte, enregistrement SW)
-features/    # auth/, planner/, profile/, carbon/ (stubs)
+features/    # auth/ (câblé — UF-105), planner/, profile/, carbon/ (stubs)
 lib/         # client API, géolocalisation (C6), helpers
 sw.ts        # service worker (C1, C10)
 ```

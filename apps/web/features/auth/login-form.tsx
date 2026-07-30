@@ -1,64 +1,141 @@
 'use client';
 
-import { FormEvent } from 'react';
+import { useRouter } from 'next/navigation';
+import { FormEvent, useState } from 'react';
+
+import { Button } from '../../components/ui/button';
+import { InputField } from '../../components/ui/input-field';
+import { ApiError, apiClient } from '../../lib/api-client';
+import { PasswordField } from './password-field';
+import { validateEmail } from './validation';
+
+/** Destination après authentification réussie : l'espace connecté (planificateur). */
+const AFTER_AUTH_REDIRECT = '/';
 
 /**
- * Formulaire de connexion (F1) — STUB squelette, non câblé.
+ * Formulaire de connexion (F1) — câblé sur `POST /api/auth/login`, mis en forme
+ * d'après la maquette Figma « 02 · Maquettes mobile — 2. CONNEXION F1 ».
  *
- * Implémentation cible : `apiClient.login` (le JWT arrive en cookie httpOnly —
- * C11), gestion des erreurs 401 avec message générique (C4), lien vers
- * l'inscription et la politique de confidentialité (C8).
+ * Le JWT est posé par l'API dans un cookie `httpOnly` (C11) : rien n'est stocké
+ * côté JS, la connexion se matérialise par la simple redirection vers l'espace
+ * connecté. En cas d'échec, un message **générique** est affiché (C4/OWASP :
+ * ne pas révéler si l'email existe).
  *
- * Accessibilité (C7) : labels associés, autocomplete standards,
- * erreurs annoncées via aria-live (à venir).
+ * Accessibilité (C7) : titre de carte relié par `aria-labelledby`, labels
+ * associés (InputField), erreur de formulaire annoncée via `role="alert"` +
+ * `aria-live`, bouton désactivé pendant l'envoi, `autoComplete` standards pour
+ * les gestionnaires de mots de passe.
  */
 export function LoginForm() {
-  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+  const router = useRouter();
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [emailError, setEmailError] = useState<string | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    // TODO(F1): apiClient.login(email, password) + redirection
+    setFormError(null);
+
+    const emailProblem = validateEmail(email);
+    setEmailError(emailProblem);
+    if (emailProblem || password.length === 0) {
+      if (!emailProblem) setFormError('Veuillez saisir votre mot de passe.');
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      await apiClient.login(email.trim(), password);
+      // Le cookie httpOnly est posé : on rafraîchit pour recharger l'état serveur.
+      router.push(AFTER_AUTH_REDIRECT);
+      router.refresh();
+    } catch (error) {
+      // Message volontairement générique quelle que soit la cause (C4/OWASP).
+      setFormError(
+        error instanceof ApiError && error.status === 401
+          ? 'Email ou mot de passe incorrect.'
+          : 'Connexion impossible pour le moment. Veuillez réessayer.',
+      );
+      setSubmitting(false);
+    }
   };
 
   return (
     <form
       onSubmit={handleSubmit}
-      className="flex max-w-sm flex-col gap-4 rounded-lg border border-primary/20 bg-white p-4"
+      noValidate
+      aria-labelledby="login-title"
+      className="mt-6 flex flex-col gap-3.5"
     >
-      <h2 className="text-lg font-bold text-primary-dark">Connexion</h2>
+      {formError && (
+        <p
+          role="alert"
+          className="rounded-md border-2 border-error bg-tint-red px-4 py-3 text-sm font-semibold text-error"
+        >
+          {formError}
+        </p>
+      )}
 
-      <div className="flex flex-col gap-1">
-        <label htmlFor="login-email" className="font-medium">
-          Email
+      <InputField
+        label="Email"
+        id="login-email"
+        name="email"
+        type="email"
+        inputMode="email"
+        autoComplete="email"
+        placeholder="marie.dupont@email.fr"
+        leadingIcon="✉"
+        required
+        value={email}
+        error={emailError ?? undefined}
+        onChange={(event) => setEmail(event.target.value)}
+      />
+
+      <PasswordField
+        label="Mot de passe"
+        id="login-password"
+        name="password"
+        autoComplete="current-password"
+        required
+        value={password}
+        onChange={(event) => setPassword(event.target.value)}
+      />
+
+      {/*
+       * Ligne « Se souvenir de moi / Oublié ? » de la maquette. Aucune des deux
+       * options n'a de contrepartie API dans le prototype (UF-103 émet un cookie
+       * de session à durée fixe, et aucune route de réinitialisation n'existe) :
+       * elles sont affichées désactivées et annoncées comme telles, plutôt que
+       * de proposer une action sans effet.
+       */}
+      <div className="flex items-center justify-between gap-4">
+        <label className="flex items-center gap-2 text-xs text-ink-700 has-[:disabled]:text-ink-500">
+          <input
+            type="checkbox"
+            disabled
+            aria-describedby="login-soon"
+            className="size-4 shrink-0 accent-primary"
+          />
+          Se souvenir de moi
         </label>
-        <input
-          id="login-email"
-          name="email"
-          type="email"
-          autoComplete="email"
-          required
-          className="rounded border border-primary/40 px-3 py-2"
-        />
+        <button
+          type="button"
+          disabled
+          aria-describedby="login-soon"
+          className="text-xs font-bold text-action-dark hover:underline disabled:text-ink-500 disabled:no-underline"
+        >
+          Oublié ?
+        </button>
       </div>
+      <p id="login-soon" className="sr-only">
+        Fonctionnalité prévue après le prototype.
+      </p>
 
-      <div className="flex flex-col gap-1">
-        <label htmlFor="login-password" className="font-medium">
-          Mot de passe
-        </label>
-        <input
-          id="login-password"
-          name="password"
-          type="password"
-          autoComplete="current-password"
-          required
-          className="rounded border border-primary/40 px-3 py-2"
-        />
-      </div>
-
-      <button
-        type="submit"
-        className="rounded bg-primary px-4 py-2 font-medium text-white hover:bg-primary-dark"
-      >
-        Se connecter
-      </button>
+      <Button type="submit" variant="primary" size="lg" className="w-full" disabled={submitting}>
+        {submitting ? 'Connexion…' : 'Se connecter'}
+      </Button>
     </form>
   );
 }
