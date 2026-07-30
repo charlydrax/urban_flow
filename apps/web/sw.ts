@@ -97,8 +97,10 @@ async function handlePlanRequest(request: Request): Promise<Response> {
 async function handleNavigation(request: Request): Promise<Response> {
   try {
     const response = await fetch(request);
-    const cache = await caches.open(SHELL_CACHE);
-    await cache.put('/', response.clone());
+    if (isCacheableShell(request, response)) {
+      const cache = await caches.open(SHELL_CACHE);
+      await cache.put('/', response.clone());
+    }
     return response;
   } catch {
     const cached = await caches.match('/');
@@ -110,6 +112,21 @@ async function handleNavigation(request: Request): Promise<Response> {
       })
     );
   }
+}
+
+/**
+ * Le shell hors-ligne ne doit être rafraîchi que par la vraie page d'accueil.
+ *
+ * Depuis UF-106, une navigation vers `/` sans session est **redirigée** vers
+ * `/login` par le middleware. Sans ce filtre :
+ *  - le shell hors-ligne deviendrait l'écran de connexion (l'app installée
+ *    s'ouvrirait sur « Connectez-vous » même pour un compte connecté) ;
+ *  - une réponse redirigée finirait en cache, or un service worker n'a pas le
+ *    droit de répondre à une navigation avec une réponse `redirected` — le
+ *    navigateur rejette l'affichage.
+ */
+function isCacheableShell(request: Request, response: Response): boolean {
+  return response.ok && !response.redirected && new URL(request.url).pathname === '/';
 }
 
 /** Cache-first pour les assets immutables. */
