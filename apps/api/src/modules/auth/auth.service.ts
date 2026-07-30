@@ -7,11 +7,17 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 
+/** Identité minimale du compte connecté (minimisation RGPD — C8). */
+export interface SessionUser {
+  id: string;
+  email: string;
+}
+
 /** Réponse d'authentification renvoyée par login/register. */
 export interface AuthResponse {
   /** JWT signé (également posé en cookie httpOnly par le contrôleur — C11). */
   accessToken: string;
-  user: { id: string; email: string };
+  user: SessionUser;
 }
 
 /**
