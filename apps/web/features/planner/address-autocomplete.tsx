@@ -260,7 +260,7 @@ export function AddressAutocomplete({
         >
           {status === 'error'
             ? message
-            : 'Aucune adresse trouvée dans la métropole de Lyon. Vérifiez l’orthographe, ou saisissez l’adresse à la main.'}
+            : 'Aucune adresse trouvée dans la métropole de Lyon. La recherche porte sur les adresses : essayez « place Bellecour » plutôt que « Bellecour », ou ajoutez la commune.'}
         </p>
       )}
     </div>

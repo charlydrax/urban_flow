@@ -10,6 +10,7 @@ import {
   normalizeFeature,
   reverseGeocode,
   searchAddresses,
+  SEARCH_FETCH_LIMIT,
   SUGGESTION_LIMIT,
 } from './geocoding';
 
@@ -71,9 +72,15 @@ describe('buildSearchUrl', () => {
     expect(`${url.origin}${url.pathname}`).toBe(BAN_SEARCH_URL);
     expect(url.searchParams.get('q')).toBe('république');
     expect(url.searchParams.get('autocomplete')).toBe('1');
-    expect(url.searchParams.get('limit')).toBe(String(SUGGESTION_LIMIT));
     expect(url.searchParams.get('lat')).toBe(String(LYON_BIAS.lat));
     expect(url.searchParams.get('lon')).toBe(String(LYON_BIAS.lng));
+  });
+
+  it('demande plus de candidats qu’il n’en sera affiché, pour survivre au filtre lyonnais', () => {
+    const url = new URL(buildSearchUrl('bellecour'));
+
+    expect(url.searchParams.get('limit')).toBe(String(SEARCH_FETCH_LIMIT));
+    expect(SEARCH_FETCH_LIMIT).toBeGreaterThan(SUGGESTION_LIMIT);
   });
 
   it('encode la saisie plutôt que de la concaténer (pas d’injection dans l’URL — C4)', () => {
@@ -193,6 +200,23 @@ describe('searchAddresses', () => {
     if (!result.ok) return;
     expect(result.places).toHaveLength(1);
     expect(result.places[0].id).toBe('lyon');
+  });
+
+  it('ne rend jamais plus de suggestions que la liste n’en affiche', async () => {
+    // La BAN a renvoyé les 10 candidats demandés, tous lyonnais : on n'en garde
+    // que le haut du panier, sans perdre l'ordre de pertinence.
+    mockFetchFeatures(
+      Array.from({ length: SEARCH_FETCH_LIMIT }, (_unused, index) =>
+        banFeature({ id: `lyon-${index}`, label: `Rue ${index} 69002 Lyon` }),
+      ),
+    );
+
+    const result = await searchAddresses('rue');
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.places).toHaveLength(SUGGESTION_LIMIT);
+    expect(result.places[0].id).toBe('lyon-0');
   });
 
   it('signale une panne du service sans lever d’exception', async () => {

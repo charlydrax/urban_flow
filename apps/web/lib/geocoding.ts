@@ -14,9 +14,14 @@
  *   Policy » de Nominatim interdit explicitement l'autocomplétion clavier ;
  * - **plus précise en France** : numéros de voie, arrondissements lyonnais.
  *
- * Contrepartie assumée : la couverture s'arrête aux frontières françaises. Pour
- * une métropole française c'est sans conséquence ; un futur besoin transfrontalier
- * demanderait un second géocodeur.
+ * Deux contreparties assumées :
+ * - la couverture s'arrête aux **frontières françaises** — sans conséquence pour
+ *   une métropole française, mais un besoin transfrontalier demanderait un
+ *   second géocodeur ;
+ * - c'est une base d'**adresses**, pas de points d'intérêt : « gare » ou
+ *   « hôtel de ville » n'y remontent rien, là où « place Bellecour » ou
+ *   « 14 rue de la République » sont trouvés immédiatement. Les arrêts de
+ *   transport viendront des données GTFS (F3), qui sont leur source légitime.
  *
  * ## Ce qui est envoyé, et ce qui ne l'est pas (C8/C11)
  *
@@ -49,12 +54,27 @@ export const BAN_REVERSE_URL = 'https://api-adresse.data.gouv.fr/reverse/';
 export const MIN_QUERY_LENGTH = 3;
 
 /**
- * Nombre de suggestions demandées.
+ * Nombre de suggestions **affichées**.
  *
  * Cinq : au-delà, la liste dépasse la hauteur utile d'un écran mobile et la
  * charge de lecture augmente sans gain de pertinence (C2/C7).
  */
 export const SUGGESTION_LIMIT = 5;
+
+/**
+ * Nombre de candidats **demandés** à la BAN, avant filtrage sur la métropole.
+ *
+ * Le double de ce qu'on affiche, parce que le filtre lyonnais taille dans le
+ * tas : sur « bellecour », la BAN classe trois lieux-dits de l'Ain et du Loiret
+ * avant la place de Lyon. En demander cinq reviendrait à n'en garder qu'un ou
+ * deux — voire aucun. Mesuré sur des saisies réelles, passer de 5 à 10 fait
+ * remonter « garibaldi » de 1 à 6 adresses lyonnaises.
+ *
+ * Dix et pas vingt : au-delà, la BAN n'apporte plus de résultat lyonnais
+ * supplémentaire et on ne ferait que grossir la réponse pour rien (C5).
+ * Cela reste **une seule requête** — c'est sa taille qui change, pas leur nombre.
+ */
+export const SEARCH_FETCH_LIMIT = SUGGESTION_LIMIT * 2;
 
 /**
  * Biais de recherche : centre de la métropole, entre Part-Dieu et Bellecour.
@@ -143,9 +163,9 @@ interface BanFeature {
  * Exporté pour être vérifié en test sans appel réseau.
  *
  * @param query Texte saisi par l'utilisateur
- * @param limit Nombre maximal de suggestions (défaut `SUGGESTION_LIMIT`)
+ * @param limit Nombre de candidats demandés (défaut `SEARCH_FETCH_LIMIT`)
  */
-export function buildSearchUrl(query: string, limit: number = SUGGESTION_LIMIT): string {
+export function buildSearchUrl(query: string, limit: number = SEARCH_FETCH_LIMIT): string {
   const params = new URLSearchParams({
     q: query,
     limit: String(limit),
@@ -280,7 +300,10 @@ export async function searchAddresses(
   const places = features
     .map((feature) => normalizeFeature(feature as BanFeature))
     .filter((place): place is GeocodedPlace => place !== null)
-    .filter((place) => isWithinLyonArea(place.lat, place.lng));
+    .filter((place) => isWithinLyonArea(place.lat, place.lng))
+    // On a demandé large pour survivre au filtre ; on n'affiche que le haut du
+    // panier, l'ordre de pertinence de la BAN étant conservé.
+    .slice(0, SUGGESTION_LIMIT);
 
   return { ok: true, places };
 }

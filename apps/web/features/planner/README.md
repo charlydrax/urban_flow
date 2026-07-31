@@ -38,6 +38,12 @@ Pour une métropole française, la limite de couverture est sans conséquence et
 l'autorisation explicite d'autocompléter est décisive. Un besoin transfrontalier
 futur demanderait un second géocodeur.
 
+**Limite connue** : la BAN est une base d'**adresses**, pas de points d'intérêt.
+« gare » ou « hôtel de ville » n'y remontent rien, là où « place Bellecour » et
+« 14 rue de la République » sont trouvés immédiatement. C'est assumé à ce stade :
+les arrêts et pôles d'échange viendront des données **GTFS** (F3), qui en sont la
+source légitime. Le message d'état vide oriente vers la formulation qui marche.
+
 ### Le parcours
 
 ```
@@ -81,16 +87,26 @@ S'y ajoute un quatrième effet : une fois une suggestion choisie, la recherche e
 relance donc rien, et refermer puis rouvrir la liste réutilise les suggestions
 déjà en mémoire.
 
-### Restreindre à Lyon : deux mécanismes, pas un
+### Restreindre à Lyon : trois mécanismes, pas un
 
 - **Biais** — `lat`/`lon` transmis à la BAN (centre de Lyon) : classe les
-  homonymes par proximité. « république » remonte Lyon avant Paris.
-- **Filtre** — `isWithinLyonArea` écarte ensuite ce qui tombe hors de l'emprise
-  de la métropole. Le biais _classe_ mais ne _restreint_ pas : sur une saisie
-  très ambiguë (« gare »), des adresses de toute la France remontent quand même.
+  homonymes par proximité. Mesuré sur des saisies réelles, « jean jaurès » passe
+  de 0 à 3 adresses lyonnaises et « garibaldi » de 1 à 6.
+- **Sur-récupération** — on demande `SEARCH_FETCH_LIMIT` (10) candidats pour n'en
+  afficher que `SUGGESTION_LIMIT` (5). Le biais _classe_ mais ne _restreint_
+  pas : sur « bellecour », la BAN place trois lieux-dits de l'Ain et du Loiret
+  avant la place de Lyon. Demander cinq résultats n'en laisserait qu'un après
+  filtrage. Cela reste **une seule requête** — c'est sa taille qui change, pas
+  leur nombre (C5).
+- **Filtre** — `isWithinLyonArea` écarte ce qui tombe hors de l'emprise de la
+  métropole, puis on tronque à cinq.
 
 L'emprise est volontairement large (les 59 communes du Grand Lyon et quelques
 limitrophes) : refuser Villeurbanne, Bron ou Vénissieux rendrait l'outil inutile.
+
+Pourquoi pas le filtre `citycode` de la BAN, qui serait plus net ? Parce qu'il
+porte sur **une seule commune** : il exclurait Villeurbanne et toute la
+périphérie, c'est-à-dire l'essentiel des trajets réels.
 
 ### Ce qui est envoyé au géocodeur (C8/C11)
 

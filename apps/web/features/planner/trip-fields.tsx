@@ -59,7 +59,7 @@ export function TripFields({
         tone="origin"
         value={from}
         onChange={onFromChange}
-        placeholder="Ex. Part-Dieu"
+        placeholder="Ex. rue de la Part-Dieu"
         trailing={
           <button
             type="button"
@@ -81,7 +81,7 @@ export function TripFields({
         tone="destination"
         value={to}
         onChange={onToChange}
-        placeholder="Ex. Bellecour"
+        placeholder="Ex. place Bellecour"
       />
 
       <p role="status" className="sr-only">
