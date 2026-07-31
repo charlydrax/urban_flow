@@ -27,7 +27,10 @@ urbanflow/
   `routes` (planificateur, F2), `transport` (GTFS/GBFS, F3), `carbon` (empreinte CO₂).
   API REST documentée via Swagger (C9).
 - **apps/web** : PWA installable (C1), mobile-first (C2), accessible WCAG 2.1 AA (C7),
-  carte MapLibre chargée en lazy-load (C5).
+  carte MapLibre chargée en lazy-load (C5). Le fond de carte est configurable par
+  variable d'environnement — aucune clé de fournisseur dans le dépôt (C4) ; sans
+  configuration, repli automatique sur les tuiles OpenStreetMap
+  (voir [`apps/web/components/map/README.md`](apps/web/components/map/README.md)).
 - **packages/shared** (`@urbanflow/shared`) : contrats TypeScript partagés (DTO d'itinéraires,
   auth, carbone, enum `TransportMode`) — une seule définition du contrat front/back (C9).
   Les DTO NestJS implémentent ces interfaces ; le client web les importe telles quelles.
@@ -49,7 +52,7 @@ npm install
 #    À faire une seule fois, puis renseigner les valeurs (mot de passe, JWT_SECRET).
 cp .env.example .env                    # base de données (docker compose)
 cp apps/api/.env.example apps/api/.env  # API (DATABASE_URL, JWT_SECRET...)
-cp apps/web/.env.example apps/web/.env  # Front (NEXT_PUBLIC_API_URL)
+cp apps/web/.env.example apps/web/.env  # Front (NEXT_PUBLIC_API_URL, fond de carte)
 
 # 3. Lancer la base PostGIS (Docker Desktop doit tourner)
 #    Au premier démarrage, docker/initdb/ active l'extension PostGIS
