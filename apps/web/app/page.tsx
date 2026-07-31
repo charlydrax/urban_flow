@@ -1,10 +1,13 @@
-import { LazyMap } from '../components/map/lazy-map';
-import { PlannerForm } from '../features/planner/planner-form';
+import { PlannerScreen } from '../features/planner/planner-screen';
 
 /**
  * Page d'accueil : planificateur d'itinéraires (F2) au-dessus de la carte.
  * Mobile-first (C2) : formulaire en pleine largeur, carte en dessous ;
  * sur écran large, les deux côte à côte.
+ *
+ * La page reste un Server Component : l'interactivité (géolocalisation, carte)
+ * est confinée à `PlannerScreen`, qui partage la position entre le formulaire
+ * et la carte (UF-202).
  */
 export default function HomePage() {
   return (
@@ -17,13 +20,7 @@ export default function HomePage() {
           Comparez les itinéraires en transports en commun, vélo, trottinette ou covoiturage, triés
           par empreinte carbone croissante.
         </p>
-        <div className="grid gap-6 md:grid-cols-[minmax(0,360px)_1fr]">
-          <PlannerForm />
-          <LazyMap
-            ariaLabel="Carte de la métropole de Lyon — les itinéraires calculés y seront tracés"
-            textAlternative="Les itinéraires calculés sont également listés sous le formulaire, triés par empreinte carbone croissante."
-          />
-        </div>
+        <PlannerScreen />
       </section>
     </div>
   );
