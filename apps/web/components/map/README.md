@@ -44,7 +44,8 @@ import { LazyMap } from '../components/map/lazy-map';
 | `className`            | `h-[420px] md:h-[560px]` | Dimensionnement de l'enveloppe                             |
 | `ariaLabel`            | `Carte des itinéraires`  | Étiquette de la région (C7)                                |
 | `textAlternative`      | liste textuelle          | Équivalent non visuel lu par les lecteurs d'écran (C7)     |
-| `showGeolocateControl` | `true`                   | Bouton « Me localiser » (C6)                               |
+| `userPosition`         | `null`                   | Marqueur « ma position » (UF-202) — voir plus bas          |
+| `showGeolocateControl` | `false`                  | Contrôle natif MapLibre — **déconseillé**, voir plus bas   |
 | `onReady`              | —                        | Accès à l'instance MapLibre après `load` (sources GeoJSON) |
 | `children`             | —                        | Surcouches positionnées au-dessus de la carte (légende…)   |
 
@@ -102,11 +103,28 @@ Ce que le code garantit :
 - Un échec de chargement du fond affiche un message en `role="status"` plutôt
   qu'un rectangle vide et silencieux (C10 — dégradation gracieuse).
 
-## Géolocalisation et RGPD (C6/C8)
+## Géolocalisation et RGPD (C6/C8) — mis à jour par UF-202
 
-Le `GeolocateControl` ne demande la permission du navigateur **qu'au clic** de
-l'utilisateur : aucune géolocalisation silencieuse au chargement de la page.
-`enableHighAccuracy: false` suffit en ville et économise la batterie (C5).
+**La carte ne géolocalise personne.** Elle affiche la position qu'on lui passe
+(`userPosition`) et se recentre si on change `center` : c'est l'écran hôte qui
+recueille le consentement, demande la permission et gère les échecs. Le parcours
+complet vit dans `features/planner` (voir son README).
+
+```tsx
+<LazyMap center={toLngLat(position)} zoom={15} userPosition={position} />
+```
+
+Le marqueur est une pastille bleue cerclée de blanc (`.uf-user-marker` dans
+`app/globals.css`), avec `role="img"` et une étiquette qui **inclut la
+précision** — « Votre position approximative (± 25 m) ». Aucun cercle de
+précision n'est tracé : un halo dessiné en pixels laisserait croire à une
+exactitude géographique qu'il n'a pas ; la valeur est donnée en toutes lettres à
+côté du bouton « Me localiser ».
+
+`showGeolocateControl` (contrôle natif MapLibre) est **désactivé par défaut**
+depuis UF-202 : il appelle l'API Geolocation directement, sans passer par le
+consentement horodaté côté serveur. Ne l'activer que sur un écran qui n'offre
+aucun parcours consenti.
 
 ## Cycle de vie et fuites mémoire (C5)
 
