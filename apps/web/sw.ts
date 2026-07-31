@@ -15,7 +15,9 @@ declare const self: ServiceWorkerGlobalScope & typeof globalThis;
 export {};
 
 const SHELL_CACHE = 'urbanflow-shell-v1';
-const ASSETS_CACHE = 'urbanflow-assets-v1';
+// v2 : purge les caches d'assets constitués quand le worker tournait aussi en
+// développement, où les chunks Next ne sont pas hashés (cf. ServiceWorkerRegister).
+const ASSETS_CACHE = 'urbanflow-assets-v2';
 const ROUTE_CACHE = 'urbanflow-last-route-v1';
 
 /** Clé synthétique : l'API Cache ne stocke pas les requêtes POST directement. */
