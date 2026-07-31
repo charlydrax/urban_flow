@@ -4,18 +4,137 @@
 Le calcul d'itinéraires lui-même (`POST /routes/plan`) arrive dans un ticket
 ultérieur ; ce module en pose le formulaire et l'étape 1 du flux de référence.
 
-Maquettes : Figma « 02 · Maquettes mobile → 1. ACCUEIL » et « 03 · Maquettes
-desktop → DESKTOP 2 : PLANIFICATEUR ».
+Maquettes : Figma « 02 · Maquettes mobile → 1. ACCUEIL » et « 4. PLANIFICATEUR
+F2 », « 03 · Maquettes desktop → DESKTOP 2 : PLANIFICATEUR ».
 
 ## Fichiers
 
-| Fichier                    | Rôle                                                                   |
-| -------------------------- | ---------------------------------------------------------------------- |
-| `planner-screen.tsx`       | Frontière client : partage la position entre le formulaire et la carte |
-| `planner-form.tsx`         | Champs départ/arrivée, pré-remplissage du départ                       |
-| `locate-me.tsx`            | Bouton « Me localiser », panneau de consentement, comptes rendus       |
-| `use-user-location.ts`     | Machine à états du parcours (consentement → permission → position)     |
-| `../../lib/geolocation.ts` | Appel `navigator.geolocation` normalisé + formats (pur, testé)         |
+| Fichier                    | Rôle                                                                     |
+| -------------------------- | ------------------------------------------------------------------------ |
+| `planner-screen.tsx`       | Frontière client : partage la position entre le formulaire et la carte   |
+| `planner-form.tsx`         | État du trajet, géolocalisation → départ, inversion, soumission          |
+| `trip-fields.tsx`          | Carte départ/arrivée de la maquette + bouton d'inversion                 |
+| `address-autocomplete.tsx` | Champ d'adresse au motif ARIA « combobox » + liste de suggestions        |
+| `use-address-search.ts`    | Débounce 300 ms, annulation de la requête précédente, états de recherche |
+| `locate-me.tsx`            | Bouton « Me localiser », panneau de consentement, comptes rendus         |
+| `use-user-location.ts`     | Machine à états du parcours (consentement → permission → position)       |
+| `../../lib/geocoding.ts`   | Appels BAN normalisés : recherche, géocodage inverse (pur, testé)        |
+| `../../lib/geolocation.ts` | Appel `navigator.geolocation` normalisé + formats (pur, testé)           |
+
+## Recherche d'adresses (UF-203) — C5 / C9 / C7
+
+### Le géocodeur retenu : la BAN
+
+La **Base Adresse Nationale** (`api-adresse.data.gouv.fr`) plutôt que Nominatim :
+
+|                     | BAN                                      | Nominatim (OSM)                        |
+| ------------------- | ---------------------------------------- | -------------------------------------- |
+| Clé d'API           | aucune                                   | aucune                                 |
+| Autocomplétion      | prévue (`autocomplete=1`)                | **interdite** par la politique d'usage |
+| Couverture          | France uniquement                        | mondiale                               |
+| Précision en France | numéro de voie, arrondissements lyonnais | variable selon la contribution         |
+
+Pour une métropole française, la limite de couverture est sans conséquence et
+l'autorisation explicite d'autocompléter est décisive. Un besoin transfrontalier
+futur demanderait un second géocodeur.
+
+**Limite connue** : la BAN est une base d'**adresses**, pas de points d'intérêt.
+« gare » ou « hôtel de ville » n'y remontent rien, là où « place Bellecour » et
+« 14 rue de la République » sont trouvés immédiatement. C'est assumé à ce stade :
+les arrêts et pôles d'échange viendront des données **GTFS** (F3), qui en sont la
+source légitime. Le message d'état vide oriente vers la formulation qui marche.
+
+### Le parcours
+
+```
+frappe dans « Départ » ou « Arrivée »
+      │
+      ├─ moins de 3 caractères ? ──oui──► aucun appel réseau
+      │
+      └─non→ pause de 300 ms sans nouvelle frappe (débounce)
+                 │
+                 ├─ une requête était en vol ? ──► AbortController.abort()
+                 │
+                 └─ GET /search/?q=…&autocomplete=1&lat=45.758&lon=4.8357&limit=5
+                          │
+              ┌───────────┼───────────────────────┐
+          suggestions   liste vide            réseau / service KO
+              │            │                       │
+      filtrage bbox    « aucune adresse       message + saisie
+      métropole de      dans la métropole »    libre toujours
+      Lyon                                      possible
+              │
+        sélection (clic, ou ↓/↑ + Entrée)
+              │
+      { label, lat, lng } mémorisé — coordonnées affichées sous le champ
+```
+
+### Ce qui limite les appels (C5/C10) — recette 4
+
+Trois verrous cumulés, tous observables dans l'onglet Réseau :
+
+1. **Longueur minimale** : sous 3 caractères, `searchAddresses` rend la main sans
+   toucher au réseau (la BAN répondrait `400` de toute façon).
+2. **Débounce 300 ms** : c'est la pause entre deux mots d'une frappe courante.
+   Taper « bellecour » coûte **1 requête** au lieu de 9.
+3. **Annulation** : chaque frappe avorte la requête précédente. Au-delà de
+   l'économie, cela supprime le bug classique de l'autocomplétion — une réponse
+   ancienne qui arrive après une plus récente et réaffiche des suggestions
+   périmées. Une réponse annulée ne peut plus toucher l'état.
+
+S'y ajoute un quatrième effet : une fois une suggestion choisie, la recherche est
+**désactivée** (`value.place !== null`). Réécrire le libellé dans le champ ne
+relance donc rien, et refermer puis rouvrir la liste réutilise les suggestions
+déjà en mémoire.
+
+### Restreindre à Lyon : trois mécanismes, pas un
+
+- **Biais** — `lat`/`lon` transmis à la BAN (centre de Lyon) : classe les
+  homonymes par proximité. Mesuré sur des saisies réelles, « jean jaurès » passe
+  de 0 à 3 adresses lyonnaises et « garibaldi » de 1 à 6.
+- **Sur-récupération** — on demande `SEARCH_FETCH_LIMIT` (10) candidats pour n'en
+  afficher que `SUGGESTION_LIMIT` (5). Le biais _classe_ mais ne _restreint_
+  pas : sur « bellecour », la BAN place trois lieux-dits de l'Ain et du Loiret
+  avant la place de Lyon. Demander cinq résultats n'en laisserait qu'un après
+  filtrage. Cela reste **une seule requête** — c'est sa taille qui change, pas
+  leur nombre (C5).
+- **Filtre** — `isWithinLyonArea` écarte ce qui tombe hors de l'emprise de la
+  métropole, puis on tronque à cinq.
+
+L'emprise est volontairement large (les 59 communes du Grand Lyon et quelques
+limitrophes) : refuser Villeurbanne, Bron ou Vénissieux rendrait l'outil inutile.
+
+Pourquoi pas le filtre `citycode` de la BAN, qui serait plus net ? Parce qu'il
+porte sur **une seule commune** : il exclurait Villeurbanne et toute la
+périphérie, c'est-à-dire l'essentiel des trajets réels.
+
+### Ce qui est envoyé au géocodeur (C8/C11)
+
+Le **texte tapé**, et rien d'autre : pas d'identifiant de compte, pas de cookie
+(`credentials: 'omit'`), pas d'en-tête d'authentification. Le biais transmis est
+le centre de Lyon — une constante publique — et **jamais la position réelle** de
+l'utilisateur : chercher « république » ne doit pas révéler à un tiers où se
+trouve la personne.
+
+### Géolocalisation → adresse
+
+« Me localiser » (UF-202) remplit le départ **immédiatement** avec ses
+coordonnées, puis ce libellé est remplacé par l'adresse réelle dès que le
+géocodage inverse répond — comme sur la maquette (« Départ · position actuelle →
+14 rue de la République, Lyon 2e »). L'utilisateur n'attend jamais le réseau
+(C10) ; une panne du géocodeur laisse simplement les coordonnées, qui restent une
+valeur parfaitement valide.
+
+Le remplacement ne touche **que notre propre libellé** : si l'utilisateur a repris
+la main entre-temps, l'adresse trouvée est abandonnée (drapeau `autofilled`).
+
+### Texte libre ou adresse résolue
+
+Le champ reste un champ de texte ordinaire — on peut y taper n'importe quoi. Mais
+seule la **sélection d'une suggestion** produit un `lat/lng`, et c'est cela que la
+soumission exige. Ce compromis évite deux écueils opposés : un champ verrouillé
+qui refuserait la frappe libre, et un formulaire qui accepterait « chez moi » puis
+échouerait côté serveur.
 
 ## Géolocalisation (UF-202) — C6 / C8
 
@@ -89,6 +208,40 @@ juger si le départ pré-rempli est crédible.
 
 ## Accessibilité (C7)
 
+### Autocomplétion — motif ARIA « combobox »
+
+Le champ est un `combobox` relié à une `listbox` : l'état ouvert/fermé
+(`aria-expanded`), la liste (`aria-controls`) et l'option courante
+(`aria-activedescendant`) sont annoncés. Le **focus ne quitte jamais le champ** —
+c'est ce qui permet de continuer à taper pendant que la liste défile, et ce qui
+évite de piéger un utilisateur au clavier.
+
+| Touche    | Effet                                        |
+| --------- | -------------------------------------------- |
+| `↓` / `↑` | Parcourt les suggestions, avec bouclage      |
+| `Entrée`  | Valide la suggestion active (sans soumettre) |
+| `Échap`   | Ferme la liste sans rien changer             |
+| `Tab`     | Quitte le champ, la liste se referme         |
+
+Un `role="status"` visuellement masqué annonce le nombre de suggestions : une
+liste qui apparaît en silence est invisible pour un lecteur d'écran. L'inversion
+départ/arrivée est annoncée de la même façon — les libellés des champs ne
+changent pas, seul leur contenu permute.
+
+Les options réagissent au `mousedown` et non au `click` : le clic déclencherait
+d'abord le `blur` du champ, qui fermerait la liste avant que la sélection
+n'arrive.
+
+**Écart assumé à la maquette** : la double-flèche d'inversion y est en Ink 300,
+un gris trop clair pour un élément interactif (WCAG 1.4.11 exige 3:1). Elle est
+remontée en Ink 500. Sa zone cliquable fait 44 × 44 px (WCAG 2.5.5) alors que le
+glyphe n'en fait que 15.
+
+Les pastilles départ/arrivée se distinguent par la **forme** (creux / plein)
+autant que par la couleur, pour rester lisibles en cas de daltonisme (WCAG 1.4.1).
+
+### Géolocalisation
+
 - Le résultat est **écrit sous le bouton**, pas seulement posé sur la carte :
   coordonnées, précision, et messages d'erreur.
 - Attente et succès en `role="status"`, échecs en `role="alert"`.
@@ -100,9 +253,17 @@ juger si le départ pré-rempli est crédible.
 ## Tests
 
 ```bash
-cd apps/web && npm run test    # lib/geolocation.test.ts
+cd apps/web && npm run test    # lib/geolocation.test.ts + lib/geocoding.test.ts
 ```
 
-Les tests couvrent la normalisation des trois cas d'échec, l'inversion
-`lat/lng → [lng, lat]` (C9) et les formats affichés. Les tests de composants
-(jsdom + Testing Library) restent à ajouter avec le calcul d'itinéraires.
+`geolocation.test.ts` couvre la normalisation des trois cas d'échec GPS,
+l'inversion `lat/lng → [lng, lat]` (C9) et les formats affichés.
+
+`geocoding.test.ts` couvre la requête envoyée à la BAN (autocomplétion, biais
+Lyon, plafond de résultats), l'absence d'appel réseau sous 3 caractères, le
+filtrage hors métropole, l'ordre GeoJSON, et le fait qu'aucune panne du service
+ne lève d'exception. `fetch` y est simulé : **la CI ne dépend pas de la
+disponibilité de la BAN**.
+
+Les tests de composants (jsdom + Testing Library) restent à ajouter avec le
+calcul d'itinéraires.
