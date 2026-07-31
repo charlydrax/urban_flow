@@ -26,6 +26,13 @@ apps/api/generated/
 apps/web/public/sw.js
 apps/web/public/sw.js.map
 
+# Seed build output — le seed est *toujours* exécuté depuis `prisma/seed.ts`
+# via ts-node (clé `prisma.seed` du package.json). Un `.js` compilé à côté de sa
+# source n'est jamais lu : c'est un doublon qui se périme en silence.
+apps/api/prisma/seed.js
+apps/api/prisma/seed.js.map
+apps/api/prisma/seed.d.ts
+
 # Logs
 logs/
 *.log
