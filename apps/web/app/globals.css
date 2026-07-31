@@ -95,3 +95,39 @@
 .skip-link:focus {
   left: 0;
 }
+
+/*
+ * Contrôles MapLibre (UF-201) — la bibliothèque injecte son propre DOM, on
+ * l'aligne donc sur la charte plutôt que d'accepter son thème par défaut :
+ * marges, rayon 10 px, ombre « raised » et bordure Ink 200 de la maquette.
+ */
+.maplibregl-ctrl-top-right {
+  margin: 12px;
+}
+
+.maplibregl-ctrl-group {
+  border: 1px solid var(--color-ink-200);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-raised);
+}
+
+.maplibregl-ctrl-group button {
+  width: 36px;
+  height: 36px;
+}
+
+/* Cibles tactiles ≥ 44 px sur écrans au doigt (C7 — WCAG 2.5.5) */
+@media (pointer: coarse) {
+  .maplibregl-ctrl-group button {
+    width: 44px;
+    height: 44px;
+  }
+}
+
+/* MapLibre pose son propre focus : on rétablit celui de la charte (C7) */
+.maplibregl-ctrl-group button:focus,
+.maplibregl-ctrl-group button:focus-visible {
+  outline: 3px solid var(--color-action);
+  outline-offset: 2px;
+  box-shadow: none;
+}
