@@ -19,7 +19,10 @@ export default function HomePage() {
         </p>
         <div className="grid gap-6 md:grid-cols-[minmax(0,360px)_1fr]">
           <PlannerForm />
-          <LazyMap />
+          <LazyMap
+            ariaLabel="Carte de la métropole de Lyon — les itinéraires calculés y seront tracés"
+            textAlternative="Les itinéraires calculés sont également listés sous le formulaire, triés par empreinte carbone croissante."
+          />
         </div>
       </section>
     </div>

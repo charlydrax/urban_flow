@@ -10,8 +10,11 @@ authentification (F1), préférences de mobilité et tableau de bord carbone.
 - **PWA (C1)** : `public/manifest.json` + service worker maison (`sw.ts`, compilé vers
   `public/sw.js` par esbuild via `npm run build:sw`). Stratégie : network-first avec
   repli cache pour les navigations et pour le **dernier itinéraire calculé** (C10).
-- **Carte (C5)** : MapLibre GL JS chargé en lazy (`components/map/lazy-map.tsx`,
-  `ssr: false`) — exclu du bundle initial.
+- **Carte (C5/C6, UF-201)** : MapLibre GL JS chargé en lazy (`components/map/lazy-map.tsx`,
+  `ssr: false`) — exclu du bundle initial. Fond de carte résolu depuis
+  l'environnement (`NEXT_PUBLIC_MAPTILER_KEY` / `NEXT_PUBLIC_MAP_STYLE_URL`,
+  repli OpenStreetMap sans clé) : choix du fournisseur, coûts et accessibilité
+  détaillés dans `components/map/README.md`.
 - **Accessibilité (C7)** : layout sémantique, skip-link, focus visible, contrastes AA,
   `prefers-reduced-motion`.
 - **API** : client typé `lib/api-client.ts` (cookies httpOnly — C11),
@@ -25,7 +28,7 @@ authentification (F1), préférences de mobilité et tableau de bord carbone.
 
 ```
 app/           # App Router (layout accessible, pages)
-components/    # UI transverse (carte, enregistrement SW)
+components/    # UI transverse (carte MapLibre — voir components/map/README.md, enregistrement SW)
 features/      # auth/ (câblé — UF-105/106), planner/, profile/, carbon/ (stubs)
 lib/           # client API, session, géolocalisation (C6), helpers
 middleware.ts  # protection des routes privées (UF-106)
