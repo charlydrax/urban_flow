@@ -4,6 +4,8 @@ import type {
   PlanRouteRequest,
   PlanRoutesResponse,
   SessionUser,
+  UpdateUserProfilePayload,
+  UserProfile,
 } from '@urbanflow/shared';
 
 /** Erreur API normalisée (corps du filtre d'exceptions global côté NestJS). */
@@ -143,6 +145,24 @@ export const apiClient = {
    */
   logout(): Promise<void> {
     return request('/auth/logout', { method: 'POST', skipUnauthorizedHandler: true });
+  },
+
+  /**
+   * Profil de mobilité du compte connecté (F1, UF-107).
+   * L'API le résout depuis le token : aucun identifiant ne transite côté client,
+   * il n'y a donc rien à falsifier pour viser le profil d'autrui (C4).
+   */
+  getProfile(): Promise<UserProfile> {
+    return request('/users/me');
+  },
+
+  /**
+   * Enregistre tout ou partie du profil (F1, UF-107).
+   * `PATCH` : seuls les champs réellement modifiés sont envoyés (C5, C10).
+   * @param payload Champs à modifier — un champ absent reste inchangé en base
+   */
+  updateProfile(payload: UpdateUserProfilePayload): Promise<UserProfile> {
+    return request('/users/me', { method: 'PATCH', body: JSON.stringify(payload) });
   },
 
   /**

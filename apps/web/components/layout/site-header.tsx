@@ -8,6 +8,7 @@ import { useSession } from '../../features/auth/session-provider';
 const navLinks = [
   { href: '/', label: 'Itinéraires' },
   { href: '/', label: 'Mon impact CO₂' },
+  { href: '/profil', label: 'Mon profil' },
 ];
 
 /**
