@@ -1,8 +1,11 @@
 import type {
   AuthResponse,
   CarbonDashboard,
+  CreateSearchHistoryPayload,
   PlanRouteRequest,
   PlanRoutesResponse,
+  SearchHistoryEntry,
+  SearchHistoryList,
   SessionUser,
   UpdateUserProfilePayload,
   UserProfile,
@@ -171,6 +174,25 @@ export const apiClient = {
    */
   planRoutes(payload: PlanRouteRequest): Promise<PlanRoutesResponse> {
     return request('/routes/plan', { method: 'POST', body: JSON.stringify(payload) });
+  },
+
+  /**
+   * Enregistre la recherche qui vient d'être lancée (UF-204) — étape 18 du flux.
+   * Le trajet est rattaché au compte du cookie de session : aucun identifiant
+   * n'est envoyé, il n'y a donc rien à falsifier côté client (C4).
+   */
+  createSearchHistory(payload: CreateSearchHistoryPayload): Promise<SearchHistoryEntry> {
+    return request('/search-history', { method: 'POST', body: JSON.stringify(payload) });
+  },
+
+  /**
+   * Dernières recherches du compte connecté (UF-204), affichées en rappels
+   * sous les champs de saisie.
+   * @param limit Nombre d'entrées voulu — l'API borne à 20 et sert 5 par défaut (C5)
+   */
+  getSearchHistory(limit?: number): Promise<SearchHistoryList> {
+    const query = limit === undefined ? '' : `?limit=${limit}`;
+    return request(`/search-history${query}`);
   },
 
   /** Tableau de bord carbone personnel. */
