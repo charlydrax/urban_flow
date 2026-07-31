@@ -3,12 +3,14 @@
 import {
   GeolocateControl,
   Map as MapLibreMap,
+  Marker,
   NavigationControl,
   type ErrorEvent as MapLibreErrorEvent,
 } from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 
+import { formatAccuracy, toLngLat, type UserPosition } from '../../lib/geolocation';
 import { DEFAULT_ZOOM, LYON_CENTER, getMapStyle } from '../../lib/map-style';
 
 /**
@@ -43,7 +45,19 @@ export interface MapViewProps {
   ariaLabel?: string;
   /** Alternative textuelle : où retrouver la même information sans la carte (C7). */
   textAlternative?: string;
-  /** Bouton « Me localiser » (C6). Désactivable sur les cartes purement illustratives. */
+  /**
+   * Position de l'utilisateur à matérialiser sur la carte (UF-202).
+   * `null`/absent : aucun marqueur — la carte reste centrée sur sa ville par défaut.
+   */
+  userPosition?: UserPosition | null;
+  /**
+   * Contrôle « Me localiser » natif de MapLibre (C6).
+   *
+   * **Désactivé par défaut depuis UF-202** : ce bouton appelle directement
+   * l'API Geolocation, sans passer par le consentement tracé côté serveur. Il
+   * ne convient donc qu'aux écrans où aucun parcours consenti n'est proposé.
+   * Sur le planificateur, c'est `useUserLocation` qui pilote la demande.
+   */
   showGeolocateControl?: boolean;
   /**
    * Appelé une fois la carte prête (`load`). Point d'extension prévu pour F2 :
@@ -70,6 +84,10 @@ export interface MapViewProps {
  * boutons de zoom invisibles aux technologies d'assistance. Elle est doublée
  * d'une alternative textuelle renvoyant vers l'équivalent non visuel, et les
  * libellés des contrôles sont traduits en français.
+ *
+ * Géolocalisation (UF-202) : la carte se contente d'**afficher** ce qu'on lui
+ * donne (`userPosition`, `center`). Elle ne demande jamais la position d'elle-même
+ * — le consentement et la demande de permission sont l'affaire de l'écran hôte.
  */
 export function MapView({
   center = LYON_CENTER,
@@ -77,7 +95,8 @@ export function MapView({
   className = '',
   ariaLabel = 'Carte des itinéraires',
   textAlternative = 'Les itinéraires sont également présentés sous forme de liste textuelle.',
-  showGeolocateControl = true,
+  userPosition = null,
+  showGeolocateControl = false,
   onReady,
   children,
 }: MapViewProps) {
@@ -183,6 +202,30 @@ export function MapView({
     // C7 : pas d'animation imposée aux personnes sensibles au mouvement.
     map.easeTo({ center: [lng, lat], zoom, duration: prefersReducedMotion ? 0 : 600 });
   }, [lng, lat, zoom]);
+
+  // Marqueur « ma position » (UF-202) — créé à la demande, détruit dès que la
+  // position est effacée : rien ne subsiste sur la carte après une révocation (C8).
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !userPosition) return;
+
+    // Élément sur mesure plutôt que la punaise par défaut : une pastille dit
+    // « vous êtes ici », là où une punaise dit « ce lieu-ci » (styles : globals.css).
+    const element = document.createElement('div');
+    element.className = 'uf-user-marker';
+    // Le marqueur porte l'information au lecteur d'écran (C7) ; la précision y
+    // figure, car une position à ± 2 km ne se lit pas comme une position à ± 20 m.
+    element.setAttribute('role', 'img');
+    element.setAttribute(
+      'aria-label',
+      `Votre position approximative (${formatAccuracy(userPosition.accuracyMeters)})`,
+    );
+
+    const marker = new Marker({ element }).setLngLat(toLngLat(userPosition)).addTo(map);
+    return () => {
+      marker.remove();
+    };
+  }, [userPosition]);
 
   return (
     <div className={`relative overflow-hidden rounded-lg border border-ink-200 ${className}`}>
