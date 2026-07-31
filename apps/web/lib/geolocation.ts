@@ -100,9 +100,12 @@ export function toLngLat(position: UserPosition): [number, number] {
 /**
  * Formate un couple de coordonnées pour l'affichage (5 décimales ≈ 1 m).
  * Tronquer plus court dégraderait la position ; plus long afficherait du bruit.
+ *
+ * Accepte tout point porteur d'un `lat`/`lng` — position du capteur (C6) comme
+ * adresse géocodée (UF-203) : la précision n'entre pas dans le formatage.
  */
-export function formatCoordinates(position: UserPosition): string {
-  return `${position.lat.toFixed(5)}, ${position.lng.toFixed(5)}`;
+export function formatCoordinates(point: { lat: number; lng: number }): string {
+  return `${point.lat.toFixed(5)}, ${point.lng.toFixed(5)}`;
 }
 
 /**
