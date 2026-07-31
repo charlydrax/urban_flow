@@ -1,4 +1,20 @@
 {
   "extends": "./tsconfig.json",
-  "exclude": ["node_modules", "test", "dist", "**/*spec.ts"]
+  "compilerOptions": {
+    // Fige la racine des sources compilées sur `src` : sans cela, tsc infère la
+    // racine commune depuis `prisma/seed.ts` et émet dans `dist/src/main.js`.
+    // Le CLI Nest cherche `dist/src/main.js` puis retombe sur `dist/main.js` si
+    // le fichier n'existe pas encore au redémarrage du watcher — d'où des
+    // MODULE_NOT_FOUND intermittents. `rootDir` rend la sortie déterministe et
+    // aligne le script `start:prod` (`node dist/main`).
+    "rootDir": "./src",
+    // Sans `rootDir`, tsc plaçait le cache incrémental dans `dist/` ; avec lui il
+    // le remonte à la racine de `apps/api`, où `deleteOutDir` ne le purge plus.
+    // Un cache périmé fait alors sortir tsc en succès sans rien émettre. On le
+    // rattache explicitement à `dist/` pour qu'il suive toujours la sortie.
+    "tsBuildInfoFile": "./dist/tsconfig.build.tsbuildinfo"
+  },
+  // `prisma/seed.ts` est exécuté par ts-node (cf. clé `prisma.seed` du
+  // package.json) : il n'a pas à être compilé dans le bundle serveur.
+  "exclude": ["node_modules", "test", "dist", "prisma", "**/*spec.ts"]
 }
