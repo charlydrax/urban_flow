@@ -9,6 +9,7 @@ import { validateEnv } from './config/env.validation';
 import { AuthModule } from './modules/auth/auth.module';
 import { CarbonModule } from './modules/carbon/carbon.module';
 import { RoutesModule } from './modules/routes/routes.module';
+import { SearchHistoryModule } from './modules/search-history/search-history.module';
 import { TransportModule } from './modules/transport/transport.module';
 import { UsersModule } from './modules/users/users.module';
 import { PrismaModule } from './prisma/prisma.module';
@@ -30,6 +31,7 @@ import { PrismaModule } from './prisma/prisma.module';
     AuthModule,
     UsersModule,
     RoutesModule,
+    SearchHistoryModule,
     TransportModule,
     CarbonModule,
   ],

@@ -24,7 +24,8 @@ urbanflow/
 ```
 
 - **apps/api** : monolithe modulaire NestJS — modules `auth` (JWT, F1), `users` (profils, F1),
-  `routes` (planificateur, F2), `transport` (GTFS/GBFS, F3), `carbon` (empreinte CO₂).
+  `routes` (planificateur, F2), `search-history` (trajets enregistrés en géométries PostGIS, F2),
+  `transport` (GTFS/GBFS, F3), `carbon` (empreinte CO₂).
   API REST documentée via Swagger (C9).
 - **apps/web** : PWA installable (C1), mobile-first (C2), accessible WCAG 2.1 AA (C7),
   carte MapLibre chargée en lazy-load (C5). Le fond de carte est configurable par
