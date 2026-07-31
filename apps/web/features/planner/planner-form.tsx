@@ -1,49 +1,135 @@
 'use client';
 
-import { FormEvent, useEffect, useRef, useState } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 
+import type { Place } from '@urbanflow/shared';
+
+import { Button } from '../../components/ui/button';
+import { reverseGeocode, type GeocodedPlace } from '../../lib/geocoding';
 import { formatPositionLabel } from '../../lib/geolocation';
+import { EMPTY_TRIP_POINT, type TripPoint } from './address-autocomplete';
 import { LocateMe } from './locate-me';
+import { TripFields } from './trip-fields';
 import type { UserLocationState } from './use-user-location';
 
+/** Rappelé à la soumission tant que les deux extrémités ne sont pas géocodées. */
+const MISSING_COORDINATES =
+  'Choisissez une suggestion pour le départ et pour l’arrivée : le calcul d’itinéraire a besoin de coordonnées, pas seulement d’un texte.';
+
 /**
- * Formulaire de recherche d'itinéraire (F2) — le calcul lui-même arrive avec
- * UF-2xx ; ce ticket (UF-202) y branche la géolocalisation consentie.
+ * Ramène une adresse géocodée au contrat partagé `Place` (`packages/shared`).
+ * Les champs internes (`id`, `context`) ne franchissent pas la frontière API :
+ * ce sont des détails d'affichage, pas des données du domaine (C9).
+ */
+function toPlace({ label, lat, lng }: GeocodedPlace): Place {
+  return { label, lat, lng };
+}
+
+/**
+ * Formulaire de recherche d'itinéraire (F2).
  *
- * Le point de départ est **pré-rempli** par « Me localiser » mais reste un champ
- * de texte ordinaire : l'utilisateur peut le corriger ou le remplacer par une
- * adresse, et un refus de géolocalisation ne retire rien au formulaire
- * (dégradation propre — recette 2 du ticket).
+ * UF-202 y a branché la géolocalisation consentie ; **UF-203 y branche le
+ * géocodage** : les deux extrémités du trajet ne sont plus du texte libre mais
+ * des adresses résolues en coordonnées, prêtes à devenir le `{ from, to }` de
+ * `POST /api/routes/plan` (étape 1 du flux de référence).
  *
- * Accessibilité (C7) : libellés explicites associés aux champs, aide reliée par
- * `aria-describedby`, retours de géolocalisation annoncés par `LocateMe`.
+ * ## Deux niveaux de saisie, assumés
+ *
+ * Le champ reste un champ de texte ordinaire : on peut y taper n'importe quoi.
+ * Mais seule la **sélection d'une suggestion** produit un `lat/lng`, et c'est
+ * cela que la soumission exige. Ce compromis évite deux écueils opposés — un
+ * champ verrouillé qui refuse la frappe libre, et un formulaire qui accepterait
+ * « chez moi » puis échouerait côté serveur.
+ *
+ * ## Géolocalisation et géocodage inverse
+ *
+ * Une position obtenue via « Me localiser » remplit le départ **immédiatement**
+ * avec ses coordonnées, puis ce libellé est remplacé par l'adresse réelle dès
+ * que le géocodage inverse répond — comme sur la maquette (« Départ · position
+ * actuelle → 14 rue de la République, Lyon 2e »). L'utilisateur n'attend jamais
+ * le réseau (C10), et une panne du géocodeur laisse simplement les coordonnées.
+ *
+ * Accessibilité (C7) : libellés explicites, aide reliée par `aria-describedby`,
+ * erreur de soumission en `role="alert"`, retours de géolocalisation annoncés
+ * par `LocateMe`, autocomplétion au motif ARIA « combobox ».
  */
 export function PlannerForm({ location }: { location: UserLocationState }) {
-  const [from, setFrom] = useState('');
-  const [to, setTo] = useState('');
+  const [from, setFrom] = useState<TripPoint>(EMPTY_TRIP_POINT);
+  const [to, setTo] = useState<TripPoint>(EMPTY_TRIP_POINT);
+  const [formError, setFormError] = useState<string | null>(null);
+  /** Dernier trajet validé — les deux `Place` qui partiront vers l'API. */
+  const [trip, setTrip] = useState<{ from: Place; to: Place } | null>(null);
 
-  // Dernier libellé écrit par la géolocalisation : sert à ne jamais écraser une
-  // saisie manuelle, et à savoir ce qu'on peut retirer quand la position est
-  // effacée. En ref : c'est une trace de ce qu'on a fait, pas un état affiché.
-  const autofilledRef = useRef<string | null>(null);
   const { position } = location;
 
   useEffect(() => {
-    if (position) {
-      const label = formatPositionLabel(position);
-      autofilledRef.current = label;
-      setFrom(label);
+    if (!position) {
+      // Position effacée (C8) : on retire le libellé que **nous** avions posé,
+      // et seulement lui — une adresse choisie entre-temps doit survivre.
+      setFrom((current) => (current.autofilled ? EMPTY_TRIP_POINT : current));
       return;
     }
-    // Position effacée (C8) : on retire le libellé que **nous** avions posé, et
-    // seulement lui — une adresse tapée entre-temps doit survivre.
-    setFrom((current) => (current === autofilledRef.current ? '' : current));
-    autofilledRef.current = null;
+
+    const controller = new AbortController();
+
+    // Libellé de repli affiché sans attendre le réseau : des coordonnées valent
+    // toujours mieux qu'un champ vide pendant une seconde.
+    const fallback: GeocodedPlace = {
+      id: `user-position:${position.lat},${position.lng}`,
+      label: formatPositionLabel(position),
+      context: '',
+      lat: position.lat,
+      lng: position.lng,
+    };
+    setFrom((current) =>
+      current.text === '' || current.autofilled
+        ? { text: fallback.label, place: fallback, autofilled: true }
+        : current,
+    );
+
+    void reverseGeocode(position.lat, position.lng, controller.signal).then((address) => {
+      if (!address || controller.signal.aborted) return;
+      // On n'écrase que notre propre libellé : si l'utilisateur a repris la main
+      // entre-temps, l'adresse trouvée est simplement abandonnée.
+      setFrom((current) =>
+        current.autofilled ? { text: address.label, place: address, autofilled: true } : current,
+      );
+    });
+
+    return () => controller.abort();
   }, [position]);
+
+  /** Toute modification du trajet périme le message de la soumission précédente. */
+  const resetOutcome = () => {
+    setFormError(null);
+    setTrip(null);
+  };
+
+  /**
+   * Inversion départ/arrivée (recette 3 du ticket).
+   * Le drapeau `autofilled` ne suit pas : après une inversion explicite, les
+   * deux champs appartiennent à l'utilisateur, plus à la géolocalisation.
+   */
+  const handleSwap = () => {
+    setFrom({ ...to, autofilled: false });
+    setTo({ ...from, autofilled: false });
+    resetOutcome();
+  };
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    // TODO(F2): apiClient.planRoutes({ from, to, userId }) + rendu des résultats
+
+    if (!from.place || !to.place) {
+      setFormError(MISSING_COORDINATES);
+      return;
+    }
+    setFormError(null);
+
+    // Le contrat de `POST /api/routes/plan` est déjà tenu ici : deux `Place`
+    // complets, coordonnées comprises. Le ticket UF-203 s'arrête à leur
+    // constitution ; le calcul lui-même arrive avec la suite de F2.
+    // TODO(F2) : apiClient.planRoutes({ from, to, userId }) + rendu des résultats.
+    setTrip({ from: toPlace(from.place), to: toPlace(to.place) });
   };
 
   return (
@@ -53,49 +139,42 @@ export function PlannerForm({ location }: { location: UserLocationState }) {
       className="flex flex-col gap-4 rounded-lg border border-primary/20 bg-white p-4"
     >
       <p id="planner-help" className="text-sm">
-        Saisissez un départ et une arrivée pour comparer les options de transport.
+        Saisissez un départ et une arrivée, puis choisissez une adresse dans la liste proposée.
       </p>
 
       <LocateMe location={location} />
 
-      <div className="flex flex-col gap-1">
-        <label htmlFor="from" className="font-medium">
-          Départ
-        </label>
-        <input
-          id="from"
-          name="from"
-          type="text"
-          value={from}
-          onChange={(event) => setFrom(event.target.value)}
-          placeholder="Ex. Part-Dieu"
-          autoComplete="off"
-          className="rounded border border-primary/40 px-3 py-2"
-        />
-      </div>
+      <TripFields
+        from={from}
+        to={to}
+        onFromChange={(next) => {
+          setFrom(next);
+          resetOutcome();
+        }}
+        onToChange={(next) => {
+          setTo(next);
+          resetOutcome();
+        }}
+        onSwap={handleSwap}
+        fromHint={from.autofilled ? 'position actuelle' : undefined}
+      />
 
-      <div className="flex flex-col gap-1">
-        <label htmlFor="to" className="font-medium">
-          Arrivée
-        </label>
-        <input
-          id="to"
-          name="to"
-          type="text"
-          value={to}
-          onChange={(event) => setTo(event.target.value)}
-          placeholder="Ex. Bellecour"
-          autoComplete="off"
-          className="rounded border border-primary/40 px-3 py-2"
-        />
-      </div>
+      {formError && (
+        <p role="alert" className="text-xs font-semibold text-error">
+          {formError}
+        </p>
+      )}
 
-      <button
-        type="submit"
-        className="rounded bg-primary px-4 py-2 font-medium text-white hover:bg-primary-dark"
-      >
+      {trip && (
+        <p role="status" className="rounded-md bg-tint-green px-3 py-2 text-xs text-ink-700">
+          Trajet prêt&nbsp;: <strong>{trip.from.label}</strong> → <strong>{trip.to.label}</strong>.
+          Le calcul des itinéraires et de leur empreinte carbone arrive dans le ticket suivant.
+        </p>
+      )}
+
+      <Button type="submit" size="lg" className="w-full">
         Comparer les itinéraires
-      </button>
+      </Button>
     </form>
   );
 }
