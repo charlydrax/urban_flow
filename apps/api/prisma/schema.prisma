@@ -62,11 +62,19 @@ model MobilityProfile {
   @@map("mobility_profiles")
 }
 
-/// Historique des recherches d'itinéraires (étape 7 du flux) — alimente le
-/// tableau de bord carbone personnel.
+/// Historique des recherches d'itinéraires (étape 7 du flux, UF-204) — alimente
+/// les trajets récents du planificateur et le tableau de bord carbone personnel.
 /// RGPD (C8) : les déplacements sont des données personnelles sensibles par
 /// recoupement — accès restreint au propriétaire, purge en cascade avec le compte,
 /// politique de rétention à définir (C11 : chiffrement au repos côté hébergeur).
+///
+/// ⚠️ Les deux extrémités sont des **géométries PostGIS**, pas des colonnes
+/// flottantes : c'est ce qui rendra possible, sans migration ultérieure, les
+/// requêtes du domaine (« mes trajets récents partant d'ici », `ST_DWithin`,
+/// agrégats par zone). Prisma ne typant pas `geometry`, elles sont déclarées
+/// `Unsupported` et le module `search-history` les lit/écrit en SQL brut
+/// (`ST_MakePoint`, `ST_X`/`ST_Y`) — même parti pris que `ST_DWithin` côté
+/// itinéraires (cf. commentaire d'en-tête).
 model SearchHistory {
   id     String @id @default(uuid()) @db.Uuid
   /// Cascade : droit à l'effacement (C8).
@@ -74,14 +82,13 @@ model SearchHistory {
   userId String @map("user_id") @db.Uuid
 
   /// RGPD (C8) : lieu de départ saisi (donnée de déplacement).
-  fromLabel String @map("from_label")
-  /// Latitude/longitude WGS84 du départ (géolocalisation — C6).
-  fromLat   Float? @map("from_lat")
-  fromLng   Float? @map("from_lng")
+  fromLabel String                               @map("from_label")
+  /// Point WGS84 (SRID 4326) du départ — géolocalisation (C6), géospatial (C9).
+  fromGeom  Unsupported("geometry(Point, 4326)") @map("from_geom")
   /// RGPD (C8) : lieu d'arrivée saisi (donnée de déplacement).
-  toLabel   String @map("to_label")
-  toLat     Float? @map("to_lat")
-  toLng     Float? @map("to_lng")
+  toLabel   String                               @map("to_label")
+  /// Point WGS84 (SRID 4326) de l'arrivée.
+  toGeom    Unsupported("geometry(Point, 4326)") @map("to_geom")
 
   /// Résumé de l'itinéraire retenu (ex. "Marche + Métro B").
   selectedSummary String? @map("selected_summary")
@@ -90,6 +97,13 @@ model SearchHistory {
 
   createdAt DateTime @default(now()) @map("created_at")
 
+  /// Lecture nominale : « les N dernières recherches de CET utilisateur »
+  /// (`WHERE user_id = … ORDER BY created_at DESC`) — l'index couvre les deux.
   @@index([userId, createdAt])
+  /// Index spatial GiST sur le départ : sans lui, stocker des `geometry` plutôt
+  /// que deux flottants n'apporterait rien de plus qu'un type mieux nommé.
+  /// Il rend indexables les requêtes de proximité à venir (« trajets récents
+  /// partant d'ici », `ST_DWithin`) — cf. étape 4 du flux de référence.
+  @@index([fromGeom(ops: raw("gist_geometry_ops_2d"))], type: Gist)
   @@map("search_history")
 }
