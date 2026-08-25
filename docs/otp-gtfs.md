@@ -203,8 +203,13 @@ Points de repère du scénario de référence :
 - **Lyon Part-Dieu** — 45.760515, 4.859057
 - **Bellecour** — 45.757813, 4.832011
 
-⚠️ Penser à régler la **date** du formulaire dans la fenêtre de validité du GTFS
-(section 4), sinon aucun itinéraire ne s'affichera.
+Deux points à connaître :
+
+- ⚠️ Régler la **date** du formulaire dans la fenêtre de validité du GTFS
+  (section 4), sinon aucun itinéraire ne s'affichera.
+- Le client de debug charge son JavaScript et son CSS depuis
+  `opentripplanner.org` : **une connexion internet est nécessaire** pour que la
+  page s'affiche. Hors ligne, passer par `make otp-test` ou par l'API GraphQL.
 
 ### Ligne de commande — recette automatisée
 
