@@ -9,12 +9,15 @@
 COMPOSE := docker compose
 # Nom du service base de données défini dans docker-compose.yml.
 DB_SERVICE := db
+# Nom du service OpenTripPlanner (UF-301).
+OTP_SERVICE := otp
 
 .DEFAULT_GOAL := help
 
 # Toutes les cibles sont des actions, pas des fichiers.
 .PHONY: help up down stop start restart build ps logs db-shell db-wait \
-        migrate generate studio reset prune clean
+        migrate generate studio reset prune clean \
+        otp-data otp-data-force otp-up otp-logs otp-wait otp-test otp-rebuild otp-reset
 
 ## help: Affiche la liste des cibles disponibles.
 help:
@@ -89,3 +92,46 @@ prune:
 ## clean: prune + nettoie les images orphelines du projet.
 clean:
 	$(COMPOSE) down -v --rmi local --remove-orphans
+
+# ---------------------------------------------------------------------------
+# OpenTripPlanner — moteur de routage transports en commun (UF-301)
+# ---------------------------------------------------------------------------
+
+## otp-data: Télécharge le GTFS TCL et le réseau OSM lyonnais (prérequis au graphe).
+otp-data:
+	./docker/otp/fetch-data.sh
+
+## otp-data-force: Retélécharge les données même si elles sont déjà présentes.
+otp-data-force:
+	./docker/otp/fetch-data.sh --force
+
+## otp-up: Démarre OTP (construit le graphe au premier lancement, plusieurs minutes).
+otp-up:
+	$(COMPOSE) up -d $(OTP_SERVICE)
+
+## otp-logs: Suit les logs d'OTP (pour observer la construction du graphe).
+otp-logs:
+	$(COMPOSE) logs -f $(OTP_SERVICE)
+
+## otp-wait: Attend qu'OTP réponde (le premier démarrage inclut le build du graphe).
+otp-wait:
+	@echo "Attente d'OpenTripPlanner (build du graphe au premier lancement)..."
+	@until curl -fsS http://localhost:${OTP_PORT:-8080}/otp/ >/dev/null 2>&1; do \
+		sleep 5; \
+	done
+	@echo "OTP pret."
+
+## otp-test: Vérifie le calcul d'un trajet Part-Dieu vers Bellecour (recette UF-301).
+otp-test:
+	./docker/otp/test-route.sh
+
+## otp-rebuild: Reconstruit le graphe après mise à jour du GTFS (procédure mensuelle).
+otp-rebuild: otp-data-force
+	OTP_FORCE_REBUILD=1 $(COMPOSE) up -d --force-recreate $(OTP_SERVICE)
+	@echo "Reconstruction lancee - suivre l'avancement avec 'make otp-logs'."
+
+## otp-reset: Supprime le graphe et le reconstruit de zéro (volume inclus).
+otp-reset:
+	$(COMPOSE) rm -sf $(OTP_SERVICE)
+	docker volume rm dev_urbanflow_otp_graph || true
+	$(COMPOSE) up -d $(OTP_SERVICE)

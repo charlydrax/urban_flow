@@ -1,6 +1,10 @@
-# Local development database - PostgreSQL + PostGIS (geospatial support, C6/C9).
-# Credentials come from the root .env file (never committed - C4/C11).
-# First run: copy .env.example to .env, then `docker compose up -d`.
+# Environnement de développement local — UrbanFlow Mobility.
+#
+#   db  : PostgreSQL + PostGIS (géospatial, C6/C9)
+#   otp : OpenTripPlanner — moteur de routage transports en commun (UF-301, F3)
+#
+# Credentials et ports viennent du fichier .env racine (jamais commité — C4/C11).
+# Premier lancement : copier .env.example en .env, puis `docker compose up -d`.
 services:
   db:
     image: postgis/postgis:16-3.4
@@ -23,5 +27,51 @@ services:
       timeout: 5s
       retries: 10
 
+  # Moteur de routage transports en commun (UF-301).
+  # Auto-hébergé plutôt qu'appelé via une API tierce : le calcul multimodal a
+  # besoin d'itinéraires détaillés segment par segment pour alimenter le calcul
+  # d'empreinte carbone, et l'auto-hébergement supprime toute dépendance à un
+  # quota externe (C10).
+  otp:
+    build:
+      context: ./docker/otp
+      args:
+        OTP_VERSION: ${OTP_VERSION:-2.7.0}
+    image: urbanflow-otp:${OTP_VERSION:-2.7.0}
+    container_name: urbanflow-otp
+    restart: unless-stopped
+    environment:
+      # Le build du graphe est l'étape la plus gourmande. 6 Go suffisent pour
+      # l'agglomération lyonnaise ; à réduire si Docker Desktop dispose de moins.
+      JAVA_OPTS: -Xmx${OTP_MAX_MEMORY:-6g}
+      # Mettre à 1 pour forcer la reconstruction (mise à jour mensuelle du GTFS).
+      OTP_FORCE_REBUILD: ${OTP_FORCE_REBUILD:-0}
+    ports:
+      - '${OTP_PORT:-8080}:8080'
+    volumes:
+      # Volume nommé : le graphe (long à construire) survit à `docker compose down`
+      # — recette UF-301 « le volume du graphe persiste entre les redémarrages ».
+      - urbanflow_otp_graph:/var/opentripplanner
+      # Données d'entrée en lecture seule, récupérées par `make otp-data`.
+      - ./docker/otp/data:/var/otp-seed/data:ro
+      - ./docker/otp/config:/var/otp-seed/config:ro
+    healthcheck:
+      # Cette build d'OTP n'expose pas d'endpoint actuator : on interroge
+      # directement l'API GraphQL. Elle ne répond qu'une fois le graphe chargé,
+      # ce qui en fait un signal de disponibilité plus fiable qu'un simple ping.
+      test:
+        [
+          'CMD-SHELL',
+          'curl -fsS -X POST -H "Content-Type: application/json" -d "{\"query\":\"{serviceTimeRange{start}}\"}" http://localhost:8080/otp/gtfs/v1 | grep -q serviceTimeRange',
+        ]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      # Le premier démarrage construit le graphe (plusieurs minutes) : sans
+      # cette fenêtre de grâce, Docker déclarerait le conteneur « unhealthy »
+      # avant même la fin du build.
+      start_period: 20m
+
 volumes:
   urbanflow_pgdata:
+  urbanflow_otp_graph:

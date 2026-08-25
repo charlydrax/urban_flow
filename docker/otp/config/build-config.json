@@ -1,0 +1,43 @@
+// Construction du graphe OTP — UrbanFlow UF-301.
+// OTP parse ses fichiers de configuration en autorisant les commentaires JS :
+// on documente donc les choix directement ici (les clés « //xxx » utilisées par
+// certains exemples OTP déclenchent, elles, un avertissement au démarrage).
+{
+  // Fenêtre de jours de service conservés dans le graphe, relative à la date de
+  // construction. Volontairement large : le GTFS TCL librement téléchargeable
+  // est un instantané daté, et une fenêtre serrée sur la date du jour ferait
+  // supprimer 100 % des trajets au build (« Trip service id does not exist »).
+  "transitServiceStart": "-P10Y",
+  "transitServiceEnd": "P3Y",
+
+  // Le réseau piéton/cyclable OSM relie les arrêts entre eux et aux adresses de
+  // départ/arrivée. Sans lui, aucun itinéraire porte-à-porte n'est possible.
+  "osmDefaults": {
+    "timeZone": "Europe/Paris"
+  },
+
+  // Le GTFS serait repéré automatiquement dans le répertoire de base ; on le
+  // déclare pour fixer le feedId présent dans les identifiants d'arrêts que
+  // renvoie l'API — le connecteur UF-302 s'appuiera dessus.
+  "transitFeeds": [
+    {
+      "type": "gtfs",
+      "feedId": "tcl",
+      "source": "gtfs-tcl.zip"
+    }
+  ],
+
+  // Marche maximale entre deux arrêts lors d'une correspondance. 30 min couvrent
+  // les correspondances Part-Dieu / Bellecour sans faire exploser le temps de
+  // construction du graphe.
+  "maxTransferDuration": "PT30M",
+
+  // Traverse les places et parvis en ligne droite plutôt que par leur contour —
+  // Bellecour et le parvis de la Part-Dieu en dépendent pour un temps de marche
+  // réaliste.
+  "areaVisibility": true,
+
+  // Rattache les entrées de quai OSM aux arrêts GTFS : améliore la précision du
+  // point d'embarquement dans les stations de métro lyonnaises.
+  "platformEntriesLinking": true
+}
