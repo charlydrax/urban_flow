@@ -6,12 +6,13 @@ contrats d'API (DTO d'itinéraires, auth, carbone) et vocabulaire commun
 
 ## Contenu
 
-| Fichier                 | Exports                                                                                              | Utilisé par                                                                                 |
-| ----------------------- | ---------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| `src/transport-mode.ts` | enum `TransportMode`                                                                                 | DTO API, préférences, facteurs CO₂                                                          |
-| `src/route.ts`          | `Place`, `PlanRouteRequest`, `RouteSegment`, `Itinerary`, `PlanRoutesResponse`, `LineStringGeometry` | planificateur F2 (les DTO NestJS _implémentent_ ces interfaces, le client web les consomme) |
-| `src/auth.ts`           | `AuthResponse`                                                                                       | auth F1                                                                                     |
-| `src/carbon.ts`         | `CarbonDashboard`                                                                                    | suivi carbone                                                                               |
+| Fichier                 | Exports                                                                                                                                    | Utilisé par                                                                                 |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------- |
+| `src/transport-mode.ts` | enum `TransportMode`                                                                                                                       | DTO API, préférences, facteurs CO₂                                                          |
+| `src/route.ts`          | `Place`, `PlanRouteRequest`, `RouteSegment`, `Itinerary`, `PlanRoutesResponse`, `LineStringGeometry`                                       | planificateur F2 (les DTO NestJS _implémentent_ ces interfaces, le client web les consomme) |
+| `src/search-history.ts` | `SearchHistoryPlace`, `CreateSearchHistoryPayload`, `SearchHistoryEntry`, `SearchHistoryList`, bornes `DEFAULT`/`MAX_SEARCH_HISTORY_LIMIT` | historique de recherche UF-204 (coordonnées **obligatoires** : stockage PostGIS)            |
+| `src/auth.ts`           | `AuthResponse`                                                                                                                             | auth F1                                                                                     |
+| `src/carbon.ts`         | `CarbonDashboard`                                                                                                                          | suivi carbone                                                                               |
 
 ## Utilisation
 

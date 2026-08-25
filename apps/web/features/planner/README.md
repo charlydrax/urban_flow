@@ -9,17 +9,20 @@ F2 », « 03 · Maquettes desktop → DESKTOP 2 : PLANIFICATEUR ».
 
 ## Fichiers
 
-| Fichier                    | Rôle                                                                     |
-| -------------------------- | ------------------------------------------------------------------------ |
-| `planner-screen.tsx`       | Frontière client : partage la position entre le formulaire et la carte   |
-| `planner-form.tsx`         | État du trajet, géolocalisation → départ, inversion, soumission          |
-| `trip-fields.tsx`          | Carte départ/arrivée de la maquette + bouton d'inversion                 |
-| `address-autocomplete.tsx` | Champ d'adresse au motif ARIA « combobox » + liste de suggestions        |
-| `use-address-search.ts`    | Débounce 300 ms, annulation de la requête précédente, états de recherche |
-| `locate-me.tsx`            | Bouton « Me localiser », panneau de consentement, comptes rendus         |
-| `use-user-location.ts`     | Machine à états du parcours (consentement → permission → position)       |
-| `../../lib/geocoding.ts`   | Appels BAN normalisés : recherche, géocodage inverse (pur, testé)        |
-| `../../lib/geolocation.ts` | Appel `navigator.geolocation` normalisé + formats (pur, testé)           |
+| Fichier                           | Rôle                                                                     |
+| --------------------------------- | ------------------------------------------------------------------------ |
+| `planner-screen.tsx`              | Frontière client : partage la position entre le formulaire et la carte   |
+| `planner-form.tsx`                | État du trajet, géolocalisation → départ, inversion, soumission          |
+| `trip-fields.tsx`                 | Carte départ/arrivée de la maquette + bouton d'inversion                 |
+| `address-autocomplete.tsx`        | Champ d'adresse au motif ARIA « combobox » + liste de suggestions        |
+| `use-address-search.ts`           | Débounce 300 ms, annulation de la requête précédente, états de recherche |
+| `locate-me.tsx`                   | Bouton « Me localiser », panneau de consentement, comptes rendus         |
+| `use-user-location.ts`            | Machine à états du parcours (consentement → permission → position)       |
+| `recent-searches.tsx`             | Trajets récents recliquables affichés sous les champs (UF-204)           |
+| `use-search-history.ts`           | Lecture unique de l'historique + enregistrement en arrière-plan (UF-204) |
+| `../../lib/geocoding.ts`          | Appels BAN normalisés : recherche, géocodage inverse (pur, testé)        |
+| `../../lib/geolocation.ts`        | Appel `navigator.geolocation` normalisé + formats (pur, testé)           |
+| `../../lib/format-search-date.ts` | Libellés « aujourd'hui, 09:12 » / « hier » / date courte (pur, testé)    |
 
 ## Recherche d'adresses (UF-203) — C5 / C9 / C7
 
@@ -206,6 +209,41 @@ La **précision** est affichée en toutes lettres (`± 25 m`) : une position à
 ± 2 km ne se lit pas comme une position à ± 20 m, et l'utilisateur doit pouvoir
 juger si le départ pré-rempli est crédible.
 
+## Trajets récents (UF-204) — C5 / C8 / C10
+
+Chaque soumission valide est enregistrée (`POST /search-history`, étape 18 du
+flux) et les derniers trajets reviennent sous les champs, recliquables.
+
+```
+soumission valide
+      │
+      ├─► setTrip(...)                         (le formulaire rend la main tout de suite)
+      └─► history.remember(from, to)           (appel NON attendu)
+                │
+                ├─ succès ─► l'entrée créée passe en tête de liste, son doublon disparaît
+                └─ échec  ─► silence : ne pas mémoriser un trajet ne doit pas
+                             empêcher la recherche d'aboutir (C10)
+```
+
+**Une seule lecture, puis plus rien** : la liste est chargée à l'ouverture de
+l'écran, puis entretenue localement à partir de l'entrée renvoyée par le `POST`.
+Aucune relecture après écriture, aucune requête périodique (C5).
+
+**Rejouer coûte zéro appel** : une entrée d'historique porte déjà ses
+coordonnées, donc un clic remplit les deux champs **déjà résolus** — le géocodeur
+n'est pas resollicité et l'utilisateur n'a pas à re-sélectionner une suggestion.
+Le formulaire n'est pas soumis pour autant : on ajuste souvent une extrémité
+avant de relancer.
+
+**Pas d'historique sans session** : le middleware (UF-106) protège déjà l'écran,
+mais il n'agit qu'à la navigation. Le hook suit donc l'état réel de
+`SessionProvider` : dès qu'il retombe, la liste est vidée de la mémoire du
+navigateur et plus aucun appel n'est émis (C8).
+
+Le dédoublonnage est appliqué **des deux côtés** : par l'API à la lecture
+(`DISTINCT ON`), et localement après un enregistrement. Sans quoi relancer un
+trajet fréquent le ferait apparaître deux fois jusqu'au prochain chargement.
+
 ## Accessibilité (C7)
 
 ### Autocomplétion — motif ARIA « combobox »
@@ -240,6 +278,15 @@ glyphe n'en fait que 15.
 Les pastilles départ/arrivée se distinguent par la **forme** (creux / plein)
 autant que par la couleur, pour rester lisibles en cas de daltonisme (WCAG 1.4.1).
 
+### Trajets récents
+
+Chaque rappel est un **bouton** (`type="button"` — sans quoi il soumettrait le
+formulaire qui l'entoure), atteignable au `Tab` et déclenché par `Entrée`. La
+flèche « → » étant décorative (`aria-hidden`), le `aria-label` reformule
+l'action : « Reprendre le trajet X vers Y, aujourd'hui 09:12 ». Sans lui, un
+lecteur d'écran énoncerait deux adresses collées sans dire ce qui se passe au
+clic (WCAG 2.4.4). La zone cliquable fait 44 px de haut (WCAG 2.5.5).
+
 ### Géolocalisation
 
 - Le résultat est **écrit sous le bouton**, pas seulement posé sur la carte :
@@ -264,6 +311,10 @@ Lyon, plafond de résultats), l'absence d'appel réseau sous 3 caractères, le
 filtrage hors métropole, l'ordre GeoJSON, et le fait qu'aucune panne du service
 ne lève d'exception. `fetch` y est simulé : **la CI ne dépend pas de la
 disponibilité de la BAN**.
+
+`format-search-date.test.ts` fige les libellés des trajets récents et vérifie
+qu'on compte des **journées de calendrier** et non des heures écoulées (23h05 la
+veille vu à 00h30, c'est « hier »), ainsi que le repli d'un horodatage futur.
 
 Les tests de composants (jsdom + Testing Library) restent à ajouter avec le
 calcul d'itinéraires.
