@@ -1,0 +1,9 @@
+# Fins de ligne — UF-301.
+#
+# `core.autocrlf=true` (config habituelle sous Windows) réécrit les fichiers en
+# CRLF à la extraction. Pour un script copié dans une image Linux, le `\r` du
+# shebang casse le démarrage du conteneur (« bad interpreter »). On force donc
+# LF sur tout ce qui est exécuté par Docker.
+*.sh text eol=lf
+Dockerfile text eol=lf
+*.dockerfile text eol=lf
