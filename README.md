@@ -19,7 +19,8 @@ urbanflow/
 ├── packages/
 │   └── shared/     # Types TypeScript partagés front/back (DTO, itinéraires, TransportMode)
 ├── docs/           # Diagrammes UML, specs, captures
-├── docker-compose.yml  # Base PostGIS de développement
+├── docker/         # Services conteneurisés (init PostGIS, OpenTripPlanner)
+├── docker-compose.yml  # Base PostGIS + moteur de routage OTP
 └── CLAUDE.md       # Contexte projet & conventions
 ```
 
@@ -40,7 +41,8 @@ urbanflow/
 ## Prérequis
 
 - **Node.js ≥ 22** et npm ≥ 10
-- **Docker Desktop** (pour la base PostGIS locale) — **doit être démarré** avant l'étape 3.
+- **Docker Desktop** — **doit être démarré** avant l'étape 3. Prévoir **8 Go de RAM**
+  alloués (Settings → Resources) : la construction du graphe OpenTripPlanner en a besoin.
 
 ## Démarrage rapide
 
@@ -55,9 +57,14 @@ cp .env.example .env                    # base de données (docker compose)
 cp apps/api/.env.example apps/api/.env  # API (DATABASE_URL, JWT_SECRET...)
 cp apps/web/.env.example apps/web/.env  # Front (NEXT_PUBLIC_API_URL, fond de carte)
 
-# 3. Lancer la base PostGIS (Docker Desktop doit tourner)
-#    Au premier démarrage, docker/initdb/ active l'extension PostGIS
-#    automatiquement (CREATE EXTENSION IF NOT EXISTS postgis)
+# 3a. Télécharger les données transport (GTFS TCL + réseau OSM lyonnais, ~85 Mo)
+#     Une seule fois — voir docs/otp-gtfs.md
+./docker/otp/fetch-data.sh
+
+# 3b. Lancer la base PostGIS et le moteur de routage OTP (Docker Desktop doit tourner)
+#     Au premier démarrage, docker/initdb/ active l'extension PostGIS, et OTP
+#     construit son graphe (5 à 15 min — suivre avec `docker compose logs -f otp`).
+#     Pour ne démarrer que la base : `docker compose up -d db`
 docker compose up -d
 
 # 4. Appliquer les migrations (active aussi l'extension PostGIS)
@@ -78,6 +85,7 @@ npm run dev
 | Base PostGIS | `docker compose ps`            | conteneur `urbanflow-db` **healthy**, port `5433` |
 | API Gateway  | http://localhost:3001/api/docs | Swagger (200)                                     |
 | Front PWA    | http://localhost:3000          | page d'accueil UrbanFlow (200)                    |
+| Routage OTP  | http://localhost:8080          | client de debug OpenTripPlanner (200)             |
 
 > ℹ️ La base est exposée sur le **port hôte 5433** (et non 5432) pour éviter un conflit
 > avec un PostgreSQL déjà installé localement — voir `POSTGRES_PORT` dans `.env` et la
@@ -92,6 +100,9 @@ make up        # démarre la base PostGIS en arrière-plan
 make migrate   # attend la base prête puis applique les migrations Prisma
 make logs      # suit les logs des conteneurs
 make down      # arrête les conteneurs (volumes conservés)
+make otp-data  # télécharge le GTFS TCL et le réseau OSM
+make otp-up    # démarre OpenTripPlanner (construit le graphe au 1er lancement)
+make otp-test  # recette : calcule un trajet Part-Dieu -> Bellecour
 make help      # liste toutes les cibles
 ```
 

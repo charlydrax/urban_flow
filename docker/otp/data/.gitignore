@@ -1,0 +1,5 @@
+# Données transport téléchargées par fetch-data.sh (UF-301).
+# Jamais commitées : volumineuses (~85 Mo), régénérables, et soumises à la
+# licence de leurs producteurs (ODbL pour le GTFS TCL et pour OSM).
+*
+!.gitignore

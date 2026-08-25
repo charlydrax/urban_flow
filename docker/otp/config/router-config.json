@@ -1,0 +1,41 @@
+// Configuration du serveur OTP — UrbanFlow UF-301.
+// Modifiable sans reconstruire le graphe : un simple redémarrage du conteneur
+// suffit (l'entrypoint resynchronise la configuration à chaque démarrage).
+{
+  // Valeurs appliquées quand le client n'en fournit pas, alignées sur le profil
+  // d'un usager urbain lyonnais.
+  "routingDefaults": {
+    // Assez d'options pour alimenter le tri par CO₂ croissant côté PWA, sans
+    // alourdir la réponse (C5 éco-conception, C10 performances).
+    "numItineraries": 5,
+
+    "walk": {
+      // 1,33 m/s ≈ 4,8 km/h — vitesse de marche adulte usuelle.
+      "speed": 1.33
+    },
+
+    "bicycle": {
+      // 4,0 m/s ≈ 14,4 km/h — vélo urbain sur terrain plat.
+      "speed": 4.0
+    },
+
+    // Désactivé par défaut, activable requête par requête. Le GTFS TCL porte
+    // l'information d'accessibilité fauteuil — support de la contrainte C12
+    // (normes transport, prise en compte PMR dans les itinéraires).
+    "wheelchairAccessibility": {
+      "enabled": false
+    }
+  },
+
+  // Au-delà de 4 correspondances, l'itinéraire n'est plus praticable en usage
+  // réel et n'a pas sa place dans les résultats proposés.
+  "transit": {
+    "maxNumberOfTransfers": 4
+  },
+
+  // Borne le temps de calcul : une requête pathologique ne doit pas monopoliser
+  // un thread du serveur (C10).
+  "server": {
+    "apiProcessingTimeout": "30s"
+  }
+}
