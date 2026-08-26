@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 
 import { CarbonService } from '../carbon/carbon.service';
+import { SearchHistoryService } from '../search-history/search-history.service';
 import { UsersService } from '../users/users.service';
 import { ItineraryDto, PlanRoutesResponseDto } from './dto/itinerary.dto';
 import { PlaceDto, PlanRouteDto } from './dto/plan-route.dto';
@@ -16,7 +17,7 @@ import { SourceCollectorService } from './sources/source-collector.service';
  *    `Promise.allSettled`, avec dégradation gracieuse — étapes 13-18, UF-305, C10.
  * 3. ✅ Fusion en itinéraires multimodaux réels — étape 5, UF-401.
  * 4. ✅ `computeFootprint(segments)` du Service Carbone par itinéraire — étape 6.
- * 5. ⏳ Sauvegarde `search_history` — étape 7.
+ * 5. ✅ Sauvegarde `search_history` — étapes 7 et 18, UF-402.
  *
  * Depuis UF-401, **plus aucun itinéraire n'est simulé** : chaque proposition est
  * construite à partir des données réellement collectées (trajets OTP, bornes
@@ -42,6 +43,7 @@ export class RoutesService {
     private readonly users: UsersService,
     private readonly collector: SourceCollectorService,
     private readonly carbon: CarbonService,
+    private readonly searchHistory: SearchHistoryService,
   ) {}
 
   /**
@@ -56,9 +58,9 @@ export class RoutesService {
    * ne sait pas quels itinéraires l'usager accepte, et en inventer serait pire
    * que d'échouer. La dégradation gracieuse commence à la collecte.
    *
-   * @param dto Requête validée { from, to, userId } (C4)
-   * @param userId Identité issue du JWT vérifié — prime sur dto.userId (anti-IDOR, C4)
-   * @returns Les itinéraires retenus, la clé de tri appliquée, et l'état des trois sources
+   * @param dto Requête validée `{ from, to }` — sans `userId` depuis UF-402 (C4)
+   * @param userId Identité issue du JWT vérifié : seule source de l'identité (anti-IDOR, C4)
+   * @returns Les itinéraires retenus, la clé de tri, l'état des trois sources et la ligne d'historique
    * @throws {BadRequestException} si une extrémité n'a pas de coordonnées
    */
   async plan(dto: PlanRouteDto, userId: string): Promise<PlanRoutesResponseDto> {
@@ -68,6 +70,14 @@ export class RoutesService {
     // Étape 3 du flux : les préférences viennent du compte du JWT, jamais du
     // corps de la requête (anti-IDOR — C4).
     const preferences = await this.users.getPreferences(userId);
+
+    // Étape 18 : la recherche est enregistrée dès sa soumission, en même temps
+    // que la collecte démarre. Deux raisons de ne pas attendre le résultat :
+    // l'historique décrit ce que l'usager a *cherché*, pas ce que nos sources
+    // ont su répondre — un trajet reste à mémoriser même quand les trois se
+    // taisent ; et son insertion se paie ainsi sous la latence de la source la
+    // plus lente, au lieu de s'y ajouter (C5).
+    const recording = this.rememberSearch(userId, from, to);
 
     // Étapes 13-18 : les trois sources en parallèle (UF-305).
     const collected = await this.collector.collectAllSources(from, to, {
@@ -87,6 +97,7 @@ export class RoutesService {
         itineraries: [],
         sortedBy: 'carbonAsc',
         sources: this.collector.toAvailability(collected),
+        searchHistoryId: await recording,
       };
     }
 
@@ -109,13 +120,46 @@ export class RoutesService {
         `(${3 - collected.failures.length}/3 source(s) disponible(s)).`,
     );
 
-    // TODO(UF-402) : étape 7 du flux — enregistrer la recherche et l'option
-    // retenue dans `search_history`.
     return {
       itineraries: priced,
       sortedBy,
       sources: this.collector.toAvailability(collected),
+      searchHistoryId: await recording,
     };
+  }
+
+  /**
+   * Écrit la recherche dans `search_history` (UF-204) pour le compte du JWT.
+   *
+   * **Ni `selectedSummary` ni `carbonGrams`.** À l'étape 18, aucune option n'a
+   * encore été retenue : inscrire d'office la première proposition ferait
+   * passer un classement du serveur pour un choix de l'usager, et fausserait le
+   * tableau de bord carbone du Sprint 5 — qui doit compter des déplacements,
+   * pas des suggestions. C'est l'écran de résultats (UF-404) qui saura ce qui a
+   * été choisi.
+   *
+   * **Un échec ne remonte jamais.** Ne pas mémoriser un trajet est un
+   * désagrément ; perdre à cause de cela des itinéraires déjà calculés serait
+   * une régression fonctionnelle (dégradation gracieuse — C10). Le client
+   * reçoit `searchHistoryId: null`, et le serveur garde la cause dans ses logs.
+   *
+   * C11 : le journal ne porte ni libellé ni coordonnées — l'incident se
+   * diagnostique sans exposer le déplacement de l'usager.
+   *
+   * @returns L'identifiant de la ligne créée, ou `null` si l'écriture a échoué
+   */
+  private async rememberSearch(
+    userId: string,
+    from: MergeEndpoint,
+    to: MergeEndpoint,
+  ): Promise<string | null> {
+    try {
+      const entry = await this.searchHistory.create(userId, { from, to });
+      return entry.id;
+    } catch (error) {
+      this.logger.warn(`Recherche non enregistrée dans l'historique : ${(error as Error).message}`);
+      return null;
+    }
   }
 }
 

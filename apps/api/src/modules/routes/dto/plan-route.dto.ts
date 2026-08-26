@@ -6,7 +6,6 @@ import {
   IsLongitude,
   IsOptional,
   IsString,
-  IsUUID,
   MaxLength,
   MinLength,
   ValidateNested,
@@ -39,12 +38,21 @@ export class PlaceDto implements Place {
 }
 
 /**
- * Corps de `POST /api/routes/plan` — contrat défini par le diagramme de séquence
- * du MVP : `{ from, to, userId }` (CLAUDE.md section 4).
+ * Corps de `POST /api/routes/plan` — **deux extrémités, rien d'autre** (UF-402).
  *
- * ⚠️ Sécurité (C4) : `userId` est conservé pour respecter le contrat du diagramme,
- * mais le service utilise TOUJOURS l'identité du JWT vérifié — jamais ce champ —
- * pour lire les préférences et écrire l'historique (anti-IDOR).
+ * ⚠️ Sécurité (C4 / OWASP A01) : il n'y a **plus de `userId`**. Le diagramme de
+ * séquence du MVP en portait un, et l'endpoint de préfiguration l'acceptait en
+ * l'ignorant ; le laisser dans le contrat définitif entretenait l'idée qu'on
+ * peut désigner un compte depuis le corps de la requête. L'auteur d'une
+ * recherche est toujours le porteur du JWT vérifié — préférences lues et
+ * historique écrit sur ce compte, sur lui seul.
+ *
+ * Le `ValidationPipe` global (`whitelist` + `forbidNonWhitelisted`) transforme
+ * la suppression en garde active : une requête qui envoie encore un `userId`
+ * échoue en `400` au lieu d'être silencieusement acceptée. C'est exactement la
+ * recette 2 du ticket, et c'est déjà le contrat de
+ * `POST /api/search-history` (UF-204) — les deux écritures de trajet parlent
+ * ainsi le même langage.
  */
 export class PlanRouteDto implements PlanRouteRequest {
   /** Point de départ. */
@@ -58,9 +66,4 @@ export class PlanRouteDto implements PlanRouteRequest {
   @ValidateNested()
   @Type(() => PlaceDto)
   to!: PlaceDto;
-
-  /** Identifiant utilisateur (contrat du diagramme) — supplanté par le JWT côté serveur (C4). */
-  @ApiProperty({ example: '00000000-0000-4000-8000-000000000001', format: 'uuid' })
-  @IsUUID()
-  userId!: string;
 }

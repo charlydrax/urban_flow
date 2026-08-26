@@ -8,8 +8,8 @@ Complète [`source-orchestration.md`](./source-orchestration.md), qui décrit
 l'étape précédente — la collecte parallèle qui alimente cette fusion.
 
 > Pour **observer** les données d'entrée de la fusion sur un trajet réel, voir
-> [`source-diagnostics-endpoint.md`](./source-diagnostics-endpoint.md) (UF-306)
-> et l'écran `/dev/sources`.
+> [`source-diagnostics-endpoint.md`](./source-diagnostics-endpoint.md) (UF-306),
+> **archive** : l'endpoint et son écran ont été retirés par UF-402.
 
 ---
 
@@ -258,7 +258,9 @@ du compte rendu du ticket.
 > ⚠️ Le GTFS TCL utilisé est un instantané daté (voir `docs/otp-gtfs.md`) : OTP
 > recale la date de service et le signale via `dateAdjusted`. Une réponse sans
 > aucun trajet TC un jour donné vient presque toujours de là, pas de la fusion —
-> `POST /api/routes/sources` permet de le vérifier en une requête.
+> le champ `sources` de la réponse de `POST /api/routes/plan` le dit, et les
+> logs du serveur en donnent la cause technique (l'endpoint de diagnostic
+> `POST /api/routes/sources` a été retiré par UF-402).
 
 ## 12. Contraintes couvertes
 

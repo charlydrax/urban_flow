@@ -7,7 +7,6 @@ import { UsersModule } from '../users/users.module';
 import { RoutesController } from './routes.controller';
 import { RoutesService } from './routes.service';
 import { SourceCollectorService } from './sources/source-collector.service';
-import { SourceDiagnosticsService } from './sources/source-diagnostics.service';
 
 /**
  * Module planificateur d'itinéraires (F2) — « Service Itinéraire » de
@@ -20,15 +19,14 @@ import { SourceDiagnosticsService } from './sources/source-diagnostics.service';
  * consommer. Le sortir d'ici reviendrait à laisser n'importe qui court-circuiter
  * la lecture des préférences qui la précède.
  *
- * `SearchHistoryModule` est importé depuis UF-306, en **lecture seule** : le
- * diagnostic rejoue une recherche enregistrée pour sonder exactement le trajet
- * que l'usager a demandé. Le planificateur y écrira à son tour (UF-402,
- * étape 7 du flux) ; le diagnostic, lui, n'écrira jamais — sonder les sources
- * n'est pas un déplacement (C8).
+ * `SearchHistoryModule` est importé pour **écrire** : depuis UF-402, chaque
+ * planification enregistre le trajet cherché (étapes 7 et 18 du flux). Il avait
+ * été importé en lecture seule par le diagnostic UF-306, retiré ici — le
+ * planificateur en est désormais le seul usager du module.
  */
 @Module({
   imports: [TransportModule, UsersModule, CarbonModule, SearchHistoryModule],
   controllers: [RoutesController],
-  providers: [RoutesService, SourceCollectorService, SourceDiagnosticsService],
+  providers: [RoutesService, SourceCollectorService],
 })
 export class RoutesModule {}

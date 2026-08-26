@@ -1,7 +1,7 @@
 import type {
-  CyclePathEndpointsData,
+  CycleSegmentsResult,
+  NearbyStationsResult,
   RouteSourceName,
-  SharedMobilityEndpointsData,
   TransitJourneysResult,
 } from '@urbanflow/shared';
 
@@ -22,15 +22,12 @@ import type {
  * de savoir quels modes ont pu être proposés (bandeau « mode dégradé » — C10) ;
  * il est donc défini dans `@urbanflow/shared`, pas ici.
  *
- * ⚠️ **UF-306 fait une exception assumée et temporaire.** L'endpoint interne de
- * test (`POST /api/routes/sources`) publie ces données brutes, parce que c'est
- * son objet même : vérifier de bout en bout que les trois sources répondent
- * avant de construire la fusion. Les formes des deux extrémités
- * (`SharedMobilityEndpointsData`, `CyclePathEndpointsData`) sont donc désormais
- * **définies dans `@urbanflow/shared`** et simplement réutilisées ici — mieux
- * vaut un type publié à un endroit qu'un même objet décrit deux fois et qui
- * dérive. Le reste (`SourceFailure`, `CollectedSources`) ne franchit toujours
- * pas la frontière.
+ * UF-306 y avait fait une exception assumée : son endpoint de diagnostic
+ * publiait ces données brutes, si bien que les formes des deux extrémités
+ * (`SharedMobilityEndpoints`, `CyclePathEndpoints`) vivaient dans
+ * `@urbanflow/shared`. L'endpoint ayant été retiré (UF-402), **plus rien de
+ * tout cela ne franchit la frontière** : ces deux types sont revenus ici, avec
+ * le reste du produit de la collecte. La règle générale n'a plus d'exception.
  */
 
 /** Les trois sources du planificateur (étape 4 du flux). */
@@ -95,13 +92,20 @@ export interface SourceOutcome<T> {
  * fois la collecte terminée — les deux requêtes partent ensemble et ne coûtent
  * qu'une latence (C5/C10).
  *
- * Alias du type publié par UF-306 : la collecte et le diagnostic décrivent le
- * même objet, et le décrire deux fois le ferait diverger.
+ * Ce fut un alias d'un type publié par `@urbanflow/shared` tant que le
+ * diagnostic UF-306 exposait les données brutes ; l'endpoint retiré (UF-402),
+ * la forme est redevenue interne et se décrit ici, à un seul endroit.
  */
-export type SharedMobilityEndpoints = SharedMobilityEndpointsData;
+export interface SharedMobilityEndpoints {
+  origin: NearbyStationsResult;
+  destination: NearbyStationsResult;
+}
 
 /** Tronçons cyclables aux deux extrémités, pour la même raison. */
-export type CyclePathEndpoints = CyclePathEndpointsData;
+export interface CyclePathEndpoints {
+  origin: CycleSegmentsResult;
+  destination: CycleSegmentsResult;
+}
 
 /**
  * Données brutes des trois sources, prêtes pour la fusion (UF-401).

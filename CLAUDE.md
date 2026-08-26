@@ -15,6 +15,7 @@ Contexte et règles pour Claude Code sur ce projet. À lire avant toute généra
 **Scénario nominal de référence (issu des diagrammes UML)** : Marie, connectée, saisit « Part-Dieu → Bellecour ». L'app combine TC + mobilités douces, calcule le CO₂ de chaque option et affiche les résultats triés sur la carte.
 
 **Contraintes d'épreuve :**
+
 - Projet **100 % original et individuel** (aucune réutilisation de projets antérieurs).
 - Dossier projet : **PDF, 40 pages max** — fichier `NOM_Prénom_Titre6_B3DEV_Septembre2026.pdf`.
 - Dépôt : **lundi 20 juillet 2026, 23h00** (Procertif + copie de secours par mail).
@@ -25,19 +26,20 @@ Contexte et règles pour Claude Code sur ce projet. À lire avant toute généra
 
 ## 2. Stack technique (imposée par mes choix)
 
-| Couche | Techno |
-|--------|--------|
-| **Client PWA** | **Next.js** (App Router) + TypeScript + **MapLibre GL JS** pour la carte |
-| **API** | **NestJS** (Node.js) + TypeScript — joue le rôle d'API Gateway |
-| **Base de données** | **PostgreSQL + PostGIS** (géospatial + profils utilisateurs) |
-| **Auth** | **JWT** (vérifié au niveau de l'API Gateway) |
-| **APIs externes** | **GTFS** (transports en commun), **GBFS** (vélos/trottinettes partagés) |
-| **Styles** | TailwindCSS, mobile-first |
-| **ORM** | Prisma (avec support PostGIS via SQL brut quand nécessaire) |
-| **Tests** | Jest / Vitest (services critiques : auth, itinéraires, carbone) |
-| **Lint** | ESLint + Prettier (strict) |
+| Couche              | Techno                                                                   |
+| ------------------- | ------------------------------------------------------------------------ |
+| **Client PWA**      | **Next.js** (App Router) + TypeScript + **MapLibre GL JS** pour la carte |
+| **API**             | **NestJS** (Node.js) + TypeScript — joue le rôle d'API Gateway           |
+| **Base de données** | **PostgreSQL + PostGIS** (géospatial + profils utilisateurs)             |
+| **Auth**            | **JWT** (vérifié au niveau de l'API Gateway)                             |
+| **APIs externes**   | **GTFS** (transports en commun), **GBFS** (vélos/trottinettes partagés)  |
+| **Styles**          | TailwindCSS, mobile-first                                                |
+| **ORM**             | Prisma (avec support PostGIS via SQL brut quand nécessaire)              |
+| **Tests**           | Jest / Vitest (services critiques : auth, itinéraires, carbone)          |
+| **Lint**            | ESLint + Prettier (strict)                                               |
 
 ### Services applicatifs (architecture logique des diagrammes)
+
 - **API Gateway (NestJS)** : point d'entrée, vérifie le JWT, orchestre les appels.
 - **Service Itinéraire** : calcul multimodal, fusionne TC + mobilités douces.
 - **Service Carbone** : calcule l'empreinte CO₂ par segment.
@@ -50,13 +52,15 @@ Contexte et règles pour Claude Code sur ce projet. À lire avant toute généra
 ## 3. Périmètre fonctionnel
 
 ### Obligatoires (les 3)
-| ID | Fonctionnalité |
-|----|----------------|
+
+| ID     | Fonctionnalité                                                         |
+| ------ | ---------------------------------------------------------------------- |
 | **F1** | Inscription / connexion + gestion de profils de mobilité personnalisés |
 | **F2** | Planificateur d'itinéraires multimodal avec géolocalisation temps réel |
-| **F3** | Intégration d'APIs de transport (GTFS + GBFS vélos/trottinettes) |
+| **F3** | Intégration d'APIs de transport (GTFS + GBFS vélos/trottinettes)       |
 
 ### Au choix — RETENUE
+
 - ✅ **Calculateur d'empreinte carbone avec suivi personnel**
   - CO₂ calculé par segment d'itinéraire (Service Carbone).
   - Tri des itinéraires par empreinte croissante (oriente vers le durable).
@@ -69,6 +73,12 @@ Les autres fonctionnalités du brief sont **hors périmètre** du prototype (men
 ## 4. Flux de référence (à respecter dans le code)
 
 Diagramme de séquence du MVP — `POST /api/routes/plan {from, to, userId}` :
+
+> ⚠️ **Écart assumé depuis UF-402** : l'endpoint définitif n'accepte **plus** de
+> `userId` dans le corps (`{from, to}` seulement). L'identité vient du JWT
+> vérifié à l'étape 2, et de lui seul — accepter un identifiant de compte depuis
+> le corps de la requête est un défaut de conception (OWASP A01), même quand le
+> serveur l'ignore. Le diagramme reste la référence du flux, pas du contrat.
 
 1. Client PWA géolocalise (Geolocation API) et envoie la requête.
 2. API Gateway **vérifie le JWT** → 401 si invalide/expiré.
@@ -85,25 +95,24 @@ Diagramme de séquence du MVP — `POST /api/routes/plan {from, to, userId}` :
 le design, l'affichage se trouve sur :
 https://www.figma.com/design/LXCZajsGIhru5ArCyHhNym/UrbanFlow-Mobility-%E2%80%94-Maquettes-T6-CDSD?node-id=0-1&p=f&t=ZUfbkntVBcZJvP84-0
 
-si tu veux y accéder, utilise le mcp figma
----
+## si tu veux y accéder, utilise le mcp figma
 
 ## 5. Contraintes techniques C1→C12 (évaluées en soutenance ET revue de code)
 
-| ID | Domaine | Traduction dans le code |
-|----|---------|-------------------------|
-| C1 | PWA | `manifest`, service worker, installable, offline de base |
-| C2 | Responsive/UX | Mobile-first, utilisable sur tout support |
-| C3 | Normes & standards | Lint strict, conventions des langages respectées |
-| C4 | Sécurité OWASP | Validation des entrées, hash mots de passe (argon2/bcrypt), CSRF/XSS/injection, HTTPS, JWT |
-| C5 | Éco-conception | Assets optimisés, lazy loading, requêtes minimisées, cache, pas de polling inutile |
-| C6 | Géolocalisation | Précision/fiabilité des positions, gestion des erreurs GPS |
-| C7 | Accessibilité WCAG 2.1 AA | Contrastes, navigation clavier, ARIA, focus visible, alternatives textuelles |
-| C8 | RGPD | Consentement géoloc, minimisation, droit à l'effacement, politique de confidentialité |
-| C9 | Interopérabilité | Formats standards (GTFS, GBFS, GeoJSON), API REST documentée (Swagger) |
-| C10 | Performances | Connectivité variable : cache offline, appels parallèles, bundle optimisé |
-| C11 | Sécurité données | Chiffrement des données de déplacement, tokens httpOnly, logs sans données perso |
-| C12 | Normes transport | Accessibilité PMR prise en compte dans les itinéraires |
+| ID  | Domaine                   | Traduction dans le code                                                                    |
+| --- | ------------------------- | ------------------------------------------------------------------------------------------ |
+| C1  | PWA                       | `manifest`, service worker, installable, offline de base                                   |
+| C2  | Responsive/UX             | Mobile-first, utilisable sur tout support                                                  |
+| C3  | Normes & standards        | Lint strict, conventions des langages respectées                                           |
+| C4  | Sécurité OWASP            | Validation des entrées, hash mots de passe (argon2/bcrypt), CSRF/XSS/injection, HTTPS, JWT |
+| C5  | Éco-conception            | Assets optimisés, lazy loading, requêtes minimisées, cache, pas de polling inutile         |
+| C6  | Géolocalisation           | Précision/fiabilité des positions, gestion des erreurs GPS                                 |
+| C7  | Accessibilité WCAG 2.1 AA | Contrastes, navigation clavier, ARIA, focus visible, alternatives textuelles               |
+| C8  | RGPD                      | Consentement géoloc, minimisation, droit à l'effacement, politique de confidentialité      |
+| C9  | Interopérabilité          | Formats standards (GTFS, GBFS, GeoJSON), API REST documentée (Swagger)                     |
+| C10 | Performances              | Connectivité variable : cache offline, appels parallèles, bundle optimisé                  |
+| C11 | Sécurité données          | Chiffrement des données de déplacement, tokens httpOnly, logs sans données perso           |
+| C12 | Normes transport          | Accessibilité PMR prise en compte dans les itinéraires                                     |
 
 ⚠️ **Règle** : pour toute fonctionnalité, identifier les contraintes C1–C12 impactées et le noter.
 
@@ -151,6 +160,7 @@ urbanflow/
 - **Validation serveur systématique** de toute entrée (class-validator / zod) — C4.
 
 ### Documentation attendue dans le code
+
 - **JSDoc/TSDoc** sur toute fonction publique, service NestJS et composant exporté : but, paramètres, retour, et **contrainte(s) C couverte(s)** quand pertinent.
 - **README par module** (`auth`, `routes`, `transport`, `carbon`) : rôle, endpoints, dépendances.
 - **Swagger/OpenAPI** généré côté NestJS pour tous les endpoints.
@@ -158,6 +168,7 @@ urbanflow/
 - **Schéma Prisma commenté** : chaque table/champ sensible annoté (RGPD/C8).
 
 Exemple de docstring attendu :
+
 ```ts
 /**
  * Calcule l'empreinte carbone d'un itinéraire, segment par segment.
@@ -189,6 +200,7 @@ npx prisma studio
 ```
 
 Initialisation PostGIS (à exécuter une fois sur la base) :
+
 ```sql
 CREATE EXTENSION IF NOT EXISTS postgis;
 ```
