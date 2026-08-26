@@ -152,40 +152,6 @@ export class SearchHistoryService {
     return rows.map((row) => SearchHistoryService.toEntry(row));
   }
 
-  /**
-   * Une recherche enregistrée précise, **dans l'historique du compte connecté**.
-   *
-   * Le `user_id` fait partie de la clause `WHERE`, il n'est pas vérifié après
-   * coup : un identifiant appartenant à quelqu'un d'autre ne remonte donc
-   * aucune ligne, et l'appelant ne peut pas distinguer « n'existe pas » de
-   * « n'est pas à vous » (C4 / OWASP A01). C'est ce qui permet à UF-306 de
-   * rejouer un trajet par son seul identifiant sans ouvrir une fuite.
-   *
-   * @param userId Identifiant issu du JWT vérifié (C4)
-   * @param id Identifiant de l'entrée à relire
-   * @returns L'entrée, ou `null` si elle n'existe pas dans cet historique
-   */
-  async findOwnedById(userId: string, id: string): Promise<SearchHistoryEntry | null> {
-    const [row] = await this.prisma.$queryRaw<SearchHistoryRow[]>`
-      SELECT
-        id,
-        from_label       AS "fromLabel",
-        ST_Y(from_geom)  AS "fromLat",
-        ST_X(from_geom)  AS "fromLng",
-        to_label         AS "toLabel",
-        ST_Y(to_geom)    AS "toLat",
-        ST_X(to_geom)    AS "toLng",
-        selected_summary AS "selectedSummary",
-        carbon_grams     AS "carbonGrams",
-        created_at       AS "createdAt"
-      FROM search_history
-      WHERE id = ${id}::uuid AND user_id = ${userId}::uuid
-      LIMIT 1
-    `;
-
-    return row ? SearchHistoryService.toEntry(row) : null;
-  }
-
   /** Projette une ligne SQL en contrat d'API (dates sérialisées en ISO 8601 — C9). */
   private static toEntry(row: SearchHistoryRow): SearchHistoryEntry {
     return {
