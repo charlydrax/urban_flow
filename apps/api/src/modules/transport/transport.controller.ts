@@ -90,9 +90,17 @@ export class TransportController {
    * du Service Itinéraire, celle qui vient de **notre** base PostGIS et non
    * d'une source externe.
    *
-   * Pas de `status` dans la réponse, à la différence des deux autres sources :
-   * si PostGIS ne répond pas, le JWT n'a pas pu être vérifié non plus. Il n'y a
-   * rien à dégrader gracieusement — l'erreur doit remonter en `500`.
+   * Pas de `status` dans la réponse, à la différence des deux autres sources.
+   * Cet endpoint n'a qu'un objet : les aménagements cyclables. Rendre une liste
+   * vide parce que la base n'a pas répondu affirmerait qu'il n'y en a pas ici —
+   * une réponse fausse, indiscernable d'une réponse vraie. L'erreur doit donc
+   * remonter en `500`.
+   *
+   * ⚠️ Cet arbitrage vaut pour **cet** endpoint, pas pour le planificateur : là,
+   * l'usager demande des itinéraires, et perdre les tronçons cyclables reste
+   * préférable à perdre aussi les trajets en métro. Le Service Itinéraire
+   * dégrade donc cette même source (UF-305) — c'est la question posée qui
+   * change, pas la source.
    */
   @Get('cycle-paths/nearby')
   @ApiOperation({

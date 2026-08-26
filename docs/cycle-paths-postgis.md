@@ -213,9 +213,16 @@ dans le rayon : un tronçon peut légitimement être plus long que le rayon dema
 
 **Il n'y a pas de champ `status`**, contrairement aux réponses GTFS et GBFS. Ces
 deux-là décrivent des sources externes dont la panne doit être dégradée
-gracieusement. Ici la source est notre propre base : si PostGIS ne répond pas, le
-JWT n'a pas pu être vérifié non plus. Il n'y a rien à dégrader — l'erreur doit
-remonter en `500`, et se voir.
+gracieusement. Cet endpoint-ci n'a qu'un objet : les aménagements cyclables.
+Rendre une liste vide parce que la base n'a pas répondu affirmerait qu'il n'y en
+a pas ici — une réponse fausse, et indiscernable d'une réponse vraie. L'erreur
+doit donc remonter en `500`, et se voir.
+
+L'arbitrage vaut pour **cet** endpoint, pas pour le planificateur : là, l'usager
+demande des itinéraires, et perdre les tronçons cyclables reste préférable à
+perdre aussi les trajets en métro. Le Service Itinéraire dégrade donc cette même
+source comme les deux autres (UF-305, `docs/source-orchestration.md`). Ce n'est
+pas la source qui décide de l'arbitrage, c'est la question posée.
 
 **`datasetImportedAt` sépare deux silences.** Un tableau `segments` vide avec une
 date d'import signifie « pas d'aménagement cyclable ici » ; le même tableau avec
