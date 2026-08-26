@@ -10,6 +10,7 @@ export * from './search-history';
 export * from './transit';
 export * from './shared-mobility';
 export * from './cycle-path';
+export * from './source-diagnostics';
 export * from './auth';
 export * from './user';
 export * from './carbon';
