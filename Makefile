@@ -17,7 +17,8 @@ OTP_SERVICE := otp
 # Toutes les cibles sont des actions, pas des fichiers.
 .PHONY: help up down stop start restart build ps logs db-shell db-wait \
         migrate generate studio reset prune clean \
-        otp-data otp-data-force otp-up otp-logs otp-wait otp-test otp-rebuild otp-reset
+        otp-data otp-data-force otp-up otp-logs otp-wait otp-test otp-rebuild otp-reset \
+        cycle-import cycle-import-dry cycle-check
 
 ## help: Affiche la liste des cibles disponibles.
 help:
@@ -79,6 +80,25 @@ generate:
 ## studio: Lance Prisma Studio (UI base de données).
 studio:
 	npm run db:studio
+
+# ---------------------------------------------------------------------------
+# Pistes cyclables — jeu de données PostGIS (UF-304)
+# ---------------------------------------------------------------------------
+
+## cycle-import: Importe les amenagements cyclables du Grand Lyon dans PostGIS.
+cycle-import: up db-wait
+	npm run db:import:cycle-paths --workspace apps/api
+
+## cycle-import-dry: Telecharge et filtre le flux sans rien ecrire en base.
+cycle-import-dry:
+	npm run db:import:cycle-paths --workspace apps/api -- --dry-run
+
+## cycle-check: Recette UF-304 - volume, geometries valides, index GiST reellement utilise.
+cycle-check:
+	@$(COMPOSE) exec -T $(DB_SERVICE) psql -U $${POSTGRES_USER:-urbanflow} -d $${POSTGRES_DB:-urbanflow} \
+		-c "SELECT COUNT(*) AS total, COUNT(*) FILTER (WHERE NOT ST_IsValid(geom::geometry)) AS invalides, ROUND((SUM(ST_Length(geom))/1000)::numeric,1) AS km FROM cycle_paths;" \
+		-c "SELECT indexname, indexdef FROM pg_indexes WHERE tablename = 'cycle_paths';" \
+		-c "EXPLAIN (ANALYZE, COSTS OFF) SELECT source_id FROM cycle_paths WHERE ST_DWithin(geom, ST_SetSRID(ST_MakePoint(4.859057,45.760515),4326)::geography, 300);"
 
 ## reset: Détruit la base (volume inclus) puis la recrée à vide.
 reset:

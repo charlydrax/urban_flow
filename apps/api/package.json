@@ -16,6 +16,7 @@
     "db:migrate": "prisma migrate dev",
     "db:migrate:deploy": "prisma migrate deploy",
     "db:seed": "prisma db seed",
+    "db:import:cycle-paths": "ts-node prisma/import-cycle-paths.ts",
     "db:studio": "prisma studio"
   },
   "prisma": {
