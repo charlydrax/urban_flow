@@ -8,10 +8,10 @@
 
 ## Endpoints (protégés par le guard JWT global)
 
-| Méthode | Route                 | Description                                                   | Statut                                       |
-| ------- | --------------------- | ------------------------------------------------------------- | -------------------------------------------- |
-| POST    | `/api/routes/plan`    | Itinéraires multimodaux + CO₂, triés par empreinte croissante | collecte réelle (UF-305), itinéraires mockés |
-| POST    | `/api/routes/sources` | **[dev]** Données brutes des trois sources, sans fusion       | UF-306 — temporaire, fermé en production     |
+| Méthode | Route                 | Description                                             | Statut                                            |
+| ------- | --------------------- | ------------------------------------------------------- | ------------------------------------------------- |
+| POST    | `/api/routes/plan`    | Itinéraires multimodaux + CO₂, classés selon le profil  | collecte réelle (UF-305) + fusion réelle (UF-401) |
+| POST    | `/api/routes/sources` | **[dev]** Données brutes des trois sources, sans fusion | UF-306 — diagnostic, fermé en production          |
 
 Contrat d'entrée : `{ from: {label, lat, lng}, to: {...}, userId }` — `userId` est
 supplanté par l'identité du JWT (anti-IDOR, C4).
@@ -22,17 +22,18 @@ label seul donne un `400` explicite — pas une liste vide inexplicable.
 
 ## Où en est le flux
 
-| Étape                                           | Ticket   | État |
-| ----------------------------------------------- | -------- | ---- |
-| 3. Lecture des préférences profil (PostGIS)     | UF-107   | ✅   |
-| 13-18. Collecte **parallèle** des trois sources | UF-305   | ✅   |
-| Fusion en itinéraires multimodaux (404 si vide) | Sprint 4 | ⏳   |
-| `computeFootprint` par itinéraire               | Sprint 4 | ⏳   |
-| Sauvegarde `search_history`                     | Sprint 4 | ⏳   |
-| Tri par CO₂ croissant                           | —        | ✅   |
+| Étape                                           | Ticket | État |
+| ----------------------------------------------- | ------ | ---- |
+| 3. Lecture des préférences profil (PostGIS)     | UF-107 | ✅   |
+| 13-18. Collecte **parallèle** des trois sources | UF-305 | ✅   |
+| 5. Fusion en itinéraires multimodaux            | UF-401 | ✅   |
+| 6. `computeFootprint` par itinéraire            | UF-401 | ✅   |
+| 9. Tri selon la priorité du profil              | UF-401 | ✅   |
+| 7. Sauvegarde `search_history`                  | UF-402 | ⏳   |
 
-Les itinéraires rendus restent donc les **mocks** du scénario nominal jusqu'à la
-fusion. Le champ `sources` de la réponse est, lui, bien réel.
+**Plus aucun itinéraire n'est simulé.** Une liste vide signifie désormais
+qu'aucune chaîne continue n'a pu être formée — et `sources` dit si c'est faute de
+données ou faute d'options.
 
 ## Orchestration parallèle des sources (UF-305)
 
@@ -129,6 +130,86 @@ moteur avant de savoir quoi lui demander.
 > les pistes cyclables, et une liste vide affirmerait qu'il n'y en a pas. Ici il
 > demande des itinéraires — perdre une option vaut mieux que tout perdre.
 
+## Fusion en itinéraires multimodaux (UF-401)
+
+`mergeIntoItineraries(sources, from, to, prefs)` transforme les données brutes de
+la collecte en propositions de bout en bout. C'est la pièce la plus algorithmique
+du projet.
+
+```
+routes/
+└── merge/
+    ├── itinerary-merger.ts   familles de propositions, préférences, plafond
+    ├── travel-model.ts       vitesses, facteurs de détour, coût de prise du vélo
+    └── cycle-coverage.ts     part du corridor desservie par un aménagement (UF-304)
+```
+
+Détail complet et recette :
+[`docs/itinerary-merge.md`](../../../../../docs/itinerary-merge.md).
+
+### Quatre familles de propositions
+
+| Famille        | Chaîne                      | Ce qu'elle apporte                                |
+| -------------- | --------------------------- | ------------------------------------------------- |
+| `transit`      | marche → TC → marche        | la référence, calculée par OTP sur le réseau réel |
+| `bike-transit` | marche → vélo → TC → marche | supprime la longue marche d'accès ou de sortie    |
+| `bike`         | marche → vélo → marche      | porte-à-porte, sans attendre de véhicule          |
+| `walk`         | marche                      | l'option évidente quand c'est court               |
+
+### Une fonction pure, pas un service
+
+Aucune I/O, aucune injection : tout est déduit de `CollectedSources`. C'est ce
+qui permet de tester le cœur du produit sans OTP, sans flux GBFS et sans PostGIS,
+sur des jeux de données figés — et de le présenter isolément en soutenance.
+
+### Trois invariants
+
+1. **Continuité** — `segments[i].to` est toujours l'origine de `segments[i+1]`,
+   en libellé comme en coordonnées. Les segments trop courts (moins de 30 m) sont
+   absorbés par leur voisin plutôt que supprimés, pour ne pas ouvrir de trou.
+2. **Plafond** — au plus **5** itinéraires, et la sélection prend d'abord le
+   meilleur de **chaque famille**. Sans cette règle, trois variantes du même
+   métro rempliraient le plafond et masqueraient l'option vélo, alors que c'est
+   précisément la comparaison entre familles que le produit veut provoquer.
+3. **Dégradation gracieuse** — une source muette retire les familles qui en
+   dépendent, elle n'invalide pas les autres (C10).
+
+### Un rabattement qu'on peut réellement faire
+
+Le vélo n'est proposé que si les **deux** bornes existent dans les données
+collectées : celle où on le prend, et celle où on le rend. Sans quoi on
+proposerait d'abandonner un Vélo'v sur le trottoir.
+
+C'est aussi pourquoi le collecteur élargit son rayon de recherche de bornes à
+900 m pour la planification : il en faut une près de l'**arrêt d'embarquement**,
+pas seulement près de l'usager. Le surcoût réseau est nul — le connecteur GBFS
+mémoïse les flux entiers et filtre en mémoire (C5).
+
+### Comment les préférences agissent
+
+| Préférence        | Effet                | Pourquoi                                                                                                   |
+| ----------------- | -------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `reducedMobility` | **filtre dur** (C12) | ce n'est pas un goût mais une contrainte : proposer un trajet impraticable serait une faute                |
+| `maxWalkMinutes`  | **filtre dur**       | c'est un maximum annoncé par l'usager ; le dépasser reviendrait à ignorer sa saisie                        |
+| `preferredModes`  | **sélection**        | n'exclut rien : un profil « métro et vélo » ne doit pas rester sans réponse le jour où seul un bus circule |
+| `priority`        | **tri publié**       | `carbonAsc` pour « écolo », `durationAsc` pour « rapide » — et `sortedBy` le dit au client                 |
+
+### Ce que les tronçons cyclables changent
+
+Un corridor desservi par un aménagement connu se parcourt plus directement : le
+facteur de détour appliqué à la distance à vol d'oiseau passe de 1,45 à 1,20 à
+mesure que la couverture augmente. La mesure est une **proximité** (le corridor
+est-il équipé ?), pas un calage sur le réseau — un vrai routeur cyclable reste la
+bonne réponse le jour où le produit en aura un.
+
+### Ce que ce n'est pas
+
+Il n'y a **pas de routeur** pour les portions que nous fabriquons : marche et
+vélo sont estimés depuis une distance à vol d'oiseau, un facteur de détour et une
+vitesse moyenne (`travel-model.ts`), et leur tracé est une droite. C'est
+suffisant pour comparer des options à quelques minutes près ; ce n'est pas une
+feuille de route au carrefour près, et c'est assumé.
+
 ## Endpoint interne de test des sources (UF-306)
 
 `POST /api/routes/sources` déclenche la même collecte que `/routes/plan` et rend
@@ -142,8 +223,9 @@ routes/
 ```
 
 Il existe parce qu'une liste d'itinéraires vide ne dit pas où est le tort : la
-fusion, ou une source muette ? Le vérifier **avant** d'écrire la fusion évite
-d'empiler deux étages non validés.
+fusion, ou une source muette ? Le vérifier **avant** d'écrire la fusion évitait
+d'empiler deux étages non validés ; il garde exactement cette valeur maintenant
+que la fusion existe.
 
 Le corps accepte `{ from, to }` ou `{ searchHistoryId }` pour rejouer une
 recherche enregistrée (UF-204) — relue avec l'identité du JWT, un identifiant
@@ -166,7 +248,7 @@ comportement ; sans la variable, `NODE_ENV` décide.
 - `TransportModule` — les **trois** sources : `TransitService` (GTFS, UF-302),
   `SharedMobilityService` (GBFS, UF-303) et `CyclePathsService`
   (`ST_DWithin` sur PostGIS, UF-304)
-- `UsersModule` (préférences, étape 3), `CarbonModule` (CO₂, Sprint 4)
+- `UsersModule` (préférences, étape 3), `CarbonModule` (barème CO₂, étape 6)
 - `SearchHistoryModule` — **lecture seule** (UF-306) : rejouer une recherche
   enregistrée. Le planificateur y écrira au Sprint 4 ; le diagnostic, jamais (C8)
 - `SourceCollectorService` — interne au module, volontairement **non exporté** :
@@ -180,9 +262,14 @@ comportement ; sans la variable, `NODE_ENV` décide.
 cd apps/api && npx jest src/modules/routes
 ```
 
-Trois suites, sans réseau ni base. Les horloges ne sont **pas** simulées : les
-faux minuteurs de Jest masqueraient exactement ce qu'on veut mesurer, à savoir
-que les trois promesses progressent réellement en même temps.
+Six suites, sans réseau ni base. Les horloges ne sont **pas** simulées dans les
+tests de collecte : les faux minuteurs de Jest masqueraient exactement ce qu'on
+veut mesurer, à savoir que les trois promesses progressent réellement en même
+temps.
+
+`merge/itinerary-merger.spec.ts` couvre la recette d'UF-401 point par point sur
+le scénario nominal Part-Dieu → Bellecour : propositions distinctes, chaîne
+continue, préférences (deux profils), plafond.
 
 ## Contraintes couvertes
 

@@ -1,6 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import type {
   Itinerary,
+  ItinerarySortKey,
   PlanRoutesResponse,
   RouteSegment,
   SourceAvailability,
@@ -134,9 +135,20 @@ export class PlanRoutesResponseDto implements PlanRoutesResponse {
   @ApiProperty({ type: [ItineraryDto] })
   itineraries!: ItineraryDto[];
 
-  /** Clé de tri appliquée par le serveur (le client peut re-trier). */
-  @ApiProperty({ example: 'carbonAsc' })
-  sortedBy!: 'carbonAsc';
+  /**
+   * Clé de tri appliquée par le serveur, déduite de la priorité du profil (F1).
+   *
+   * Publiée plutôt que sous-entendue : le client doit pouvoir annoncer
+   * « classés par empreinte » ou « classés par durée » sans relire les
+   * préférences de l'usager ni deviner l'ordre en comparant les valeurs.
+   */
+  @ApiProperty({
+    enum: ['carbonAsc', 'durationAsc'],
+    example: 'carbonAsc',
+    description:
+      '`carbonAsc` pour un profil « écolo » (défaut du produit), `durationAsc` pour « rapide ».',
+  })
+  sortedBy!: ItinerarySortKey;
 
   /**
    * État des trois sources pour cette recherche (UF-305).
