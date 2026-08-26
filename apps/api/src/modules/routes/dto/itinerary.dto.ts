@@ -1,5 +1,10 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import type { Itinerary, PlanRoutesResponse, RouteSegment } from '@urbanflow/shared';
+import type {
+  Itinerary,
+  PlanRoutesResponse,
+  RouteSegment,
+  SourceAvailability,
+} from '@urbanflow/shared';
 
 import { TransportMode } from '../../../common/enums/transport-mode.enum';
 
@@ -85,7 +90,45 @@ export class ItineraryDto implements Itinerary {
   geometry?: { type: 'LineString'; coordinates: [number, number][] };
 }
 
-/** Réponse de `POST /api/routes/plan` (étape 8 du flux : 200 + itinéraires + CO₂). */
+/**
+ * État d'une des trois sources interrogées par le planificateur (UF-305).
+ *
+ * Exposé parce que le client ne peut pas le deviner : une liste sans option
+ * vélo peut signifier « aucun vélo praticable ici » ou « l'opérateur n'a pas
+ * répondu », et ce n'est pas la même chose à annoncer à l'usager.
+ */
+export class SourceAvailabilityDto implements SourceAvailability {
+  @ApiProperty({
+    enum: ['transit', 'sharedMobility', 'cyclePaths'],
+    example: 'transit',
+    description:
+      'Source interrogée : GTFS (`transit`), GBFS (`sharedMobility`) ou PostGIS (`cyclePaths`).',
+  })
+  source!: SourceAvailability['source'];
+
+  @ApiProperty({
+    example: true,
+    description: 'Faux quand la source n’a rien pu fournir pour cette recherche.',
+  })
+  available!: boolean;
+
+  @ApiPropertyOptional({
+    enum: ['timeout', 'network', 'upstream-error', 'internal-error'],
+    description:
+      'Cause générique, renseignée uniquement si `available` vaut `false`. Le détail ' +
+      'technique reste dans les logs du serveur : il n’apprendrait rien à l’usager et ' +
+      'exposerait notre topologie (C11).',
+  })
+  reason?: SourceAvailability['reason'];
+}
+
+/**
+ * Réponse de `POST /api/routes/plan` (étape 8 du flux : 200 + itinéraires + CO₂).
+ *
+ * Depuis UF-305, elle porte aussi l'état des trois sources : un `200` avec une
+ * liste vide et trois sources indisponibles n'est pas la même réponse qu'un
+ * `200` avec une liste vide et trois sources en bonne santé.
+ */
 export class PlanRoutesResponseDto implements PlanRoutesResponse {
   /** Itinéraires proposés, triés par empreinte carbone croissante (mobilité douce d'abord). */
   @ApiProperty({ type: [ItineraryDto] })
@@ -94,4 +137,20 @@ export class PlanRoutesResponseDto implements PlanRoutesResponse {
   /** Clé de tri appliquée par le serveur (le client peut re-trier). */
   @ApiProperty({ example: 'carbonAsc' })
   sortedBy!: 'carbonAsc';
+
+  /**
+   * État des trois sources pour cette recherche (UF-305).
+   *
+   * Toujours présent, même quand tout va bien : trois sources `available`
+   * signifient que la liste est complète, ce que le client ne peut pas déduire
+   * d'un tableau d'itinéraires. C'est ce qui alimente le bandeau
+   * « mode dégradé » (C10).
+   */
+  @ApiProperty({
+    type: [SourceAvailabilityDto],
+    description:
+      'Une entrée par source, dans l’ordre du flux. Une liste sans option vélo et une ' +
+      'source `sharedMobility` indisponible ne se lisent pas pareil.',
+  })
+  sources!: SourceAvailabilityDto[];
 }
