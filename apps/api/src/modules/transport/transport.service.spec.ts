@@ -1,5 +1,6 @@
 import { Test } from '@nestjs/testing';
 
+import { SharedMobilityService } from './shared-mobility.service';
 import { TransitService } from './transit.service';
 import { TransportService } from './transport.service';
 
@@ -14,15 +15,30 @@ const SERVICE_WINDOW = {
   to: new Date(1657663200 * 1000).toISOString(),
 };
 
+/** Publication GBFS datant de `minutes` minutes. */
+function publishedMinutesAgo(minutes: number): string {
+  return new Date(Date.now() - minutes * 60_000).toISOString();
+}
+
 describe('TransportService', () => {
   let service: TransportService;
   let probe: jest.Mock;
+  let probeGbfs: jest.Mock;
 
   beforeEach(async () => {
     probe = jest.fn().mockResolvedValue({ reachable: true, serviceWindow: SERVICE_WINDOW });
+    probeGbfs = jest.fn().mockResolvedValue({
+      reachable: true,
+      publishedAt: publishedMinutesAgo(1),
+      stationCount: 428,
+    });
 
     const moduleRef = await Test.createTestingModule({
-      providers: [TransportService, { provide: TransitService, useValue: { probe } }],
+      providers: [
+        TransportService,
+        { provide: TransitService, useValue: { probe } },
+        { provide: SharedMobilityService, useValue: { probe: probeGbfs } },
+      ],
     }).compile();
 
     service = moduleRef.get(TransportService);
@@ -56,9 +72,66 @@ describe('TransportService', () => {
     expect(gtfs.detail).toContain('aucune période de service');
   });
 
-  it('laisse GBFS en stub jusqu’à UF-303', async () => {
+  it('sonde réellement la source GBFS et rapporte sa fraîcheur (UF-303)', async () => {
     const [, gbfs] = await service.getStatus();
 
-    expect(gbfs).toMatchObject({ source: 'gbfs', status: 'mock' });
+    expect(gbfs).toMatchObject({ source: 'gbfs', status: 'ok' });
+    expect(gbfs.detail).toContain('428 station(s)');
+    expect(probeGbfs).toHaveBeenCalledTimes(1);
+  });
+
+  it('déclare la source GBFS `down` quand le flux ne répond pas', async () => {
+    probeGbfs.mockResolvedValue({
+      reachable: false,
+      publishedAt: null,
+      stationCount: 0,
+      reason: 'timeout',
+    });
+
+    const [, gbfs] = await service.getStatus();
+
+    expect(gbfs.status).toBe('down');
+    expect(gbfs.detail).toContain('timeout');
+  });
+
+  it('déclare la source GBFS `degraded` quand le flux n’est plus republié', async () => {
+    probeGbfs.mockResolvedValue({
+      reachable: true,
+      publishedAt: publishedMinutesAgo(45),
+      stationCount: 428,
+    });
+
+    const [, gbfs] = await service.getStatus();
+
+    // Le flux répond, mais son contenu est figé : la nuance existe précisément
+    // pour que le client puisse nuancer plutôt que masquer.
+    expect(gbfs.status).toBe('degraded');
+    expect(gbfs.detail).toContain('figé');
+  });
+
+  it('accepte un flux GBFS sans horodatage de publication', async () => {
+    probeGbfs.mockResolvedValue({ reachable: true, publishedAt: null, stationCount: 12 });
+
+    const [, gbfs] = await service.getStatus();
+
+    expect(gbfs.status).toBe('ok');
+    expect(gbfs.detail).toContain('sans horodatage');
+  });
+
+  it('sonde les deux sources en parallèle — un diagnostic ne cumule pas deux timeouts', async () => {
+    let resolveOtp: (value: unknown) => void = () => {};
+    probe.mockReturnValue(
+      new Promise((resolve) => {
+        resolveOtp = resolve;
+      }),
+    );
+
+    const pending = service.getStatus();
+    // GBFS est déjà parti alors que GTFS n'a pas répondu : la preuve que les
+    // deux sondes ne s'attendent pas l'une l'autre.
+    expect(probeGbfs).toHaveBeenCalledTimes(1);
+
+    resolveOtp({ reachable: true, serviceWindow: SERVICE_WINDOW });
+    await expect(pending).resolves.toHaveLength(2);
   });
 });
