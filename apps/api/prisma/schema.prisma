@@ -107,3 +107,75 @@ model SearchHistory {
   @@index([fromGeom(ops: raw("gist_geometry_ops_2d"))], type: Gist)
   @@map("search_history")
 }
+
+/// Aménagements cyclables de la Métropole de Lyon (UF-304) — troisième source du
+/// `Promise.all` de l'étape 4 du flux, aux côtés de GTFS et GBFS.
+///
+/// Contrairement aux deux autres, celle-ci est **persistée chez nous** : le
+/// réseau cyclable est une donnée de patrimoine qui bouge de quelques dizaines
+/// de tronçons par an, pas un flux temps réel. L'interroger en base plutôt qu'à
+/// chaque requête chez un tiers supprime une latence réseau et un point de panne
+/// du chemin critique du planificateur (C5/C10) — et c'est ce qui rend
+/// `ST_DWithin` pertinent ici, là où les stations GBFS restent en mémoire.
+///
+/// RGPD (C8) : aucune donnée personnelle — patrimoine public sous Licence
+/// Ouverte. C'est la seule table du schéma qui puisse être purgée et réimportée
+/// sans conséquence.
+model CyclePath {
+  id String @id @default(uuid()) @db.Uuid
+
+  /// Identifiant du tronçon chez le producteur (`gid` du flux Grand Lyon).
+  /// Unique : c'est la clé de rapprochement qui rend le réimport idempotent
+  /// (un tronçon corrigé est mis à jour, pas dupliqué).
+  sourceId String @unique @map("source_id")
+
+  /// Voie empruntée (« Rue Garibaldi »), `null` pour un tronçon hors voirie
+  /// nommée (traversée de parc, passerelle).
+  name String?
+
+  /// Type d'aménagement tel que publié : « Piste Cyclable », « Bande Cyclable »,
+  /// « Voie verte », « Double sens cyclable »… Conservé parce qu'une piste
+  /// séparée de la circulation et une bande peinte au sol n'offrent ni la même
+  /// sécurité ni le même confort — le planificateur (F2) doit pouvoir les
+  /// pondérer différemment.
+  facilityType String @map("facility_type")
+
+  /// Niveau de réseau (« Voies Lyonnaises », « Réseau structurant… ») : distingue
+  /// les axes express continus des dessertes de quartier.
+  network String? @map("network")
+
+  /// Revêtement (« Matériaux liés », « sable compacté »…). Retenu pour C12 :
+  /// un stabilisé n'est praticable ni en fauteuil ni par tous les vélos.
+  surface String? @map("surface")
+
+  /// Tracé du tronçon.
+  ///
+  /// ⚠️ `geography` et non `geometry` — à la différence de `search_history`.
+  /// C'est le type qui porte la sémantique du ticket : `ST_DWithin` sur une
+  /// `geometry(4326)` compte en **degrés** (un rayon de 500 vaudrait ~55 000 km),
+  /// alors que sur une `geography` il compte en **mètres** sur l'ellipsoïde.
+  /// Caster à la volée (`geom::geography`) donnerait le bon résultat mais
+  /// écarterait l'index — la mesure métrique est donc inscrite dans le type,
+  /// pas rattrapée dans la requête.
+  ///
+  /// `MultiLineString` parce que la source en publie : un même aménagement peut
+  /// être interrompu (carrefour, tronçon en deux brins). 15 tronçons sur 4 714
+  /// sont réellement multi-brins, mais un type unique évite une conversion
+  /// fragile à l'import.
+  geom Unsupported("geography(MultiLineString, 4326)")
+
+  /// Date du dernier import de ce tronçon — sert à dater la fraîcheur du jeu de
+  /// données exposée par l'API, le producteur ne publiant pas d'horodatage.
+  importedAt DateTime @default(now()) @map("imported_at")
+
+  /// Index spatial GiST — l'exigence explicite de la recette du ticket, et la
+  /// raison d'être de PostGIS ici (C10).
+  ///
+  /// Sans lui, `ST_DWithin` impose un parcours séquentiel : 4 714 calculs de
+  /// distance ellipsoïdale à chaque recherche d'itinéraire. Avec lui, l'index
+  /// élimine d'abord par boîtes englobantes et le calcul exact ne porte que sur
+  /// une poignée de candidats. L'opclass est celle des `geography`
+  /// (`gist_geography_ops`), pas celle des `geometry` du reste du schéma.
+  @@index([geom(ops: raw("gist_geography_ops"))], type: Gist)
+  @@map("cycle_paths")
+}

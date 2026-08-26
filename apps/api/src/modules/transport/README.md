@@ -1,20 +1,29 @@
-# Module `transport` — Intégrations GTFS / GBFS (F3)
+# Module `transport` — Sources de données transport (F3)
 
 ## Rôle
 
-Adaptateur vers les sources de données transport aux formats standards (C9) :
+Adaptateur vers les **trois** sources du planificateur, toutes aux formats
+standards (C9) :
 
 - **GTFS** : transports en commun (arrêts, lignes, horaires) — **implémenté** (UF-302)
 - **GBFS** : vélos et trottinettes en libre-service (stations, disponibilité) — **implémenté** (UF-303)
+- **PostGIS** : aménagements cyclables et piétons de la Métropole — **implémenté** (UF-304)
+
+Les deux premières lisent des flux **externes**, la troisième **notre propre
+base**. La différence est assumée : les horaires et les vélos décrivent ce qui
+circule, le réseau cyclable décrit ce qui est construit — quelques dizaines de
+tronçons livrés par an. L'héberger retire une latence réseau et un point de panne
+du chemin critique (C5/C10), et c'est ce qui rend `ST_DWithin` pertinent.
 
 Consommé par le Service Itinéraire (module `routes`) via des appels parallèles (C10).
 
 ## Endpoints (protégés par le guard JWT global)
 
-| Méthode | Route                            | Description                                 |
-| ------- | -------------------------------- | ------------------------------------------- |
-| GET     | `/api/transport/status`          | État des deux sources GTFS/GBFS             |
-| GET     | `/api/transport/stations/nearby` | Stations en libre-service autour d'un point |
+| Méthode | Route                               | Description                                  |
+| ------- | ----------------------------------- | -------------------------------------------- |
+| GET     | `/api/transport/status`             | État des deux sources GTFS/GBFS              |
+| GET     | `/api/transport/stations/nearby`    | Stations en libre-service autour d'un point  |
+| GET     | `/api/transport/cycle-paths/nearby` | Tronçons cyclables/piétons autour d'un point |
 
 ## Connecteur transports en commun (UF-302)
 
@@ -39,6 +48,9 @@ transport/
 ├── shared-mobility.service.ts   mobilités douces : bornage, croisement des flux
 ├── transport.service.ts         état des sources (bandeau « mode dégradé » côté front)
 ├── dto/                         contrats HTTP + Swagger des endpoints du module
+├── cycle-paths/
+│   ├── cycle-paths.service.ts   recherche spatiale ST_DWithin, bornage
+│   └── cycle-path.mapper.ts     libellés producteur -> contrats internes (fonctions pures)
 ├── otp/
 │   ├── otp.client.ts            transport HTTP + timeout + qualification des pannes
 │   ├── otp.mapper.ts            OTP -> contrats internes (fonctions pures)
@@ -51,11 +63,12 @@ transport/
     └── distance.ts              distance haversine (sélection et tri des stations)
 ```
 
-La frontière tient en une règle, appliquée aux deux connecteurs : **rien de la
+La frontière tient en une règle, appliquée aux trois connecteurs : **rien de la
 structure d'OTP ne franchit le dossier `otp/`, rien de la structure de GBFS ne
-franchit le dossier `gbfs/`**. Remplacer le moteur de routage (OTP 3, Navitia,
-API opérateur) ou changer d'opérateur de vélos n'imposerait de réécrire que le
-client et le mapper concernés.
+franchit le dossier `gbfs/`, rien du vocabulaire de la Métropole de Lyon ne
+franchit `cycle-paths/`**. Remplacer le moteur de routage (OTP 3, Navitia, API
+opérateur), changer d'opérateur de vélos ou brancher une seconde métropole
+n'imposerait de réécrire que le mapper concerné.
 
 ### Résilience — dégradation gracieuse (C10)
 
@@ -250,6 +263,118 @@ Le rayon est borné entre **50 m** et **2 km**. Le plancher n'est pas arbitraire
 en dessous, la précision d'un GPS de smartphone en ville (20 à 60 m — C6) rendrait
 le résultat aléatoire. Le plafond évite qu'une requête ne balaie tout le réseau.
 
+## Connecteur pistes cyclables (UF-304)
+
+`CyclePathsService.getCycleSegments(point, options)` est le point d'entrée du
+volet PostGIS. Il interroge **notre table** `cycle_paths`, peuplée par le script
+d'import depuis le flux ouvert de la Métropole, et rend des tronçons au format
+interne `CycleSegment` (`@urbanflow/shared`).
+
+```ts
+const result = await cyclePathsService.getCycleSegments(
+  { label: 'Part-Dieu', lat: 45.760515, lng: 4.859057 },
+  { radiusMeters: 300, limit: 20 },
+);
+```
+
+```jsonc
+{
+  "segments": [
+    {
+      "id": "7298",
+      "name": "Tunnel Marius Vivier-Merle",
+      "facilityType": "CYCLE_TRACK",
+      "sourceFacilityType": "Piste Cyclable",
+      "network": "Voies Lyonnaises",
+      "surface": "Matériaux liés (asphaltes, enrobés, bétons et nouveaux liants)",
+      "distanceMeters": 68,
+      "lengthMeters": 742,
+      "geometry": { "type": "MultiLineString", "coordinates": [[[4.858743, 45.757074]]] },
+    },
+  ],
+  "radiusMeters": 300,
+  "datasetImportedAt": "2026-08-26T11:01:04.368Z",
+}
+```
+
+### Peupler la table
+
+```bash
+make cycle-import                                  # depuis la racine
+npm run db:import:cycle-paths --workspace apps/api # équivalent sans make
+```
+
+4 067 tronçons réalisés, 1 124 km cumulés. Le script est idempotent et
+transactionnel ; le détail de la source et de l'import est dans
+[`docs/cycle-paths-postgis.md`](../../../../../docs/cycle-paths-postgis.md).
+
+### `geography` plutôt que `geometry` — la décision structurante
+
+`search_history` (UF-204) stocke des `geometry(Point, 4326)`, `cycle_paths`
+stocke des `geography(MultiLineString, 4326)`. Ce n'est pas une inconséquence :
+
+|                            | `geometry(4326)`        | `geography(4326)`    |
+| -------------------------- | ----------------------- | -------------------- |
+| Unité de `ST_DWithin`      | **degrés**              | **mètres**           |
+| `ST_DWithin(geom, p, 300)` | cherche dans ~33 000 km | cherche dans 300 m   |
+| Index GiST                 | `gist_geometry_ops_2d`  | `gist_geography_ops` |
+
+Un rayon en mètres sur une `geometry` imposerait d'écrire
+`ST_DWithin(geom::geography, …)` : correct, mais caster la **colonne** rend
+l'index inutilisable. Le type porte donc la sémantique métrique, plutôt que
+chaque requête.
+
+### `ST_DWithin`, et pas `ST_Distance(…) <= rayon`
+
+Les deux formes rendent les mêmes tronçons ; seule la première est indexable.
+Mesuré sur le jeu de développement (4 067 lignes) :
+
+| Plan                         | Lignes examinées | Temps   |
+| ---------------------------- | ---------------- | ------- |
+| `Bitmap Index Scan` (GiST)   | 46               | 1,1 ms  |
+| `Seq Scan` (index désactivé) | 4 067            | 50,6 ms |
+
+Environ **45×**, et l'écart se creuse avec le volume : le parcours séquentiel est
+linéaire, l'index ne l'est pas (C10). Un test fige la forme de la requête, pour
+qu'une réécriture bien intentionnée ne la fasse pas retomber en parcours complet.
+
+### Distance au tronçon, pas à son début
+
+`ST_Distance` sur une ligne rend la distance au point **le plus proche**. Une
+Voie Lyonnaise de deux kilomètres qui passe devant la porte est donc à quelques
+mètres — ce qu'une distance à son point de départ ou à son centroïde aurait raté.
+En contrepartie, `lengthMeters` est la longueur **totale** du tronçon : il peut
+légitimement dépasser le rayon demandé.
+
+### Pas de `status` dans la réponse, et c'est délibéré
+
+Les réponses GTFS et GBFS portent un `status: 'ok' | 'unavailable'` parce
+qu'elles décrivent des sources externes dont la panne doit être dégradée
+gracieusement. Ici la source est notre propre base : si PostGIS ne répond pas, le
+JWT n'a pas pu être vérifié non plus. Il n'y a rien à dégrader — l'erreur remonte
+en `500` et doit se voir.
+
+En revanche `datasetImportedAt` sépare deux silences qui se ressemblent : un
+tableau vide **avec** une date signifie « pas d'aménagement ici », le même
+tableau avec `null` signifie « l'import n'a jamais été lancé ».
+
+### Correspondance des types d'aménagement
+
+| Libellé source                            | Interne         |
+| ----------------------------------------- | --------------- |
+| `Piste Cyclable`                          | `CYCLE_TRACK`   |
+| `Bande Cyclable`                          | `CYCLE_LANE`    |
+| `Voie verte`                              | `GREENWAY`      |
+| `Double sens cyclable`, `Vélorue`, `CVCB` | `SHARED_STREET` |
+| `Couloir bus vélo élargi` / `non élargi`  | `BUS_LANE`      |
+| `Goulotte ou rampe`                       | `CROSSING`      |
+| libellé inconnu                           | `OTHER`         |
+
+Un libellé inconnu devient `OTHER` plutôt que d'écarter le tronçon. C'est
+l'inverse du choix fait pour les modes OTP — et pour une raison : un mode faux
+fausserait le calcul carbone, alors qu'un type d'aménagement inconnu n'empêche
+pas l'aménagement d'exister et d'être cyclable.
+
 ## Configuration
 
 | Variable             | Rôle                                             | Défaut                    |
@@ -259,6 +384,10 @@ le résultat aléatoire. Le plafond évite qu'une requête ne balaie tout le ré
 | `GBFS_DISCOVERY_URL` | Document `gbfs.json` de l'opérateur              | flux Vélo'v du Grand Lyon |
 | `GBFS_TIMEOUT_MS`    | Délai maximal accordé à chaque flux (0,5 s–15 s) | `5000`                    |
 | `GBFS_STATUS_TTL_MS` | Mémoïsation du statut temps réel (5 s–10 min)    | `60000`                   |
+
+Le volet pistes cyclables n'a **aucune variable d'exécution** : l'API ne lit
+que la table. Seul le script d'import accepte un `CYCLE_PATHS_SOURCE_URL`
+facultatif, pour rejouer un export local ou brancher une autre métropole.
 
 Validées au démarrage : l'API refuse de démarrer si elles manquent (fail-fast, C4).
 
@@ -291,6 +420,13 @@ centaines de millisecondes en régime normal.
   l'usager ne paie pas trois latences réseau bout à bout.
 - Le nombre de stations rendues est plafonné (10 par défaut, 50 au maximum), tout
   comme le rayon : pas de réponse démesurée sur un réseau mobile.
+- Le jeu de données cyclable ne conserve que **4 attributs sur les 23 publiés** :
+  ceux qui changent une décision d'itinéraire ou un affichage. Les traçés sont
+  rendus à **six décimales** (~11 cm), là où les neuf par défaut de
+  `ST_AsGeoJSON` décriraient le millimètre et gonfleraient chaque réponse d'un
+  tiers pour une exactitude qui n'existe pas dans la donnée source.
+- Les aménagements cyclables sont **hébergés** plutôt qu'interrogés à chaque
+  recherche : une latence réseau et un point de panne en moins par requête.
 
 ## Sécurité (C4/C11)
 
@@ -303,13 +439,20 @@ centaines de millisecondes en régime normal.
   est une donnée de déplacement.
 - Les flux GBFS sont publics : aucun en-tête d'identification n'est envoyé, et
   la position de l'usager ne quitte jamais l'API.
+- Les requêtes PostGIS passent par le _tagged template_ `$queryRaw` : chaque
+  valeur devient un paramètre lié côté serveur, jamais une concaténation — y
+  compris les coordonnées venues du client (OWASP A03). L'import envoie chaque
+  lot en **un seul paramètre JSON** déplié par `jsonb_array_elements`, ce qui
+  garde le texte SQL constant bien que les libellés viennent d'un tiers.
 
 ## Dépendances
 
 - `OtpClient` (interne au module) → OpenTripPlanner, API GraphQL `/otp/gtfs/v1`
 - `GbfsClient` (interne au module) → flux GBFS de l'opérateur, via `gbfs.json`
-- `@urbanflow/shared` pour les contrats `TransitJourney` / `TransitJourneysResult`
-  et `SharedMobilityStation` / `NearbyStationsResult`
+- `PrismaService` (global) → PostgreSQL + PostGIS, table `cycle_paths`
+- `@urbanflow/shared` pour les contrats `TransitJourney` / `TransitJourneysResult`,
+  `SharedMobilityStation` / `NearbyStationsResult` et `CycleSegment` /
+  `CycleSegmentsResult`
 
 ## Tests
 
@@ -317,23 +460,32 @@ centaines de millisecondes en régime normal.
 cd apps/api && npx jest src/modules/transport
 ```
 
-Neuf suites, **sans réseau ni conteneur** (`fetch` simulé) — exécutables en CI et
-insensibles à l'état des sources amont :
+Onze suites, **sans réseau, base ni conteneur** (`fetch` et `$queryRaw` simulés)
+— exécutables en CI et insensibles à l'état des sources amont :
 
-| Volet  | Suites                                                              |
-| ------ | ------------------------------------------------------------------- |
-| GTFS   | `otp.mapper`, `otp.client`, `service-date`, `transit.service`       |
-| GBFS   | `gbfs.mapper`, `gbfs.client`, `distance`, `shared-mobility.service` |
-| Commun | `transport.service` (état des deux sources)                         |
+| Volet   | Suites                                                              |
+| ------- | ------------------------------------------------------------------- |
+| GTFS    | `otp.mapper`, `otp.client`, `service-date`, `transit.service`       |
+| GBFS    | `gbfs.mapper`, `gbfs.client`, `distance`, `shared-mobility.service` |
+| PostGIS | `cycle-paths.service`, `cycle-path.mapper`                          |
+| Commun  | `transport.service` (état des sources externes)                     |
+
+Les suites PostGIS vérifient la **forme** de la requête (prédicat `ST_DWithin`,
+ordre longitude/latitude, paramètres liés, bornage). Que la requête soit
+réellement _indexée_ relève de l'`EXPLAIN` documenté dans la recette — un test
+unitaire ne peut pas le prouver.
 
 Recettes des tickets : UF-302 dans
 [`docs/otp-gtfs.md`](../../../../../docs/otp-gtfs.md) section 10, UF-303 dans
-[`docs/gbfs-velov.md`](../../../../../docs/gbfs-velov.md).
+[`docs/gbfs-velov.md`](../../../../../docs/gbfs-velov.md), UF-304 dans
+[`docs/cycle-paths-postgis.md`](../../../../../docs/cycle-paths-postgis.md).
 
 ## Contraintes couvertes
 
-C4 (variables GraphQL, revalidation des entrées), C5 (mémoïsation graduée,
-appels parallèles, champs et volumes minimaux), C6 (rayon plancher aligné sur la
-précision GPS réelle), C9 (GTFS, GBFS et son auto-découverte, GeoJSON, contrats
-partagés), C10 (timeouts bornés, dégradation gracieuse), C11 (logs sans donnée
-de déplacement), C12 (accessibilité PMR).
+C4 (variables GraphQL, paramètres SQL liés, revalidation des entrées),
+C5 (mémoïsation graduée, appels parallèles, champs et volumes minimaux, données
+cyclables hébergées), C6 (rayon plancher aligné sur la précision GPS réelle),
+C8 (jeu de données cyclable sans donnée personnelle), C9 (GTFS, GBFS et son
+auto-découverte, WFS/GeoJSON, SRID 4326, contrats partagés), C10 (timeouts
+bornés, dégradation gracieuse, index GiST mesuré), C11 (logs sans donnée de
+déplacement), C12 (accessibilité PMR, revêtement des aménagements exposé).

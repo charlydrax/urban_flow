@@ -9,6 +9,8 @@ import {
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
 
+import { CyclePathsService } from './cycle-paths/cycle-paths.service';
+import { CycleSegmentsQueryDto, CycleSegmentsResponseDto } from './dto/cycle-segments.dto';
 import { NearbyStationsQueryDto, NearbyStationsResponseDto } from './dto/nearby-stations.dto';
 import { SharedMobilityService } from './shared-mobility.service';
 import { TransportService, TransportSourceStatus } from './transport.service';
@@ -16,8 +18,9 @@ import { TransportService, TransportSourceStatus } from './transport.service';
 /**
  * Contrôleur des intégrations transport (F3).
  * Expose l'état des sources GTFS/GBFS pour le diagnostic et l'affichage
- * d'un mode dégradé côté client (C10), ainsi que les stations de véhicules
- * en libre-service à proximité d'un point (UF-303).
+ * d'un mode dégradé côté client (C10), les stations de véhicules en
+ * libre-service à proximité d'un point (UF-303), et les tronçons cyclables
+ * issus de notre propre base PostGIS (UF-304).
  */
 @ApiTags('transport')
 @ApiBearerAuth()
@@ -28,6 +31,7 @@ export class TransportController {
   constructor(
     private readonly transportService: TransportService,
     private readonly sharedMobilityService: SharedMobilityService,
+    private readonly cyclePathsService: CyclePathsService,
   ) {}
 
   /**
@@ -74,6 +78,38 @@ export class TransportController {
   })
   getNearbyStations(@Query() query: NearbyStationsQueryDto): Promise<NearbyStationsResponseDto> {
     return this.sharedMobilityService.getNearbyStations(
+      { label: 'Point de recherche', lat: query.lat, lng: query.lng },
+      { radiusMeters: query.radius, limit: query.limit },
+    );
+  }
+
+  /**
+   * Tronçons cyclables et piétons autour d'un point (UF-304).
+   *
+   * Étapes 12-13 du flux de référence : la troisième branche du `Promise.all`
+   * du Service Itinéraire, celle qui vient de **notre** base PostGIS et non
+   * d'une source externe.
+   *
+   * Pas de `status` dans la réponse, à la différence des deux autres sources :
+   * si PostGIS ne répond pas, le JWT n'a pas pu être vérifié non plus. Il n'y a
+   * rien à dégrader gracieusement — l'erreur doit remonter en `500`.
+   */
+  @Get('cycle-paths/nearby')
+  @ApiOperation({
+    summary: 'Tronçons cyclables et piétons à proximité',
+    description:
+      'Interroge PostGIS (`ST_DWithin` sur index GiST) et retourne les aménagements cyclables ' +
+      'du rayon demandé, triés par distance croissante, tracé GeoJSON compris. La distance est ' +
+      'celle du **point le plus proche du tronçon** : une piste de deux kilomètres qui longe le ' +
+      'point demandé est à quelques mètres, pas à mille. `datasetImportedAt` date le jeu de ' +
+      "données — `null` signifie que l'import n'a pas encore été lancé.",
+  })
+  @ApiOkResponse({ type: CycleSegmentsResponseDto })
+  @ApiBadRequestResponse({
+    description: 'Coordonnées manquantes ou hors bornes WGS84, rayon ou limite hors plage (C4).',
+  })
+  getNearbyCycleSegments(@Query() query: CycleSegmentsQueryDto): Promise<CycleSegmentsResponseDto> {
+    return this.cyclePathsService.getCycleSegments(
       { label: 'Point de recherche', lat: query.lat, lng: query.lng },
       { radiusMeters: query.radius, limit: query.limit },
     );
