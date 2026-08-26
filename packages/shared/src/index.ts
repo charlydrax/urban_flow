@@ -7,6 +7,7 @@ export * from './transport-mode';
 export * from './route-priority';
 export * from './route';
 export * from './search-history';
+export * from './transit';
 export * from './auth';
 export * from './user';
 export * from './carbon';

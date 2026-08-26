@@ -245,7 +245,54 @@ POST http://localhost:8080/otp/gtfs/v1
 
 ---
 
-## 9. Recette UF-301
+## 9. Le connecteur applicatif (UF-302)
+
+Le module NestJS `transport` consomme cette instance via
+`TransitService.getTransitJourneys(from, to, options)` et normalise la réponse au
+format interne `TransitJourney`. Détail du découpage, correspondance des modes,
+comportement en cas de panne :
+[`apps/api/src/modules/transport/README.md`](../apps/api/src/modules/transport/README.md).
+
+Deux points relient ce document au code :
+
+- **Le recalage de date** décrit en section 4 est automatisé par le connecteur.
+  Une recherche à la date du jour est reportée sur une date équivalente de la
+  période couverte, en conservant le jour de la semaine ; le résultat le signale
+  via `dateAdjusted: true`. Rien n'est masqué, et le comportement disparaît de
+  lui-même dès que le GTFS est à jour.
+- **L'état du moteur** est exposé par `GET /api/transport/status` : la source
+  `gtfs` y passe à `down` quand OTP ne répond pas, ce qui permet au client
+  d'afficher un bandeau « mode dégradé » plutôt qu'une erreur (C10).
+
+Configuration côté API (`apps/api/.env`) :
+
+```dotenv
+OTP_BASE_URL=http://localhost:8080
+OTP_TIMEOUT_MS=12000
+```
+
+---
+
+## 10. Recette UF-302
+
+| Critère                                                       | Vérification                                                                                                 |
+| ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `getTransitJourneys` retourne des trajets structurés          | `npx jest src/modules/transport/transit.service.spec.ts`, ou Swagger `/api/transport/status` puis appel réel |
+| La réponse est normalisée, indépendante de la structure OTP   | `otp.mapper.spec.ts` + le test « ne laisse fuiter aucune structure OTP »                                     |
+| Un timeout OTP est capté et remonté proprement (pas de crash) | `otp.client.spec.ts` (qualification `timeout`) et `transit.service.spec.ts` (résultat `unavailable`)         |
+
+Vérification manuelle du cas « OTP ne répond pas », moteur à l'arrêt :
+
+```bash
+docker compose stop otp
+curl -b cookies.txt http://localhost:3001/api/transport/status
+# -> source gtfs : status "down", detail "OpenTripPlanner ne répond pas…"
+docker compose start otp
+```
+
+---
+
+## 11. Recette UF-301
 
 | Critère                                                              | Vérification                                                               |
 | -------------------------------------------------------------------- | -------------------------------------------------------------------------- |
