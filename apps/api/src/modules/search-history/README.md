@@ -104,6 +104,19 @@ le corps est rejeté en `400` par le `ValidationPipe` global
 (`forbidNonWhitelisted`). Le service n'expose délibérément aucune méthode
 « lire l'historique de X » — recette 2 du ticket.
 
+`findOwnedById(userId, id)` (ajoutée par UF-306, pour rejouer un trajet dans le
+diagnostic des sources) ne fait pas exception : le `user_id` est **dans la clause
+`WHERE`**, pas vérifié après coup.
+
+```sql
+WHERE id = $1::uuid AND user_id = $2::uuid
+```
+
+Une entrée appartenant à quelqu'un d'autre ne remonte donc aucune ligne, et
+l'appelant ne peut pas distinguer « n'existe pas » de « n'est pas à vous » —
+sans quoi l'endpoint de diagnostic serait devenu un moyen de lire les trajets
+d'autrui en les faisant rejouer.
+
 **Injection SQL (OWASP A03)** : le SQL brut est écrit en _tagged template_
 `$queryRaw`, où chaque `${…}` devient un paramètre lié côté PostgreSQL. Aucune
 valeur venant du client n'est concaténée dans le texte de la requête ; un test
@@ -133,6 +146,13 @@ le vérifie explicitement.
   de lecture verrouillé (recette 2), écriture en géométrie SRID 4326 avec l'ordre
   (lng, lat) (recette 3), paramétrage des valeurs client, plafonnement du
   `limit`, dédoublonnage des trajets répétés.
+
+## Consommateurs du service
+
+- `SourceDiagnosticsService` (UF-306) — **lecture seule** : `findOwnedById` pour
+  rejouer un trajet enregistré et sonder les trois sources dessus. Il n'écrit
+  jamais ici : sonder l'infrastructure n'est pas un déplacement, et l'inscrire
+  fausserait les rappels récents puis le bilan carbone de l'usager (C8).
 
 ## Reste à faire (hors UF-204)
 

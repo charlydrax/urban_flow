@@ -13,6 +13,11 @@ Complète [`otp-gtfs.md`](./otp-gtfs.md), [`gbfs-velov.md`](./gbfs-velov.md) et
 [`cycle-paths-postgis.md`](./cycle-paths-postgis.md), qui décrivent chacune des
 trois sources prises isolément.
 
+> Pour **observer** cette collecte sur un trajet réel — durées par source,
+> données brutes, causes de panne —, voir
+> [`source-diagnostics-endpoint.md`](./source-diagnostics-endpoint.md) (UF-306)
+> et l'écran `/dev/sources`.
+
 ---
 
 ## 1. Le problème
@@ -324,3 +329,6 @@ savoir que les promesses progressent réellement en même temps.
   collecter.
 - **Le calcul carbone** et **l'écriture de `search_history`** (étapes 6 et 7),
   qui viennent après la fusion.
+- **L'exposition de la collecte** : rien ne permet encore de voir ces données
+  brutes depuis l'extérieur. C'est l'objet d'UF-306
+  ([`source-diagnostics-endpoint.md`](./source-diagnostics-endpoint.md)).
