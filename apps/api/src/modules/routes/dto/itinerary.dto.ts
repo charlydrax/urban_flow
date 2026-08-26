@@ -165,4 +165,26 @@ export class PlanRoutesResponseDto implements PlanRoutesResponse {
       'source `sharedMobility` indisponible ne se lisent pas pareil.',
   })
   sources!: SourceAvailabilityDto[];
+
+  /**
+   * Identifiant de la ligne écrite dans `search_history` pour cette recherche
+   * (UF-204, étape 18 du flux).
+   *
+   * Publié pour que le client n'ait pas à réenregistrer le trajet : un second
+   * `POST /search-history` dupliquerait ce que le serveur vient d'écrire. Il
+   * servira aussi de référence pour rattacher l'option retenue quand l'usager
+   * en choisira une (UF-404).
+   *
+   * `null` quand l'écriture a échoué — un désagrément, pas une panne de la
+   * recherche : les itinéraires sont rendus quand même (C10).
+   */
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    format: 'uuid',
+    example: '3f1b8c2e-9a4d-4c1f-8b7a-2e5d6c3a1f04',
+    description:
+      'Ligne d’historique créée pour cette recherche, ou `null` si elle n’a pas pu être écrite.',
+  })
+  searchHistoryId!: string | null;
 }

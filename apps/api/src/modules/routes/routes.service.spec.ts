@@ -3,6 +3,7 @@ import { Test } from '@nestjs/testing';
 import { RoutePriority, TransportMode } from '@urbanflow/shared';
 
 import { CarbonService } from '../carbon/carbon.service';
+import { SearchHistoryService } from '../search-history/search-history.service';
 import { DEFAULT_PREFERENCES, UsersService } from '../users/users.service';
 import { PlanRouteDto } from './dto/plan-route.dto';
 import { RoutesService } from './routes.service';
@@ -22,7 +23,9 @@ import { SourceCollectorService } from './sources/source-collector.service';
  *  - la fusion reçoit bien la collecte, et son résultat est valorisé par le
  *    Service Carbone (étape 6) ;
  *  - trois sources muettes donnent une réponse vide, pas une exception (C10) ;
- *  - une extrémité sans coordonnées est un défaut d'appel, pas une panne.
+ *  - une extrémité sans coordonnées est un défaut d'appel, pas une panne ;
+ *  - la recherche est enregistrée dans l'historique à chaque appel, sur le
+ *    compte du JWT, et une écriture ratée ne coûte pas les itinéraires (UF-402).
  */
 describe('RoutesService', () => {
   let service: RoutesService;
@@ -30,14 +33,15 @@ describe('RoutesService', () => {
   let collectAllSources: jest.Mock;
   let toAvailability: jest.Mock;
   let computeFootprint: jest.Mock;
+  let createSearchHistory: jest.Mock;
 
   const userId = 'user-from-jwt';
 
+  // Depuis UF-402 le corps ne porte plus que les deux extrémités : il n'y a
+  // plus de `userId` à opposer à celui du JWT (C4).
   const dto = (overrides: Partial<PlanRouteDto> = {}): PlanRouteDto => ({
     from: { label: 'Part-Dieu', lat: 45.760515, lng: 4.859057 },
     to: { label: 'Bellecour', lat: 45.757813, lng: 4.832011 },
-    // Le contrat du diagramme porte un userId ; il ne doit JAMAIS être utilisé.
-    userId: 'user-from-body',
     ...overrides,
   });
 
@@ -103,6 +107,7 @@ describe('RoutesService', () => {
       { source: 'cyclePaths', available: true },
     ]);
     computeFootprint = jest.fn().mockReturnValue(42);
+    createSearchHistory = jest.fn().mockResolvedValue({ id: 'history-1' });
 
     const moduleRef = await Test.createTestingModule({
       providers: [
@@ -110,6 +115,7 @@ describe('RoutesService', () => {
         { provide: UsersService, useValue: { getPreferences } },
         { provide: SourceCollectorService, useValue: { collectAllSources, toAvailability } },
         { provide: CarbonService, useValue: { computeFootprint } },
+        { provide: SearchHistoryService, useValue: { create: createSearchHistory } },
       ],
     }).compile();
 
@@ -118,11 +124,13 @@ describe('RoutesService', () => {
     jest.spyOn(service['logger'], 'log').mockImplementation(() => undefined);
   });
 
-  it('reads the preferences of the JWT account, never of the body (C4 / OWASP A01)', async () => {
+  it('works entirely off the JWT identity — the body carries none (C4 / OWASP A01)', async () => {
     await service.plan(dto(), userId);
 
     expect(getPreferences).toHaveBeenCalledWith(userId);
-    expect(getPreferences).not.toHaveBeenCalledWith('user-from-body');
+    // La même identité sert aux deux accès au compte : lecture du profil et
+    // écriture de l'historique. Aucun autre identifiant n'entre dans le service.
+    expect(createSearchHistory).toHaveBeenCalledWith(userId, expect.anything());
   });
 
   it('reads the preferences before collecting, because they shape the request (C12)', async () => {
@@ -203,6 +211,10 @@ describe('RoutesService', () => {
     expect(result.sources.every((source) => !source.available)).toBe(true);
     // Et surtout : rien n'est inventé pour meubler la réponse.
     expect(computeFootprint).not.toHaveBeenCalled();
+    // L'historique décrit ce que l'usager a cherché, pas ce que nos sources ont
+    // su répondre : le trajet reste à mémoriser même quand les trois se taisent.
+    expect(createSearchHistory).toHaveBeenCalledTimes(1);
+    expect(result.searchHistoryId).toBe('history-1');
   });
 
   it('rejects an endpoint without coordinates as a bad request, not as an outage', async () => {
@@ -219,5 +231,60 @@ describe('RoutesService', () => {
     // Rien ne doit avoir été interrogé : ni la base, ni les trois sources.
     expect(getPreferences).not.toHaveBeenCalled();
     expect(collectAllSources).not.toHaveBeenCalled();
+    // Ni écrit : un appel mal formé n'est pas une recherche de l'usager.
+    expect(createSearchHistory).not.toHaveBeenCalled();
+  });
+
+  it('records the search in the history at every call, on the JWT account (step 18)', async () => {
+    const result = await service.plan(dto(), userId);
+
+    expect(createSearchHistory).toHaveBeenCalledTimes(1);
+    expect(createSearchHistory).toHaveBeenCalledWith(userId, {
+      from: { label: 'Part-Dieu', lat: 45.760515, lng: 4.859057 },
+      to: { label: 'Bellecour', lat: 45.757813, lng: 4.832011 },
+    });
+    // La ligne créée est publiée : le client n'a pas à l'enregistrer à son tour,
+    // ce qui doublerait l'entrée que le serveur vient d'écrire.
+    expect(result.searchHistoryId).toBe('history-1');
+  });
+
+  it('records the search without pretending an option was chosen', async () => {
+    await service.plan(dto(), userId);
+
+    // Étape 18 : aucune option n'est encore retenue. Inscrire d'office la
+    // première proposition ferait passer notre classement pour un choix de
+    // l'usager, et fausserait le tableau de bord carbone (C8).
+    const [, payload] = createSearchHistory.mock.calls[0] as [string, Record<string, unknown>];
+    expect(payload).not.toHaveProperty('selectedSummary');
+    expect(payload).not.toHaveProperty('carbonGrams');
+  });
+
+  it('does not wait for the history write to start collecting the sources (C5)', async () => {
+    const order: string[] = [];
+    createSearchHistory.mockImplementation(() => {
+      order.push('history:start');
+      return Promise.resolve({ id: 'history-1' });
+    });
+    collectAllSources.mockImplementation(() => {
+      order.push('collect');
+      return Promise.resolve(collected());
+    });
+
+    await service.plan(dto(), userId);
+
+    // L'insertion part avant la collecte et se paie donc sous la latence de la
+    // source la plus lente, au lieu de s'y ajouter.
+    expect(order).toEqual(['history:start', 'collect']);
+  });
+
+  it('still answers with the itineraries when the history write fails (C10)', async () => {
+    createSearchHistory.mockRejectedValue(new Error('database unreachable'));
+
+    const result = await service.plan(dto(), userId);
+
+    // Ne pas mémoriser un trajet est un désagrément ; perdre pour cela des
+    // itinéraires déjà calculés serait une régression fonctionnelle.
+    expect(result.itineraries.length).toBeGreaterThan(0);
+    expect(result.searchHistoryId).toBeNull();
   });
 });

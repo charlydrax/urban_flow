@@ -182,8 +182,11 @@ export function PlannerForm({ location }: { location: UserLocationState }) {
 
     // Le contrat de `POST /api/routes/plan` est déjà tenu ici : deux `Place`
     // complets, coordonnées comprises. Le ticket UF-203 s'arrête à leur
-    // constitution ; le calcul lui-même arrive avec la suite de F2.
-    // TODO(F2) : apiClient.planRoutes({ from, to, userId }) + rendu des résultats.
+    // constitution ; le rendu des résultats arrive avec UF-404.
+    // TODO(UF-404) : apiClient.planRoutes({ from, to }) + rendu des résultats.
+    // ⚠️ En le branchant, SUPPRIMER le `history.remember` ci-dessus : depuis
+    // UF-402 l'API enregistre elle-même la recherche et renvoie la ligne créée
+    // dans `searchHistoryId` — garder les deux créerait un doublon.
     setTrip({ from: toPlace(from.place), to: toPlace(to.place) });
   };
 

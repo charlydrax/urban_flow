@@ -13,11 +13,19 @@ export interface Place {
   lng?: number;
 }
 
-/** Corps de POST /api/routes/plan (contrat du diagramme de séquence MVP). */
+/**
+ * Corps de `POST /api/routes/plan`.
+ *
+ * ⚠️ **Aucun `userId`** (C4 / OWASP A01). Le diagramme de séquence du MVP en
+ * portait un ; l'endpoint définitif (UF-402) ne l'accepte plus. L'auteur d'une
+ * recherche est toujours le porteur du JWT vérifié — il n'y a donc aucun champ
+ * à falsifier pour lire les préférences ou écrire dans l'historique d'un autre
+ * compte. Le `ValidationPipe` global (`whitelist` + `forbidNonWhitelisted`) fait
+ * d'ailleurs échouer en `400` toute requête qui en envoie un.
+ */
 export interface PlanRouteRequest {
   from: Place;
   to: Place;
-  userId: string;
 }
 
 /** Tracé GeoJSON LineString [lng, lat] pour l'affichage MapLibre (format standard — C9). */
@@ -108,4 +116,17 @@ export interface PlanRoutesResponse {
    * liste d'itinéraires est complète.
    */
   sources: SourceAvailability[];
+  /**
+   * Identifiant de la ligne écrite dans l'historique pour cette recherche
+   * (UF-204, étape 18 du flux) — `null` si l'écriture a échoué.
+   *
+   * Publié pour que le client n'ait pas à enregistrer la recherche lui-même :
+   * un second `POST /search-history` créerait un doublon de ce que le serveur
+   * vient d'écrire. Il lui sert aussi de référence pour rattacher plus tard
+   * l'option effectivement retenue.
+   *
+   * `null` n'est pas une erreur à afficher : ne pas mémoriser un trajet est un
+   * désagrément, pas une panne de la recherche (C10).
+   */
+  searchHistoryId: string | null;
 }
