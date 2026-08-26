@@ -8,6 +8,7 @@ export * from './route-priority';
 export * from './route';
 export * from './search-history';
 export * from './transit';
+export * from './shared-mobility';
 export * from './auth';
 export * from './user';
 export * from './carbon';
