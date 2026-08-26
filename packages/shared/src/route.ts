@@ -49,8 +49,39 @@ export interface Itinerary {
   geometry?: LineStringGeometry;
 }
 
+/**
+ * État d'une des trois sources interrogées par le planificateur (UF-305).
+ *
+ * Publié dans la réponse parce que le client ne peut pas le deviner : une liste
+ * sans option vélo peut vouloir dire « aucun vélo praticable ici » ou «
+ * l'opérateur n'a pas répondu », et ce n'est pas la même chose à annoncer à
+ * l'usager. C'est ce qui alimente le bandeau « mode dégradé » (C10).
+ */
+export interface SourceAvailability {
+  /** `transit` (GTFS), `sharedMobility` (GBFS) ou `cyclePaths` (PostGIS). */
+  source: 'transit' | 'sharedMobility' | 'cyclePaths';
+  /** `false` quand la source n'a rien pu fournir pour cette recherche. */
+  available: boolean;
+  /**
+   * Cause de l'indisponibilité, renseignée uniquement si `available` est `false`.
+   *
+   * Volontairement générique (`timeout`, `network`, `upstream-error`,
+   * `internal-error`) : le détail technique reste dans les logs du serveur, il
+   * n'apprendrait rien à l'usager et exposerait notre topologie (C11).
+   */
+  reason?: 'timeout' | 'network' | 'upstream-error' | 'internal-error';
+}
+
 /** Réponse de POST /api/routes/plan, triée par CO₂ croissant. */
 export interface PlanRoutesResponse {
   itineraries: Itinerary[];
   sortedBy: 'carbonAsc';
+  /**
+   * État des trois sources pour **cette** recherche (UF-305).
+   *
+   * Toujours présent, même quand tout va bien : un tableau où les trois sources
+   * sont `available` est une information, pas du remplissage — il dit que la
+   * liste d'itinéraires est complète.
+   */
+  sources: SourceAvailability[];
 }
