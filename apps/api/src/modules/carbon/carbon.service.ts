@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 
 import { RouteSegmentDto } from '../routes/dto/itinerary.dto';
+import { segmentCarbonGrams } from './emission-factors';
 
 /** Tableau de bord carbone personnel exposé par l'API. */
 export interface CarbonDashboard {
@@ -17,9 +18,16 @@ export interface CarbonDashboard {
 /**
  * Service Carbone (fonctionnalité au choix retenue).
  *
- * ⚠️ SQUELETTE : `computeFootprint` agrège les valeurs déjà portées par les
- * segments (passthrough) ; le calcul réel par facteurs d'émission
- * (g CO₂/passager·km par mode, source ADEME) sera implémenté ensuite.
+ * Autorité unique sur l'empreinte publiée : `computeFootprint` **recalcule**
+ * chaque segment à partir de son mode et de sa distance, au lieu de faire
+ * confiance à la valeur qu'il porte. Un segment fabriqué par la fusion (UF-401)
+ * et un segment venu d'ailleurs sont ainsi valorisés au même barème, et une
+ * évolution du barème (`emission-factors.ts`) se propage sans que personne
+ * n'ait à ré-émettre ses segments.
+ *
+ * ⚠️ Le barème reste **provisoire** — ordres de grandeur ADEME, à affiner par un
+ * ticket dédié (taux d'occupation réels, mix électrique, VAE). Il classe
+ * correctement les modes entre eux, ce qui est ce dont le tri a besoin.
  *
  * Couvre : proposition de valeur écologique du produit ; alimente le tri par
  * CO₂ croissant (étape 9 du flux) et le tableau de bord personnel.
@@ -33,8 +41,10 @@ export class CarbonService {
    * @returns Empreinte totale en grammes de CO₂
    */
   computeFootprint(segments: RouteSegmentDto[]): number {
-    // TODO(carbone): facteurs d'émission ADEME par mode × distance (g CO₂/passager·km)
-    return segments.reduce((total, segment) => total + segment.carbonGrams, 0);
+    return segments.reduce(
+      (total, segment) => total + segmentCarbonGrams(segment.mode, segment.distanceMeters),
+      0,
+    );
   }
 
   /**

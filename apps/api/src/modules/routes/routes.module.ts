@@ -22,8 +22,8 @@ import { SourceDiagnosticsService } from './sources/source-diagnostics.service';
  *
  * `SearchHistoryModule` est importé depuis UF-306, en **lecture seule** : le
  * diagnostic rejoue une recherche enregistrée pour sonder exactement le trajet
- * que l'usager a demandé. Le planificateur y écrira à son tour au Sprint 4
- * (étape 18 du flux) ; le diagnostic, lui, n'écrira jamais — sonder les sources
+ * que l'usager a demandé. Le planificateur y écrira à son tour (UF-402,
+ * étape 7 du flux) ; le diagnostic, lui, n'écrira jamais — sonder les sources
  * n'est pas un déplacement (C8).
  */
 @Module({

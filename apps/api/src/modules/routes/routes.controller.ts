@@ -36,9 +36,10 @@ export class RoutesController {
   /**
    * Planifie des itinéraires multimodaux entre deux lieux.
    *
-   * Depuis UF-305, les trois sources (GTFS, GBFS, PostGIS) sont réellement
-   * interrogées **en parallèle**, et leur état est rapporté dans `sources`.
-   * Les itinéraires eux-mêmes restent des mocks jusqu'à la fusion (Sprint 4).
+   * Les trois sources (GTFS, GBFS, PostGIS) sont interrogées **en parallèle**
+   * (UF-305), puis **fusionnées** en itinéraires de bout en bout (UF-401) :
+   * tout-TC, TC avec rabattement à vélo, vélo en libre-service porte-à-porte,
+   * marche seule sur une courte distance. Plus aucun itinéraire n'est simulé.
    *
    * Trois sources muettes donnent un `200` avec une liste vide, jamais un
    * `500` : un code d'erreur ferait croire à l'usager que sa requête est
@@ -51,15 +52,18 @@ export class RoutesController {
     description:
       'Contrat du diagramme de séquence MVP : { from, to, userId }. Les trois sources sont ' +
       'interrogées en parallèle (UF-305) : le temps de réponse suit la plus lente, pas la ' +
-      'somme des trois. Le champ `sources` rapporte laquelle a répondu — une liste sans ' +
-      'option vélo et un opérateur injoignable ne se lisent pas pareil. ' +
-      '⚠️ Les itinéraires sont encore des mocks (fusion : Sprint 4) ; `sources`, lui, est réel.',
+      'somme des trois. Elles sont ensuite fusionnées en itinéraires continus (UF-401) — ' +
+      'tout-TC, TC + vélo en rabattement, vélo seul, marche seule si c’est court — au plus ' +
+      'cinq, filtrés puis classés selon les préférences du profil (marche maximale, ' +
+      'accessibilité PMR, priorité rapide ou écolo). Le champ `sources` rapporte laquelle a ' +
+      'répondu : une liste sans option vélo et un opérateur injoignable ne se lisent pas pareil.',
   })
   @ApiOkResponse({
     type: PlanRoutesResponseDto,
     description:
-      'Itinéraires triés par empreinte croissante, et état des trois sources. Renvoyé même ' +
-      'quand toutes les sources ont échoué : la liste est alors vide et `sources` dit pourquoi.',
+      'Itinéraires classés selon `sortedBy` (empreinte croissante par défaut, durée pour un ' +
+      'profil « rapide »), et état des trois sources. Renvoyé même quand toutes les sources ' +
+      'ont échoué : la liste est alors vide et `sources` dit pourquoi.',
   })
   @ApiUnauthorizedResponse({ description: 'JWT absent, invalide ou expiré.' })
   @ApiBadRequestResponse({
@@ -78,11 +82,12 @@ export class RoutesController {
    * Interroge les trois sources et rend leurs données **brutes**, sans fusion
    * (UF-306) — endpoint interne de vérification du Sprint 3.
    *
-   * ⚠️ **Temporaire.** Il disparaîtra au Sprint 4, quand `POST /routes/plan`
-   * rendra de vrais itinéraires fusionnés. Il existe pour valider la chaîne
-   * complète — GTFS, GBFS, PostGIS — avant qu'on ne construise par-dessus :
-   * une fusion qui rend une liste vide ne dit pas si le tort revient à la
-   * fusion ou à une source muette.
+   * ⚠️ **Temporaire.** Il a servi à valider la chaîne complète — GTFS, GBFS,
+   * PostGIS — avant qu'on ne construise la fusion par-dessus : une fusion qui
+   * rend une liste vide ne dit pas si le tort revient à la fusion ou à une
+   * source muette. Maintenant que `POST /routes/plan` rend de vrais itinéraires
+   * (UF-401), il garde exactement cette valeur de diagnostic : il reste le seul
+   * moyen de voir ce que les sources ont *réellement* répondu.
    *
    * Protégé comme le reste du contrôleur : le guard JWT global répond `401`
    * sans token valide (recette 2 du ticket). Il est de surcroît **éteint hors
@@ -98,8 +103,9 @@ export class RoutesController {
       'extrémités, tronçons cyclables (PostGIS) aux deux extrémités. ' +
       'Le corps accepte `{ from, to }`, ou `{ searchHistoryId }` pour rejouer une recherche ' +
       'enregistrée (UF-204). ' +
-      '⚠️ Endpoint de développement, désactivé en production (404) et destiné à disparaître ' +
-      'au profit de `/routes/plan` au Sprint 4.',
+      '⚠️ Endpoint de développement, désactivé en production (404). Il complète ' +
+      '`/routes/plan` (qui rend désormais de vrais itinéraires fusionnés) en montrant les ' +
+      'données d’entrée de cette fusion.',
   })
   @ApiOkResponse({
     type: TestSourcesResponseDto,

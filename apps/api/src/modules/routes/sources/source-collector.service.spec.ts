@@ -171,9 +171,13 @@ describe('SourceCollectorService', () => {
 
       // Un vélo se prend à une borne ET se rend à une autre : une seule
       // extrémité ne permettrait pas de construire l'option.
+      //
+      // Le rayon passé est celui de la planification (plus large que le défaut
+      // du connecteur) : la fusion a besoin de bornes près des **arrêts**, pas
+      // seulement près de l'usager — voir `PLANNING_STATION_RADIUS_METERS`.
       expect(getNearbyStations).toHaveBeenCalledTimes(2);
-      expect(getNearbyStations).toHaveBeenCalledWith(from);
-      expect(getNearbyStations).toHaveBeenCalledWith(to);
+      expect(getNearbyStations).toHaveBeenCalledWith(from, expect.anything());
+      expect(getNearbyStations).toHaveBeenCalledWith(to, expect.anything());
       expect(getCycleSegments).toHaveBeenCalledTimes(2);
     });
   });

@@ -2,11 +2,16 @@ import { Test } from '@nestjs/testing';
 
 import { TransportMode } from '../../common/enums/transport-mode.enum';
 import { CarbonService } from './carbon.service';
+import { segmentCarbonGrams } from './emission-factors';
 
 /**
- * Test smoke du Service Carbone : vérifie que la chaîne de test Jest fonctionne
- * et fige le contrat de `computeFootprint` (somme des segments).
- * Les cas réels (facteurs d'émission par mode) seront ajoutés avec l'implémentation.
+ * Contrat de `computeFootprint` : l'empreinte d'un itinéraire est la somme de
+ * ses segments, **recalculée** au barème du service.
+ *
+ * Le point important est là : depuis UF-401 le service ne fait plus confiance
+ * au `carbonGrams` que porte un segment. Un segment fabriqué par la fusion et
+ * un segment venu d'ailleurs sont valorisés pareil, et une valeur fantaisiste
+ * ne peut pas se glisser dans le total publié.
  */
 describe('CarbonService', () => {
   let service: CarbonService;
@@ -35,11 +40,30 @@ describe('CarbonService', () => {
         to: 'C',
         durationMinutes: 8,
         distanceMeters: 3200,
-        carbonGrams: 12,
+        carbonGrams: 0,
       },
     ]);
 
-    expect(total).toBe(12);
+    // 3,2 km de métro au barème du service ; la marche ne coûte rien.
+    expect(total).toBe(segmentCarbonGrams(TransportMode.METRO, 3200));
+    expect(total).toBeGreaterThan(0);
+  });
+
+  it('ignores the value carried by a segment and applies its own scale', () => {
+    // Un appelant qui annoncerait une empreinte nulle sur un trajet en bus ne
+    // doit pas pouvoir la faire publier telle quelle.
+    const total = service.computeFootprint([
+      {
+        mode: TransportMode.BUS,
+        from: 'A',
+        to: 'B',
+        durationMinutes: 20,
+        distanceMeters: 4000,
+        carbonGrams: 0,
+      },
+    ]);
+
+    expect(total).toBe(segmentCarbonGrams(TransportMode.BUS, 4000));
   });
 
   it('returns 0 for an empty itinerary', () => {

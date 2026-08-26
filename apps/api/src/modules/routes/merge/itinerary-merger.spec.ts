@@ -1,0 +1,590 @@
+import {
+  CycleFacilityType,
+  type CycleSegment,
+  type SharedMobilityStation,
+  type TransitJourney,
+  type TransitLeg,
+} from '@urbanflow/shared';
+
+import { RoutePriority } from '../../../common/enums/route-priority.enum';
+import { TransportMode } from '../../../common/enums/transport-mode.enum';
+import type { CollectedSources } from '../sources/collected-sources';
+import {
+  MAX_ITINERARIES,
+  mergeIntoItineraries,
+  type MergeEndpoint,
+  type MergePreferences,
+} from './itinerary-merger';
+
+/**
+ * Recette du ticket UF-401, sur le scénario nominal du projet
+ * (Part-Dieu → Bellecour, CLAUDE.md §1).
+ *
+ * Les quatre points de recette y sont couverts explicitement :
+ *  1. plusieurs itinéraires multimodaux **distincts** ;
+ *  2. chaque itinéraire est une **chaîne continue** (aucun trou géographique) ;
+ *  3. les **préférences** du profil changent les propositions (deux profils) ;
+ *  4. le nombre d'itinéraires est **plafonné**.
+ *
+ * La fusion étant une fonction pure, tout se joue sur des données figées : ni
+ * OTP, ni flux GBFS, ni PostGIS ne sont sollicités. C'est précisément ce qui
+ * rend l'algorithme — le cœur du produit — vérifiable en soutenance.
+ */
+describe('mergeIntoItineraries', () => {
+  /** Départ du scénario nominal. */
+  const PART_DIEU: MergeEndpoint = { label: 'Part-Dieu', lat: 45.760515, lng: 4.859057 };
+  /** Arrivée du scénario nominal, à environ 2,1 km de vol d'oiseau. */
+  const BELLECOUR: MergeEndpoint = { label: 'Bellecour', lat: 45.757813, lng: 4.832011 };
+
+  const DEFAULT_PREFS: MergePreferences = {
+    preferredModes: [TransportMode.WALK, TransportMode.METRO, TransportMode.BIKE],
+    priority: RoutePriority.GREENEST,
+    reducedMobility: false,
+    maxWalkMinutes: 15,
+  };
+
+  const prefs = (overrides: Partial<MergePreferences> = {}): MergePreferences => ({
+    ...DEFAULT_PREFS,
+    ...overrides,
+  });
+
+  // ------------------------------------------------------------- fabriques
+
+  const place = (name: string, lat: number, lng: number, stopId?: string) => ({
+    name,
+    lat,
+    lng,
+    ...(stopId ? { stopId } : {}),
+  });
+
+  const leg = (
+    overrides: Partial<TransitLeg> & Pick<TransitLeg, 'mode' | 'from' | 'to'>,
+  ): TransitLeg => ({
+    sourceMode: overrides.mode,
+    transit: overrides.mode !== TransportMode.WALK,
+    departureAt: '2026-08-26T08:00:00+02:00',
+    arrivalAt: '2026-08-26T08:15:00+02:00',
+    durationMinutes: 5,
+    distanceMeters: 500,
+    accessible: true,
+    ...overrides,
+  });
+
+  /**
+   * Trajet TC de référence : une longue marche d'accès (15 min), un métro, une
+   * courte marche de sortie. C'est la marche d'accès qui rend le rabattement à
+   * vélo intéressant — et c'est le cas d'usage que le ticket cible.
+   */
+  const journey = (overrides: Partial<TransitJourney> = {}): TransitJourney => ({
+    id: 'transit-1',
+    departureAt: '2026-08-26T08:00:00+02:00',
+    arrivalAt: '2026-08-26T08:23:00+02:00',
+    durationMinutes: 23,
+    walkDistanceMeters: 1300,
+    transfers: 0,
+    accessible: true,
+    legs: [
+      leg({
+        mode: TransportMode.WALK,
+        from: place('Origin', PART_DIEU.lat, PART_DIEU.lng),
+        to: place('Saxe-Gambetta', 45.7565, 4.848, 'TCL:1234'),
+        durationMinutes: 15,
+        distanceMeters: 1200,
+      }),
+      leg({
+        mode: TransportMode.METRO,
+        from: place('Saxe-Gambetta', 45.7565, 4.848, 'TCL:1234'),
+        to: place('Bellecour', 45.7578, 4.8325, 'TCL:5678'),
+        durationMinutes: 6,
+        distanceMeters: 2000,
+        line: 'B',
+      }),
+      leg({
+        mode: TransportMode.WALK,
+        from: place('Bellecour', 45.7578, 4.8325, 'TCL:5678'),
+        to: place('Destination', BELLECOUR.lat, BELLECOUR.lng),
+        durationMinutes: 2,
+        distanceMeters: 100,
+      }),
+    ],
+    ...overrides,
+  });
+
+  const station = (
+    overrides: Partial<SharedMobilityStation> &
+      Pick<SharedMobilityStation, 'id' | 'name' | 'lat' | 'lng'>,
+  ): SharedMobilityStation => ({
+    distanceMeters: 0,
+    capacity: 20,
+    vehiclesAvailable: 8,
+    vehicles: [{ mode: TransportMode.BIKE, electric: false, count: 8 }],
+    docksAvailable: 12,
+    renting: true,
+    returning: true,
+    lastReportedAt: '2026-08-26T07:59:00+02:00',
+    ...overrides,
+  });
+
+  /** Borne devant le départ. */
+  const VILLETTE = station({ id: '1001', name: 'PART-DIEU / VILLETTE', lat: 45.7604, lng: 4.8598 });
+  /** Borne au pied de l'arrêt d'embarquement — la clé du rabattement. */
+  const GAMBETTA = station({ id: '1002', name: 'SAXE / GAMBETTA', lat: 45.7567, lng: 4.8483 });
+  /** Borne devant l'arrivée. */
+  const BELLECOUR_STATION = station({
+    id: '2001',
+    name: 'BELLECOUR / RÉPUBLIQUE',
+    lat: 45.758,
+    lng: 4.8325,
+  });
+
+  /** Arrivée courte : environ 1,3 km, de quoi rendre la marche seule crédible. */
+  const GUILLOTIERE: MergeEndpoint = { label: 'Guillotière', lat: 45.7578, lng: 4.8425 };
+  /** Borne devant cette arrivée courte. */
+  const GUILLOTIERE_STATION = station({
+    id: '3001',
+    name: 'GUILLOTIÈRE / GRANDE RUE',
+    lat: 45.7576,
+    lng: 4.8428,
+  });
+
+  /** Même trajet TC, mais vers l'arrivée courte — les quatre familles deviennent constructibles. */
+  const shortJourney = (id: string, line: string, mode = TransportMode.METRO): TransitJourney =>
+    journey({
+      id,
+      legs: [
+        leg({
+          mode: TransportMode.WALK,
+          from: place('Origin', PART_DIEU.lat, PART_DIEU.lng),
+          to: place('Saxe-Gambetta', 45.7565, 4.848, 'TCL:1234'),
+          durationMinutes: 15,
+          distanceMeters: 1200,
+        }),
+        leg({
+          mode,
+          from: place('Saxe-Gambetta', 45.7565, 4.848, 'TCL:1234'),
+          to: place('Guillotière', 45.758, 4.843, 'TCL:9012'),
+          durationMinutes: 4,
+          distanceMeters: 700,
+          line,
+        }),
+        leg({
+          mode: TransportMode.WALK,
+          from: place('Guillotière', 45.758, 4.843, 'TCL:9012'),
+          to: place('Destination', GUILLOTIERE.lat, GUILLOTIERE.lng),
+          durationMinutes: 1,
+          distanceMeters: 60,
+        }),
+      ],
+    });
+
+  const cycleSegment = (id: string, coordinates: [number, number][]): CycleSegment => ({
+    id,
+    name: 'Rue Garibaldi',
+    facilityType: CycleFacilityType.CYCLE_TRACK,
+    sourceFacilityType: 'Piste Cyclable',
+    network: 'Voies Lyonnaises',
+    surface: 'Enrobé',
+    distanceMeters: 10,
+    lengthMeters: 800,
+    geometry: { type: 'MultiLineString', coordinates: [coordinates] },
+  });
+
+  /**
+   * Collecte nominale : les trois sources ont répondu.
+   *
+   * Chaque source est surchargeable indépendamment — c'est ce qui permet de
+   * vérifier la dégradation gracieuse source par source (C10).
+   */
+  const sources = (
+    options: {
+      journeys?: TransitJourney[];
+      originStations?: SharedMobilityStation[];
+      destinationStations?: SharedMobilityStation[];
+      cycleSegments?: CycleSegment[];
+      transitFailed?: boolean;
+      sharedMobilityFailed?: boolean;
+      cyclePathsFailed?: boolean;
+    } = {},
+  ): CollectedSources => {
+    const {
+      journeys = [journey()],
+      originStations = [VILLETTE, GAMBETTA],
+      destinationStations = [BELLECOUR_STATION],
+      cycleSegments = [],
+      transitFailed = false,
+      sharedMobilityFailed = false,
+      cyclePathsFailed = false,
+    } = options;
+
+    const failed = <T>(source: 'transit' | 'sharedMobility' | 'cyclePaths') =>
+      ({
+        status: 'failed' as const,
+        data: null,
+        elapsedMs: 0,
+        failure: { source, kind: 'unavailable' as const, reason: 'test' },
+      }) satisfies { status: 'failed'; data: T | null; elapsedMs: number; failure: unknown };
+
+    return {
+      transit: transitFailed
+        ? failed('transit')
+        : {
+            status: 'ok',
+            elapsedMs: 120,
+            data: {
+              status: 'ok',
+              journeys,
+              requestedDate: '2026-08-26',
+              serviceDate: '2022-09-01',
+              dateAdjusted: true,
+            },
+          },
+      sharedMobility: sharedMobilityFailed
+        ? failed('sharedMobility')
+        : {
+            status: 'ok',
+            elapsedMs: 60,
+            data: {
+              origin: {
+                status: 'ok',
+                stations: originStations,
+                radiusMeters: 900,
+                publishedAt: '2026-08-26T07:59:00+02:00',
+              },
+              destination: {
+                status: 'ok',
+                stations: destinationStations,
+                radiusMeters: 900,
+                publishedAt: '2026-08-26T07:59:00+02:00',
+              },
+            },
+          },
+      cyclePaths: cyclePathsFailed
+        ? failed('cyclePaths')
+        : {
+            status: 'ok',
+            elapsedMs: 8,
+            data: {
+              origin: { segments: cycleSegments, radiusMeters: 300, datasetImportedAt: null },
+              destination: { segments: [], radiusMeters: 300, datasetImportedAt: null },
+            },
+          },
+      failures: [],
+      allSourcesFailed: false,
+      elapsedMs: 130,
+    } as CollectedSources;
+  };
+
+  // -------------------------------------------------------------- recette 1
+
+  it('proposes several distinct multimodal itineraries for a Lyon trip', () => {
+    const { itineraries } = mergeIntoItineraries(sources(), PART_DIEU, BELLECOUR, prefs());
+
+    expect(itineraries.length).toBeGreaterThanOrEqual(3);
+
+    // « Distincts » ne veut pas dire « au nombre de trois » mais « qui ne se
+    // ressemblent pas » : trois variantes du même métro ne sont pas trois choix.
+    const summaries = itineraries.map((itinerary) => itinerary.summary);
+    expect(new Set(summaries).size).toBe(summaries.length);
+
+    // Les trois familles attendues du ticket sont représentées.
+    expect(itineraries.map((itinerary) => itinerary.id).sort()).toEqual([
+      'bike',
+      'bike-transit',
+      'transit-1',
+    ]);
+  });
+
+  it('builds the bike feeder out of a real docking station near the boarding stop', () => {
+    const { itineraries } = mergeIntoItineraries(sources(), PART_DIEU, BELLECOUR, prefs());
+    const feeder = itineraries.find((itinerary) => itinerary.id === 'bike-transit');
+
+    expect(feeder).toBeDefined();
+    expect(feeder?.segments.map((segment) => segment.mode)).toEqual([
+      TransportMode.WALK,
+      TransportMode.BIKE,
+      TransportMode.WALK,
+      TransportMode.METRO,
+      TransportMode.WALK,
+    ]);
+    // Le vélo est rendu à la borne de l'arrêt, pas abandonné sur le trottoir.
+    expect(feeder?.segments[1]?.to).toBe('SAXE / GAMBETTA');
+    // Et le rabattement fait bien gagner du temps sur le tout-TC.
+    const transitOnly = itineraries.find((itinerary) => itinerary.id === 'transit-1');
+    expect(feeder?.durationMinutes).toBeLessThan(transitOnly?.durationMinutes ?? 0);
+  });
+
+  // -------------------------------------------------------------- recette 2
+
+  it('chains every itinerary end to end, with no geographic hole', () => {
+    const { itineraries } = mergeIntoItineraries(sources(), PART_DIEU, BELLECOUR, prefs());
+
+    for (const itinerary of itineraries) {
+      expect(itinerary.segments.length).toBeGreaterThan(0);
+      expect(itinerary.segments[0]?.from).toBe(PART_DIEU.label);
+      expect(itinerary.segments[itinerary.segments.length - 1]?.to).toBe(BELLECOUR.label);
+
+      for (let index = 0; index < itinerary.segments.length - 1; index += 1) {
+        expect(itinerary.segments[index]?.to).toBe(itinerary.segments[index + 1]?.from);
+      }
+    }
+  });
+
+  it('publishes one continuous GeoJSON LineString per itinerary (C9)', () => {
+    const { itineraries } = mergeIntoItineraries(sources(), PART_DIEU, BELLECOUR, prefs());
+
+    for (const itinerary of itineraries) {
+      expect(itinerary.geometry?.type).toBe('LineString');
+      // Une LineString valide au sens de la RFC 7946 exige au moins deux points.
+      expect(itinerary.geometry?.coordinates.length ?? 0).toBeGreaterThanOrEqual(2);
+    }
+  });
+
+  it('keeps totals equal to the sum of the segments', () => {
+    const { itineraries } = mergeIntoItineraries(sources(), PART_DIEU, BELLECOUR, prefs());
+
+    for (const itinerary of itineraries) {
+      const sum = (key: 'durationMinutes' | 'distanceMeters' | 'carbonGrams') =>
+        itinerary.segments.reduce((total, segment) => total + segment[key], 0);
+
+      expect(itinerary.durationMinutes).toBe(sum('durationMinutes'));
+      expect(itinerary.distanceMeters).toBe(sum('distanceMeters'));
+      expect(itinerary.carbonGrams).toBe(sum('carbonGrams'));
+    }
+  });
+
+  // -------------------------------------------------------------- recette 3
+
+  it('drops the options that exceed the walking limit of the profile', () => {
+    const patient = mergeIntoItineraries(sources(), PART_DIEU, BELLECOUR, prefs());
+    const impatient = mergeIntoItineraries(
+      sources(),
+      PART_DIEU,
+      BELLECOUR,
+      prefs({ maxWalkMinutes: 10 }),
+    );
+
+    // Le tout-TC impose 15 minutes de marche d'accès : acceptable pour le
+    // profil par défaut, hors limite pour celui qui plafonne à dix.
+    expect(patient.itineraries.map((itinerary) => itinerary.id)).toContain('transit-1');
+    expect(impatient.itineraries.map((itinerary) => itinerary.id)).not.toContain('transit-1');
+    // Le rabattement à vélo, lui, survit : c'est justement ce qu'il corrige.
+    expect(impatient.itineraries.map((itinerary) => itinerary.id)).toContain('bike-transit');
+  });
+
+  it('offers only wheelchair-friendly options to a reduced-mobility profile (C12)', () => {
+    const { itineraries } = mergeIntoItineraries(
+      sources(),
+      PART_DIEU,
+      BELLECOUR,
+      prefs({ reducedMobility: true }),
+    );
+
+    expect(itineraries.length).toBeGreaterThan(0);
+    expect(itineraries.every((itinerary) => itinerary.accessible)).toBe(true);
+    // Un vélo en libre-service n'est pas une option en fauteuil roulant.
+    expect(itineraries.some((itinerary) => itinerary.id.includes('bike'))).toBe(false);
+  });
+
+  it('orders by footprint for a green profile and by duration for a fast one', () => {
+    const green = mergeIntoItineraries(sources(), PART_DIEU, BELLECOUR, prefs());
+    const fast = mergeIntoItineraries(
+      sources(),
+      PART_DIEU,
+      BELLECOUR,
+      prefs({ priority: RoutePriority.FASTEST }),
+    );
+
+    expect(green.sortedBy).toBe('carbonAsc');
+    expect(fast.sortedBy).toBe('durationAsc');
+
+    const carbon = green.itineraries.map((itinerary) => itinerary.carbonGrams);
+    expect(carbon).toEqual([...carbon].sort((a, b) => a - b));
+
+    const durations = fast.itineraries.map((itinerary) => itinerary.durationMinutes);
+    expect(durations).toEqual([...durations].sort((a, b) => a - b));
+
+    // Deux profils, deux classements : la préférence est visible, pas théorique.
+    // Ici le rabattement à vélo devance le tout-TC pour qui veut aller vite, et
+    // l'inverse pour qui veut émettre le moins.
+    const ids = (result: typeof green) => result.itineraries.map((itinerary) => itinerary.id);
+    expect(ids(green)).not.toEqual(ids(fast));
+    expect(ids(green)).toEqual(expect.arrayContaining(ids(fast)));
+  });
+
+  it('never lets a favourite mode empty the list, it only reorders the selection', () => {
+    // Un profil « bus seulement » n'a aucune option bus ici. Le laisser sans
+    // réponse serait pire que de lui proposer autre chose (C10).
+    const { itineraries } = mergeIntoItineraries(
+      sources(),
+      PART_DIEU,
+      BELLECOUR,
+      prefs({ preferredModes: [TransportMode.WALK, TransportMode.BUS] }),
+    );
+
+    expect(itineraries.length).toBeGreaterThan(0);
+  });
+
+  // -------------------------------------------------------------- recette 4
+
+  it('caps the number of itineraries and keeps one option per family', () => {
+    // Un trajet court, pour que les **quatre** familles soient constructibles,
+    // et quatre variantes TC distinctes : six propositions au total, soit une
+    // de plus que le plafond.
+    const journeys = [
+      shortJourney('transit-1', 'D'),
+      shortJourney('transit-2', 'B'),
+      shortJourney('transit-3', 'T1', TransportMode.TRAM),
+      shortJourney('transit-4', 'C3', TransportMode.BUS),
+    ];
+
+    const { itineraries } = mergeIntoItineraries(
+      sources({ journeys, destinationStations: [GUILLOTIERE_STATION] }),
+      PART_DIEU,
+      GUILLOTIERE,
+      prefs({ maxWalkMinutes: 40 }),
+    );
+
+    expect(itineraries).toHaveLength(MAX_ITINERARIES);
+
+    // Le plafond ne doit pas être rempli par une seule famille : sans la règle
+    // de diversité, les quatre variantes de TC l'auraient saturé et masqué les
+    // options douces — exactement la comparaison que le produit veut provoquer.
+    const ids = itineraries.map((itinerary) => itinerary.id);
+    expect(ids).toContain('bike');
+    expect(ids).toContain('bike-transit');
+    expect(ids).toContain('walk');
+    expect(ids.filter((id) => id.startsWith('transit-')).length).toBeLessThanOrEqual(2);
+  });
+
+  // ------------------------------------------------ dégradation gracieuse (C10)
+
+  it('still proposes transit when the shared-mobility operator is silent', () => {
+    const { itineraries } = mergeIntoItineraries(
+      sources({ sharedMobilityFailed: true }),
+      PART_DIEU,
+      BELLECOUR,
+      prefs(),
+    );
+
+    expect(itineraries.map((itinerary) => itinerary.id)).toEqual(['transit-1']);
+  });
+
+  it('still proposes bikes when the transit engine is silent', () => {
+    const { itineraries } = mergeIntoItineraries(
+      sources({ transitFailed: true }),
+      PART_DIEU,
+      BELLECOUR,
+      prefs(),
+    );
+
+    expect(itineraries.map((itinerary) => itinerary.id)).toEqual(['bike']);
+  });
+
+  it('returns nothing rather than inventing an itinerary when no chain can be formed', () => {
+    // Le moteur a cherché et n'a rien trouvé, aucune borne ne loue, et la
+    // distance est trop longue pour la marche seule.
+    const { itineraries } = mergeIntoItineraries(
+      sources({ journeys: [], originStations: [], destinationStations: [] }),
+      PART_DIEU,
+      BELLECOUR,
+      prefs(),
+    );
+
+    expect(itineraries).toEqual([]);
+  });
+
+  // ------------------------------------------------------ règles de bon sens
+
+  it('refuses a bike trip that cannot be ended at a docking station', () => {
+    // La borne d'arrivée n'accepte plus les retours : le trajet ne finit pas.
+    const full = station({ ...BELLECOUR_STATION, returning: false, docksAvailable: 0 });
+
+    const { itineraries } = mergeIntoItineraries(
+      sources({ destinationStations: [full] }),
+      PART_DIEU,
+      BELLECOUR,
+      prefs(),
+    );
+
+    expect(itineraries.map((itinerary) => itinerary.id)).not.toContain('bike');
+  });
+
+  it('refuses a bike trip when no station has a bike left', () => {
+    const empty = station({
+      ...VILLETTE,
+      vehiclesAvailable: 0,
+      vehicles: [{ mode: TransportMode.BIKE, electric: false, count: 0 }],
+    });
+
+    const { itineraries } = mergeIntoItineraries(
+      sources({ originStations: [empty] }),
+      PART_DIEU,
+      BELLECOUR,
+      prefs(),
+    );
+
+    expect(itineraries.map((itinerary) => itinerary.id)).not.toContain('bike');
+  });
+
+  it('proposes walking alone on a short trip, and only then', () => {
+    const short = mergeIntoItineraries(
+      sources(),
+      PART_DIEU,
+      GUILLOTIERE,
+      prefs({ maxWalkMinutes: 40 }),
+    );
+    const long = mergeIntoItineraries(
+      sources(),
+      PART_DIEU,
+      BELLECOUR,
+      prefs({ maxWalkMinutes: 40 }),
+    );
+
+    expect(short.itineraries.map((itinerary) => itinerary.id)).toContain('walk');
+    // Part-Dieu → Bellecour fait plus de deux kilomètres et demi à pied : la
+    // marche seule reste physiquement possible, mais ce n'est plus une option
+    // qu'on propose.
+    expect(long.itineraries.map((itinerary) => itinerary.id)).not.toContain('walk');
+  });
+
+  it('shortens the bike leg when the corridor is served by cycle facilities (UF-304)', () => {
+    // Un aménagement qui suit exactement le corridor Villette → Gambetta.
+    const along = cycleSegment('cp-1', sampleLine(VILLETTE, GAMBETTA, 40));
+
+    const bare = mergeIntoItineraries(sources(), PART_DIEU, BELLECOUR, prefs());
+    const equipped = mergeIntoItineraries(
+      sources({ cycleSegments: [along] }),
+      PART_DIEU,
+      BELLECOUR,
+      prefs(),
+    );
+
+    const bikeLeg = (result: ReturnType<typeof mergeIntoItineraries>) =>
+      result.itineraries
+        .find((itinerary) => itinerary.id === 'bike-transit')
+        ?.segments.find((segment) => segment.mode === TransportMode.BIKE);
+
+    const withoutFacility = bikeLeg(bare);
+    const withFacility = bikeLeg(equipped);
+
+    expect(withoutFacility).toBeDefined();
+    expect(withFacility).toBeDefined();
+    // Un corridor aménagé se parcourt plus directement : moins de détour, donc
+    // moins de distance annoncée à qualité de service égale.
+    expect(withFacility?.distanceMeters ?? 0).toBeLessThan(withoutFacility?.distanceMeters ?? 0);
+  });
+});
+
+/** Échantillonne une droite entre deux points, pour simuler un tracé cyclable. */
+function sampleLine(
+  from: { lat: number; lng: number },
+  to: { lat: number; lng: number },
+  steps: number,
+): [number, number][] {
+  const points: [number, number][] = [];
+  for (let index = 0; index <= steps; index += 1) {
+    const ratio = index / steps;
+    points.push([from.lng + (to.lng - from.lng) * ratio, from.lat + (to.lat - from.lat) * ratio]);
+  }
+  return points;
+}

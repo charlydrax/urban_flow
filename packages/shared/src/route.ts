@@ -82,10 +82,24 @@ export interface SourceAvailability {
   reason?: 'timeout' | 'network' | 'upstream-error' | 'internal-error';
 }
 
-/** Réponse de POST /api/routes/plan, triée par CO₂ croissant. */
+/**
+ * Clé de tri appliquée par le serveur à la liste d'itinéraires.
+ *
+ * Déduite de la priorité du profil de mobilité (F1) et **publiée** : le client
+ * doit pouvoir annoncer « classés par empreinte » ou « classés par durée » sans
+ * avoir à relire les préférences de l'usager, et sans déduire l'ordre en
+ * comparant lui-même les valeurs.
+ */
+export type ItinerarySortKey =
+  /** Empreinte carbone croissante — priorité « écolo », choix par défaut du produit. */
+  | 'carbonAsc'
+  /** Durée totale croissante — priorité « rapide ». */
+  | 'durationAsc';
+
+/** Réponse de POST /api/routes/plan, triée selon la priorité du profil. */
 export interface PlanRoutesResponse {
   itineraries: Itinerary[];
-  sortedBy: 'carbonAsc';
+  sortedBy: ItinerarySortKey;
   /**
    * État des trois sources pour **cette** recherche (UF-305).
    *

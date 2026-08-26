@@ -1,6 +1,8 @@
 import { BadRequestException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
+import { RoutePriority, TransportMode } from '@urbanflow/shared';
 
+import { CarbonService } from '../carbon/carbon.service';
 import { DEFAULT_PREFERENCES, UsersService } from '../users/users.service';
 import { PlanRouteDto } from './dto/plan-route.dto';
 import { RoutesService } from './routes.service';
@@ -8,15 +10,18 @@ import type { CollectedSources } from './sources/collected-sources';
 import { SourceCollectorService } from './sources/source-collector.service';
 
 /**
- * Tests du Service Itinéraire au point où UF-305 le laisse.
+ * Tests du Service Itinéraire en tant qu'**orchestrateur**.
  *
- * La fusion multimodale relève du Sprint 4 ; ce qui est vérifié ici est
- * l'**orchestration** :
+ * L'algorithme de fusion a ses propres tests
+ * (`merge/itinerary-merger.spec.ts`), sur des données figées et sans conteneur
+ * d'injection. Ce qui est vérifié ici, c'est l'enchaînement du flux de
+ * référence :
  *  - les préférences sont lues avant la collecte, et avec l'identité du JWT
  *    (anti-IDOR — C4) ;
  *  - la préférence PMR devient une entrée de la collecte (C12) ;
- *  - trois sources muettes donnent une réponse vide, pas une exception
- *    (recette 3 du ticket) ;
+ *  - la fusion reçoit bien la collecte, et son résultat est valorisé par le
+ *    Service Carbone (étape 6) ;
+ *  - trois sources muettes donnent une réponse vide, pas une exception (C10) ;
  *  - une extrémité sans coordonnées est un défaut d'appel, pas une panne.
  */
 describe('RoutesService', () => {
@@ -24,6 +29,7 @@ describe('RoutesService', () => {
   let getPreferences: jest.Mock;
   let collectAllSources: jest.Mock;
   let toAvailability: jest.Mock;
+  let computeFootprint: jest.Mock;
 
   const userId = 'user-from-jwt';
 
@@ -35,12 +41,53 @@ describe('RoutesService', () => {
     ...overrides,
   });
 
-  /** Collecte nominale : les trois sources ont répondu. */
+  /**
+   * Collecte nominale : un trajet TC exploitable, aucune borne, aucun tronçon.
+   *
+   * Volontairement minimale — l'objet de ces tests est l'orchestration, pas la
+   * richesse des propositions. Un seul trajet suffit à prouver que la fusion a
+   * bien été appelée avec ce que la collecte a rapporté.
+   */
   const collected = (overrides: Partial<CollectedSources> = {}): CollectedSources =>
     ({
-      transit: { status: 'ok', data: null, elapsedMs: 12 },
-      sharedMobility: { status: 'ok', data: null, elapsedMs: 8 },
-      cyclePaths: { status: 'ok', data: null, elapsedMs: 3 },
+      transit: {
+        status: 'ok',
+        elapsedMs: 12,
+        data: {
+          status: 'ok',
+          requestedDate: '2026-08-26',
+          serviceDate: '2022-09-01',
+          dateAdjusted: true,
+          journeys: [
+            {
+              id: 'transit-1',
+              departureAt: '2026-08-26T08:00:00+02:00',
+              arrivalAt: '2026-08-26T08:12:00+02:00',
+              durationMinutes: 12,
+              walkDistanceMeters: 300,
+              transfers: 0,
+              accessible: true,
+              legs: [
+                {
+                  mode: TransportMode.METRO,
+                  sourceMode: 'SUBWAY',
+                  transit: true,
+                  from: { name: 'Part-Dieu', lat: 45.760515, lng: 4.859057 },
+                  to: { name: 'Bellecour', lat: 45.757813, lng: 4.832011 },
+                  departureAt: '2026-08-26T08:00:00+02:00',
+                  arrivalAt: '2026-08-26T08:12:00+02:00',
+                  durationMinutes: 12,
+                  distanceMeters: 2200,
+                  line: 'B',
+                  accessible: true,
+                },
+              ],
+            },
+          ],
+        },
+      },
+      sharedMobility: { status: 'ok', elapsedMs: 8, data: null },
+      cyclePaths: { status: 'ok', elapsedMs: 3, data: null },
       failures: [],
       allSourcesFailed: false,
       elapsedMs: 14,
@@ -55,17 +102,20 @@ describe('RoutesService', () => {
       { source: 'sharedMobility', available: true },
       { source: 'cyclePaths', available: true },
     ]);
+    computeFootprint = jest.fn().mockReturnValue(42);
 
     const moduleRef = await Test.createTestingModule({
       providers: [
         RoutesService,
         { provide: UsersService, useValue: { getPreferences } },
         { provide: SourceCollectorService, useValue: { collectAllSources, toAvailability } },
+        { provide: CarbonService, useValue: { computeFootprint } },
       ],
     }).compile();
 
     service = moduleRef.get(RoutesService);
     jest.spyOn(service['logger'], 'warn').mockImplementation(() => undefined);
+    jest.spyOn(service['logger'], 'log').mockImplementation(() => undefined);
   });
 
   it('reads the preferences of the JWT account, never of the body (C4 / OWASP A01)', async () => {
@@ -101,16 +151,40 @@ describe('RoutesService', () => {
   it('reports the real state of the sources alongside the itineraries', async () => {
     const result = await service.plan(dto(), userId);
 
-    expect(result.sortedBy).toBe('carbonAsc');
     expect(result.sources).toHaveLength(3);
     expect(result.sources.every((source) => source.available)).toBe(true);
   });
 
-  it('sorts the itineraries by increasing carbon footprint', async () => {
+  it('builds real itineraries out of what the sources returned, no mock left', async () => {
     const result = await service.plan(dto(), userId);
 
-    const footprints = result.itineraries.map((itinerary) => itinerary.carbonGrams);
-    expect(footprints).toEqual([...footprints].sort((a, b) => a - b));
+    expect(result.itineraries.length).toBeGreaterThan(0);
+    const [itinerary] = result.itineraries;
+    expect(itinerary?.segments[0]?.from).toBe('Part-Dieu');
+    expect(itinerary?.segments[itinerary.segments.length - 1]?.to).toBe('Bellecour');
+    expect(itinerary?.summary).toContain('Métro B');
+  });
+
+  it('publishes the footprint computed by the Carbon service (step 6 of the flow)', async () => {
+    const result = await service.plan(dto(), userId);
+
+    expect(computeFootprint).toHaveBeenCalledTimes(result.itineraries.length);
+    expect(computeFootprint).toHaveBeenCalledWith(result.itineraries[0]?.segments);
+    // Le barème appartient au Service Carbone : la fusion ne fait qu'estimer
+    // pour classer ses candidats, c'est cette valeur-ci qui est publiée.
+    expect(result.itineraries.every((itinerary) => itinerary.carbonGrams === 42)).toBe(true);
+  });
+
+  it('publishes the sort key derived from the profile priority', async () => {
+    const green = await service.plan(dto(), userId);
+    expect(green.sortedBy).toBe('carbonAsc');
+
+    getPreferences.mockResolvedValue({
+      ...DEFAULT_PREFERENCES,
+      priority: RoutePriority.FASTEST,
+    });
+    const fast = await service.plan(dto(), userId);
+    expect(fast.sortedBy).toBe('durationAsc');
   });
 
   it('answers with an empty list when every source failed, without throwing', async () => {
@@ -121,12 +195,14 @@ describe('RoutesService', () => {
       { source: 'cyclePaths', available: false, reason: 'internal-error' },
     ]);
 
-    // Recette 3 : un état clair, pas une exception non gérée. Un 500 ferait
-    // croire à l'usager que SA requête est fautive.
+    // Un état clair, pas une exception non gérée. Un 500 ferait croire à
+    // l'usager que SA requête est fautive (C10).
     const result = await service.plan(dto(), userId);
 
     expect(result.itineraries).toEqual([]);
     expect(result.sources.every((source) => !source.available)).toBe(true);
+    // Et surtout : rien n'est inventé pour meubler la réponse.
+    expect(computeFootprint).not.toHaveBeenCalled();
   });
 
   it('rejects an endpoint without coordinates as a bad request, not as an outage', async () => {

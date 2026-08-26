@@ -126,12 +126,15 @@ Les serveurs applicatifs restent lancés via npm (`npm run dev:api` / `npm run d
 
 ## Fonctionnalités (périmètre MVP)
 
-| ID  | Fonctionnalité                                    | Statut                                    |
-| --- | ------------------------------------------------- | ----------------------------------------- |
-| F1  | Inscription / connexion + profils de mobilité     | squelette (stubs)                         |
-| F2  | Planificateur d'itinéraires multimodal            | squelette (stubs)                         |
-| F3  | Intégration GTFS + GBFS                           | connecteurs implémentés (UF-302 / UF-303) |
-| —   | Calculateur d'empreinte carbone + suivi personnel | squelette (stubs)                         |
+| ID  | Fonctionnalité                                     | Statut                                                                 |
+| --- | -------------------------------------------------- | ---------------------------------------------------------------------- |
+| F1  | Inscription / connexion + profils de mobilité      | implémenté (UF-101 → UF-107)                                           |
+| F2  | Planificateur d'itinéraires multimodal             | fusion réelle côté API (UF-401) ; affichage front à venir (UF-403/404) |
+| F3  | Intégration GTFS + GBFS + pistes cyclables PostGIS | connecteurs implémentés (UF-302 / UF-303 / UF-304)                     |
+| —   | Calculateur d'empreinte carbone + suivi personnel  | barème par mode branché (UF-401) ; tableau de bord encore un stub      |
+
+Le détail de l'algorithme de fusion multimodale est documenté dans
+[`docs/itinerary-merge.md`](docs/itinerary-merge.md).
 
 ## Qualité de code & contribution
 

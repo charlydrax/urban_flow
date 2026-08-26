@@ -14,7 +14,7 @@ import type {
  * `@urbanflow/shared` porte les contrats **front/back** : ce que le client
  * consomme. Ce qui suit est le produit intermédiaire d'une étape interne du
  * Service Itinéraire — les données brutes des trois sources, avant fusion
- * (Sprint 4). Le client ne les verra jamais sous cette forme. Les publier
+ * (UF-401). Le client ne les verra jamais sous cette forme. Les publier
  * figerait un détail d'implémentation dans le contrat public, et rendrait la
  * fusion plus difficile à faire évoluer.
  *
@@ -104,7 +104,7 @@ export type SharedMobilityEndpoints = SharedMobilityEndpointsData;
 export type CyclePathEndpoints = CyclePathEndpointsData;
 
 /**
- * Données brutes des trois sources, prêtes pour la fusion (Sprint 4).
+ * Données brutes des trois sources, prêtes pour la fusion (UF-401).
  *
  * Aucune fusion, aucun tri, aucun calcul carbone à ce stade : la collecte
  * rapporte ce que les sources ont dit, et rien de plus. C'est ce qui permet de

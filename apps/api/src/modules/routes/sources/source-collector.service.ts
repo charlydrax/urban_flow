@@ -48,6 +48,34 @@ export interface CollectPreferences {
  */
 const COLLECTION_BUDGET_MARGIN_MS = 2000;
 
+/**
+ * Rayon de recherche des bornes en libre-service pour la planification, en
+ * mètres.
+ *
+ * Plus large que le défaut du connecteur (500 m, « les stations autour de
+ * moi ») parce que la fusion (UF-401) ne cherche pas seulement une borne près
+ * de l'usager : il lui en faut aussi une près de l'**arrêt d'embarquement**
+ * pour construire un rabattement vélo → transports en commun. Un arrêt à sept
+ * cents mètres tomberait hors du rayon par défaut, et le rabattement — la
+ * proposition la plus intéressante du planificateur — ne serait jamais
+ * constructible.
+ *
+ * Le surcoût est nul côté réseau (C5) : le connecteur GBFS télécharge et
+ * mémoïse les flux **entiers**, puis filtre en mémoire. Élargir le rayon ne
+ * déclenche aucune requête supplémentaire, seulement quelques haversines de
+ * plus.
+ */
+const PLANNING_STATION_RADIUS_METERS = 900;
+
+/**
+ * Nombre de bornes retenues par extrémité pour la planification.
+ *
+ * Relevé en conséquence du rayon : avec la limite par défaut (10), les dix
+ * bornes les plus proches de l'usager satureraient la liste et masqueraient
+ * celle qui dessert l'arrêt, qui est justement celle qu'on cherche.
+ */
+const PLANNING_STATION_LIMIT = 20;
+
 /** Sentinelle interne : une source qui a dépassé le budget de la collecte. */
 const BUDGET_EXCEEDED = Symbol('source-budget-exceeded');
 
@@ -59,7 +87,8 @@ const BUDGET_EXCEEDED = Symbol('source-budget-exceeded');
  *
  * Il lance les **trois** sources en parallèle, attend la plus lente, et rend ce
  * que chacune a dit. Il ne fusionne rien, ne trie rien, ne calcule aucun CO₂ :
- * la construction des itinéraires multimodaux est l'affaire du Sprint 4. Cette
+ * la construction des itinéraires multimodaux est l'affaire de la fusion
+ * (`merge/itinerary-merger.ts`, UF-401). Cette
  * séparation est délibérée — l'orchestration et la fusion échouent pour des
  * raisons différentes, et les mêler rendrait les deux plus difficiles à tester.
  *
@@ -115,7 +144,7 @@ export class SourceCollectorService {
    * @param from Départ, coordonnées obligatoires (le géocodage est fait en amont — UF-203)
    * @param to Arrivée, coordonnées obligatoires
    * @param prefs Préférences du compte, lues en base à l'étape 3 du flux
-   * @returns Les données brutes des trois sources, prêtes pour la fusion (Sprint 4)
+   * @returns Les données brutes des trois sources, prêtes pour la fusion (UF-401)
    */
   async collectAllSources(
     from: RouteEndpoint,
@@ -202,14 +231,23 @@ export class SourceCollectorService {
    * Les deux requêtes partent ensemble : un trajet en vélo partagé suppose une
    * borne au départ **et** une borne à l'arrivée, et les enchaîner ajouterait
    * une latence réseau à la recherche de l'usager pour rien (C5/C10).
+   *
+   * Le rayon et le nombre de bornes sont ceux de la **planification**, plus
+   * larges que les valeurs par défaut du connecteur : voir
+   * `PLANNING_STATION_RADIUS_METERS`.
    */
   private async fetchSharedMobility(
     from: RouteEndpoint,
     to: RouteEndpoint,
   ): Promise<SharedMobilityEndpoints> {
+    const options = {
+      radiusMeters: PLANNING_STATION_RADIUS_METERS,
+      limit: PLANNING_STATION_LIMIT,
+    };
+
     const [origin, destination] = await Promise.all([
-      this.sharedMobility.getNearbyStations(from),
-      this.sharedMobility.getNearbyStations(to),
+      this.sharedMobility.getNearbyStations(from, options),
+      this.sharedMobility.getNearbyStations(to, options),
     ]);
     return { origin, destination };
   }
