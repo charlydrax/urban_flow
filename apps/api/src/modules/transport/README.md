@@ -350,9 +350,16 @@ légitimement dépasser le rayon demandé.
 
 Les réponses GTFS et GBFS portent un `status: 'ok' | 'unavailable'` parce
 qu'elles décrivent des sources externes dont la panne doit être dégradée
-gracieusement. Ici la source est notre propre base : si PostGIS ne répond pas, le
-JWT n'a pas pu être vérifié non plus. Il n'y a rien à dégrader — l'erreur remonte
-en `500` et doit se voir.
+gracieusement. Cet endpoint-ci n'a qu'un objet : les aménagements cyclables.
+Rendre une liste vide parce que la base n'a pas répondu affirmerait qu'il n'y en
+a pas ici — une réponse fausse, et indiscernable d'une réponse vraie. L'erreur
+remonte donc en `500` et doit se voir.
+
+⚠️ L'arbitrage vaut pour **cet** endpoint, pas pour le planificateur. Là,
+l'usager demande des itinéraires : perdre les tronçons cyclables reste largement
+préférable à perdre aussi les trajets en métro, et le Service Itinéraire dégrade
+donc cette même source comme les deux autres (UF-305). Ce n'est pas la source qui
+décide, c'est la question posée.
 
 En revanche `datasetImportedAt` sépare deux silences qui se ressemblent : un
 tableau vide **avec** une date signifie « pas d'aménagement ici », le même

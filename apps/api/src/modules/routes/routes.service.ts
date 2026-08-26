@@ -1,44 +1,94 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 
 import { TransportMode } from '../../common/enums/transport-mode.enum';
+import { UsersService } from '../users/users.service';
 import { ItineraryDto, PlanRoutesResponseDto } from './dto/itinerary.dto';
-import { PlanRouteDto } from './dto/plan-route.dto';
+import { PlaceDto, PlanRouteDto } from './dto/plan-route.dto';
+import { SourceCollectorService, type RouteEndpoint } from './sources/source-collector.service';
 
 /**
  * Service Itinéraire (F2) — cœur du flux de référence (CLAUDE.md section 4).
  *
- * ⚠️ SQUELETTE : renvoie des itinéraires mock conformes au scénario nominal
- * (Part-Dieu → Bellecour), déjà triés par CO₂ croissant.
+ * État d'avancement :
+ * 1. ✅ Lecture des préférences profil (PostGIS) — étape 3.
+ * 2. ✅ Appels PARALLÈLES aux trois sources GTFS / GBFS / PostGIS via
+ *    `Promise.allSettled`, avec dégradation gracieuse — étapes 13-18, UF-305, C10.
+ * 3. ⏳ Fusion en itinéraires multimodaux ; 404 si aucun trajet — Sprint 4.
+ * 4. ⏳ `computeFootprint(segments)` du Service Carbone par itinéraire.
+ * 5. ⏳ Sauvegarde `search_history`.
  *
- * Implémentation cible :
- * 1. Lecture des préférences profil (PostGIS) — étape 3.
- * 2. Appels PARALLÈLES via `Promise.all` à GTFS, GBFS et PostGIS
- *    (`ST_DWithin` pour les pistes cyclables proches) — étape 4, C10.
- * 3. Fusion en itinéraires multimodaux ; 404 si aucun trajet — étape 5.
- * 4. `computeFootprint(segments)` du Service Carbone par itinéraire — étape 6.
- * 5. Sauvegarde `search_history` — étape 7.
- * 6. Dégradation gracieuse : une API externe indisponible → son mode est ignoré,
- *    les autres options sont retournées (C10).
+ * ⚠️ Les **itinéraires restent des mocks** conformes au scénario nominal
+ * (Part-Dieu → Bellecour) jusqu'à la fusion. En revanche, le champ `sources` de
+ * la réponse est, lui, bien réel : il rapporte l'état effectif des trois
+ * sources pour la recherche demandée. C'est ce qui rend la dégradation
+ * gracieuse observable dès maintenant, sans attendre le Sprint 4.
  *
- * Couvre : F2, C9 (GeoJSON), C10 (appels parallèles, dégradation), C12 (champ accessible).
+ * Couvre : F2, C4 (identité du JWT, entrées validées), C9 (GeoJSON),
+ * C10 (appels parallèles, dégradation gracieuse), C12 (préférence PMR).
  */
 @Injectable()
 export class RoutesService {
+  private readonly logger = new Logger(RoutesService.name);
+
+  constructor(
+    private readonly users: UsersService,
+    private readonly collector: SourceCollectorService,
+  ) {}
+
   /**
-   * Calcule les itinéraires multimodaux entre deux lieux (stub).
+   * Calcule les itinéraires multimodaux entre deux lieux.
+   *
+   * Les préférences sont lues **avant** la collecte et non en parallèle d'elle :
+   * elles en sont une entrée (la préférence PMR change la requête envoyée à
+   * OpenTripPlanner — C12). Les paralléliser reviendrait à interroger le moteur
+   * avant de savoir quoi lui demander.
+   *
+   * Une panne de la base à cette étape n'est **pas** dégradée : sans profil, on
+   * ne sait pas quels itinéraires l'usager accepte, et en inventer serait pire
+   * que d'échouer. La dégradation gracieuse commence à la collecte.
+   *
    * @param dto Requête validée { from, to, userId } (C4)
    * @param userId Identité issue du JWT vérifié — prime sur dto.userId (anti-IDOR, C4)
-   * @returns Itinéraires avec leur empreinte CO₂, triés par empreinte croissante
+   * @returns Itinéraires triés par empreinte croissante, et l'état des trois sources
+   * @throws {BadRequestException} si une extrémité n'a pas de coordonnées
    */
   async plan(dto: PlanRouteDto, userId: string): Promise<PlanRoutesResponseDto> {
-    // TODO(F2): Promise.all([gtfs, gbfs, postgis ST_DWithin]) + fusion + carbone + historique
-    void userId;
+    const from = toEndpoint(dto.from, 'départ');
+    const to = toEndpoint(dto.to, 'arrivée');
+
+    // Étape 3 du flux : les préférences viennent du compte du JWT, jamais du
+    // corps de la requête (anti-IDOR — C4).
+    const preferences = await this.users.getPreferences(userId);
+
+    // Étapes 13-18 : les trois sources en parallèle (UF-305).
+    const collected = await this.collector.collectAllSources(from, to, {
+      reducedMobility: preferences.reducedMobility,
+    });
+
+    if (collected.allSourcesFailed) {
+      // Aucune exception : les trois sources muettes restent une réponse
+      // valide, avec une liste vide et un `sources` qui dit pourquoi. Un 500
+      // ferait croire à un défaut de la requête de l'usager (C10).
+      this.logger.warn('Aucune source disponible : réponse sans itinéraire.');
+      return {
+        itineraries: [],
+        sortedBy: 'carbonAsc',
+        sources: this.collector.toAvailability(collected),
+      };
+    }
+
+    // TODO(Sprint 4) : fusionner `collected` en itinéraires réels, calculer le
+    // CO₂ par segment puis enregistrer la recherche dans `search_history`.
     const itineraries = this.buildMockItineraries(dto.from.label, dto.to.label);
 
     // Tri par empreinte croissante : oriente l'usager vers les mobilités douces
     itineraries.sort((a, b) => a.carbonGrams - b.carbonGrams);
 
-    return { itineraries, sortedBy: 'carbonAsc' };
+    return {
+      itineraries,
+      sortedBy: 'carbonAsc',
+      sources: this.collector.toAvailability(collected),
+    };
   }
 
   /** Construit trois options multimodales factices reflétant le scénario nominal. */
@@ -140,4 +190,22 @@ export class RoutesService {
       },
     ];
   }
+}
+
+/**
+ * Exige des coordonnées sur une extrémité de trajet.
+ *
+ * Le DTO les accepte facultatives (le contrat du diagramme autorise une saisie
+ * purement textuelle), mais les trois sources travaillent sur des points : sans
+ * coordonnées, il n'y a rien à interroger. Le géocodage est fait en amont, côté
+ * client (UF-203) — un label seul est donc un défaut d'appel, pas une panne, et
+ * mérite un `400` explicite plutôt qu'une liste vide inexplicable.
+ */
+function toEndpoint(place: PlaceDto, role: string): RouteEndpoint {
+  if (typeof place.lat !== 'number' || typeof place.lng !== 'number') {
+    throw new BadRequestException(
+      `Le point de ${role} doit porter des coordonnées (lat, lng) : le géocodage est fait par le client.`,
+    );
+  }
+  return { label: place.label, lat: place.lat, lng: place.lng };
 }
