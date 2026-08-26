@@ -15,6 +15,9 @@ describe('validateEnv', () => {
     JWT_EXPIRES_IN: '15m',
     OTP_BASE_URL: 'http://localhost:8080',
     OTP_TIMEOUT_MS: '8000',
+    GBFS_DISCOVERY_URL: 'https://example.test/velov/gbfs.json',
+    GBFS_TIMEOUT_MS: '5000',
+    GBFS_STATUS_TTL_MS: '60000',
   };
 
   it('accepte une configuration complète et convertit PORT en nombre', () => {
@@ -56,6 +59,20 @@ describe('validateEnv', () => {
     // une source qui, de toute façon, est optionnelle (C5/C10).
     expect(() => validateEnv({ ...validConfig, OTP_TIMEOUT_MS: '120000' })).toThrow(
       /OTP_TIMEOUT_MS/,
+    );
+  });
+
+  it('rejette une GBFS_DISCOVERY_URL absente (UF-303)', () => {
+    const { GBFS_DISCOVERY_URL: _omitted, ...withoutGbfs } = validConfig;
+
+    expect(() => validateEnv(withoutGbfs)).toThrow(/GBFS_DISCOVERY_URL/);
+  });
+
+  it('rejette un GBFS_STATUS_TTL_MS hors plage (UF-303)', () => {
+    // Au-delà de dix minutes, un flux « temps réel » n'est plus qu'un
+    // instantané périmé : le plafond empêche de le dénaturer par configuration.
+    expect(() => validateEnv({ ...validConfig, GBFS_STATUS_TTL_MS: '3600000' })).toThrow(
+      /GBFS_STATUS_TTL_MS/,
     );
   });
 

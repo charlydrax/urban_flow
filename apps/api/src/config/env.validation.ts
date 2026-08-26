@@ -55,6 +55,49 @@ class EnvironmentVariables {
   @Min(1000)
   @Max(30000)
   OTP_TIMEOUT_MS!: number;
+
+  /**
+   * Document d'auto-découverte GBFS de l'opérateur de véhicules en libre-service
+   * (UF-303) — `gbfs.json` au sens de la spécification.
+   *
+   * C'est bien l'URL du **document**, et non une racine de service : GBFS ne
+   * normalise pas les chemins des flux, il normalise le fichier qui les
+   * déclare. Le connecteur y lit les URL de `station_information`,
+   * `station_status` et `vehicle_types` (C9).
+   */
+  @IsUrl({ require_tld: false, require_protocol: true })
+  GBFS_DISCOVERY_URL!: string;
+
+  /**
+   * Délai maximal accordé à chaque flux GBFS, en millisecondes.
+   *
+   * Nettement plus court que celui d'OpenTripPlanner : là où le moteur de
+   * routage *calcule*, l'opérateur GBFS ne fait que servir un fichier statique
+   * — quelques centaines de millisecondes en régime normal. Passé ce délai, les
+   * mobilités douces sont simplement ignorées (dégradation gracieuse — C10) ;
+   * attendre davantage ne ferait qu'immobiliser la requête de l'usager.
+   */
+  @IsInt()
+  @Min(500)
+  @Max(15000)
+  GBFS_TIMEOUT_MS!: number;
+
+  /**
+   * Durée de mémoïsation du flux de disponibilité temps réel, en millisecondes.
+   *
+   * Arbitrage entre fraîcheur et sobriété (C5) : les disponibilités bougent en
+   * permanence, mais pas à la seconde. Une minute lisse les rafales de requêtes
+   * sans qu'un usager voie un nombre de vélos sensiblement faux. Le plafond de
+   * dix minutes empêche de transformer une source temps réel en instantané
+   * périmé ; le plancher de cinq secondes empêche de marteler l'opérateur.
+   *
+   * Les flux quasi statiques (description des stations, catalogue des
+   * véhicules) ne sont pas concernés : ils sont mémoïsés une heure en dur.
+   */
+  @IsInt()
+  @Min(5000)
+  @Max(600000)
+  GBFS_STATUS_TTL_MS!: number;
 }
 
 /**
