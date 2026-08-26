@@ -8,9 +8,10 @@
 
 ## Endpoints (protégés par le guard JWT global)
 
-| Méthode | Route              | Description                                                   | Statut                                       |
-| ------- | ------------------ | ------------------------------------------------------------- | -------------------------------------------- |
-| POST    | `/api/routes/plan` | Itinéraires multimodaux + CO₂, triés par empreinte croissante | collecte réelle (UF-305), itinéraires mockés |
+| Méthode | Route                 | Description                                                   | Statut                                       |
+| ------- | --------------------- | ------------------------------------------------------------- | -------------------------------------------- |
+| POST    | `/api/routes/plan`    | Itinéraires multimodaux + CO₂, triés par empreinte croissante | collecte réelle (UF-305), itinéraires mockés |
+| POST    | `/api/routes/sources` | **[dev]** Données brutes des trois sources, sans fusion       | UF-306 — temporaire, fermé en production     |
 
 Contrat d'entrée : `{ from: {label, lat, lng}, to: {...}, userId }` — `userId` est
 supplanté par l'identité du JWT (anti-IDOR, C4).
@@ -128,12 +129,46 @@ moteur avant de savoir quoi lui demander.
 > les pistes cyclables, et une liste vide affirmerait qu'il n'y en a pas. Ici il
 > demande des itinéraires — perdre une option vaut mieux que tout perdre.
 
+## Endpoint interne de test des sources (UF-306)
+
+`POST /api/routes/sources` déclenche la même collecte que `/routes/plan` et rend
+les données **brutes** de chaque source, séparément — sans fusion, sans CO₂,
+sans écriture d'historique.
+
+```
+routes/
+└── sources/
+    └── source-diagnostics.service.ts   résolution du trajet, projection, garde d'environnement
+```
+
+Il existe parce qu'une liste d'itinéraires vide ne dit pas où est le tort : la
+fusion, ou une source muette ? Le vérifier **avant** d'écrire la fusion évite
+d'empiler deux étages non validés.
+
+Le corps accepte `{ from, to }` ou `{ searchHistoryId }` pour rejouer une
+recherche enregistrée (UF-204) — relue avec l'identité du JWT, un identifiant
+d'autrui donnant un `404` indiscernable d'un identifiant inexistant (C4).
+
+**Il ne passe pas par `RoutesService.plan`** : l'emprunter mesurerait la fusion
+en plus des sources, et il ne saurait plus dire laquelle des deux a échoué. Les
+deux services partagent `UsersService` et `SourceCollectorService`, rien de plus.
+
+**Il est fermé hors développement** (`404`), parce qu'il publie la cause
+technique réelle de chaque panne — là où `sources` de `/routes/plan` s'en tient
+à un vocabulaire générique (C11). `ROUTES_SOURCES_DEBUG=true|false` force le
+comportement ; sans la variable, `NODE_ENV` décide.
+
+Écran associé : `/dev/sources` (apps/web). Détail complet et recette :
+[`docs/source-diagnostics-endpoint.md`](../../../../../docs/source-diagnostics-endpoint.md).
+
 ## Dépendances
 
 - `TransportModule` — les **trois** sources : `TransitService` (GTFS, UF-302),
   `SharedMobilityService` (GBFS, UF-303) et `CyclePathsService`
   (`ST_DWithin` sur PostGIS, UF-304)
 - `UsersModule` (préférences, étape 3), `CarbonModule` (CO₂, Sprint 4)
+- `SearchHistoryModule` — **lecture seule** (UF-306) : rejouer une recherche
+  enregistrée. Le planificateur y écrira au Sprint 4 ; le diagnostic, jamais (C8)
 - `SourceCollectorService` — interne au module, volontairement **non exporté** :
   l'orchestration est une étape du planificateur, pas un service que d'autres
   modules auraient à consommer. L'exporter laisserait court-circuiter la lecture
@@ -145,13 +180,15 @@ moteur avant de savoir quoi lui demander.
 cd apps/api && npx jest src/modules/routes
 ```
 
-Deux suites, sans réseau ni base. Les horloges ne sont **pas** simulées : les
+Trois suites, sans réseau ni base. Les horloges ne sont **pas** simulées : les
 faux minuteurs de Jest masqueraient exactement ce qu'on veut mesurer, à savoir
 que les trois promesses progressent réellement en même temps.
 
 ## Contraintes couvertes
 
-C4 (validation, anti-IDOR, coordonnées exigées), C9 (GeoJSON LineString,
-contrats partagés), C10 (appels parallèles, budget borné, dégradation gracieuse,
-durées mesurées), C11 (logs sans donnée de déplacement, cause publiée générique),
-C12 (préférence PMR propagée au moteur de routage).
+C4 (validation, anti-IDOR, coordonnées exigées, surface de diagnostic fermée en
+production), C8 (le diagnostic n'écrit pas dans l'historique), C9 (GeoJSON
+LineString, contrats partagés), C10 (appels parallèles, budget borné,
+dégradation gracieuse, durées mesurées), C11 (logs sans donnée de déplacement,
+cause publiée générique hors diagnostic), C12 (préférence PMR propagée au moteur
+de routage).

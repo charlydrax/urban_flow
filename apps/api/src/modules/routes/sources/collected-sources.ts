@@ -1,6 +1,7 @@
 import type {
-  CycleSegmentsResult,
-  NearbyStationsResult,
+  CyclePathEndpointsData,
+  RouteSourceName,
+  SharedMobilityEndpointsData,
   TransitJourneysResult,
 } from '@urbanflow/shared';
 
@@ -20,10 +21,20 @@ import type {
  * Seul `SourceAvailability` franchit la frontière, parce que le client a besoin
  * de savoir quels modes ont pu être proposés (bandeau « mode dégradé » — C10) ;
  * il est donc défini dans `@urbanflow/shared`, pas ici.
+ *
+ * ⚠️ **UF-306 fait une exception assumée et temporaire.** L'endpoint interne de
+ * test (`POST /api/routes/sources`) publie ces données brutes, parce que c'est
+ * son objet même : vérifier de bout en bout que les trois sources répondent
+ * avant de construire la fusion. Les formes des deux extrémités
+ * (`SharedMobilityEndpointsData`, `CyclePathEndpointsData`) sont donc désormais
+ * **définies dans `@urbanflow/shared`** et simplement réutilisées ici — mieux
+ * vaut un type publié à un endroit qu'un même objet décrit deux fois et qui
+ * dérive. Le reste (`SourceFailure`, `CollectedSources`) ne franchit toujours
+ * pas la frontière.
  */
 
 /** Les trois sources du planificateur (étape 4 du flux). */
-export type SourceName = 'transit' | 'sharedMobility' | 'cyclePaths';
+export type SourceName = RouteSourceName;
 
 /**
  * Comment une source a échoué.
@@ -83,17 +94,14 @@ export interface SourceOutcome<T> {
  * ici plutôt qu'au moment de la fusion évite un second aller-retour réseau une
  * fois la collecte terminée — les deux requêtes partent ensemble et ne coûtent
  * qu'une latence (C5/C10).
+ *
+ * Alias du type publié par UF-306 : la collecte et le diagnostic décrivent le
+ * même objet, et le décrire deux fois le ferait diverger.
  */
-export interface SharedMobilityEndpoints {
-  origin: NearbyStationsResult;
-  destination: NearbyStationsResult;
-}
+export type SharedMobilityEndpoints = SharedMobilityEndpointsData;
 
 /** Tronçons cyclables aux deux extrémités, pour la même raison. */
-export interface CyclePathEndpoints {
-  origin: CycleSegmentsResult;
-  destination: CycleSegmentsResult;
-}
+export type CyclePathEndpoints = CyclePathEndpointsData;
 
 /**
  * Données brutes des trois sources, prêtes pour la fusion (Sprint 4).

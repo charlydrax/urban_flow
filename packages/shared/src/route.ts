@@ -50,6 +50,16 @@ export interface Itinerary {
 }
 
 /**
+ * Nom d'une des trois sources du planificateur (UF-305).
+ *
+ * Nommé plutôt que répété en union anonyme : la collecte (UF-305), l'état
+ * publié au client et le diagnostic (UF-306) parlent des mêmes trois sources.
+ * Un seul type garantit qu'ajouter une quatrième source casse à la compilation
+ * partout où il faut la traiter, plutôt que silencieusement nulle part.
+ */
+export type RouteSourceName = 'transit' | 'sharedMobility' | 'cyclePaths';
+
+/**
  * État d'une des trois sources interrogées par le planificateur (UF-305).
  *
  * Publié dans la réponse parce que le client ne peut pas le deviner : une liste
@@ -59,7 +69,7 @@ export interface Itinerary {
  */
 export interface SourceAvailability {
   /** `transit` (GTFS), `sharedMobility` (GBFS) ou `cyclePaths` (PostGIS). */
-  source: 'transit' | 'sharedMobility' | 'cyclePaths';
+  source: RouteSourceName;
   /** `false` quand la source n'a rien pu fournir pour cette recherche. */
   available: boolean;
   /**

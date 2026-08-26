@@ -7,6 +7,8 @@ import type {
   SearchHistoryEntry,
   SearchHistoryList,
   SessionUser,
+  SourceDiagnosticsRequest,
+  SourceDiagnosticsResponse,
   UpdateUserProfilePayload,
   UserProfile,
 } from '@urbanflow/shared';
@@ -193,6 +195,20 @@ export const apiClient = {
   getSearchHistory(limit?: number): Promise<SearchHistoryList> {
     const query = limit === undefined ? '' : `?limit=${limit}`;
     return request(`/search-history${query}`);
+  },
+
+  /**
+   * [dev] Données brutes des trois sources pour un trajet (UF-306).
+   *
+   * Endpoint **temporaire** de vérification du Sprint 3 : il ne fusionne rien et
+   * disparaîtra avec l'arrivée des vrais itinéraires (Sprint 4). Il est fermé
+   * hors développement — un `404` en production n'est donc pas une panne, c'est
+   * le comportement attendu.
+   *
+   * @param payload Deux extrémités, ou `searchHistoryId` pour rejouer une recherche (UF-204)
+   */
+  testRouteSources(payload: SourceDiagnosticsRequest): Promise<SourceDiagnosticsResponse> {
+    return request('/routes/sources', { method: 'POST', body: JSON.stringify(payload) });
   },
 
   /** Tableau de bord carbone personnel. */
