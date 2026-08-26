@@ -80,12 +80,13 @@ npm run dev
 
 ### Vérifier que tout tourne
 
-| Service      | URL / commande                 | Attendu                                           |
-| ------------ | ------------------------------ | ------------------------------------------------- |
-| Base PostGIS | `docker compose ps`            | conteneur `urbanflow-db` **healthy**, port `5433` |
-| API Gateway  | http://localhost:3001/api/docs | Swagger (200)                                     |
-| Front PWA    | http://localhost:3000          | page d'accueil UrbanFlow (200)                    |
-| Routage OTP  | http://localhost:8080          | client de debug OpenTripPlanner (200)             |
+| Service      | URL / commande                 | Attendu                                                                           |
+| ------------ | ------------------------------ | --------------------------------------------------------------------------------- |
+| Base PostGIS | `docker compose ps`            | conteneur `urbanflow-db` **healthy**, port `5433`                                 |
+| API Gateway  | http://localhost:3001/api/docs | Swagger (200)                                                                     |
+| Front PWA    | http://localhost:3000          | page d'accueil UrbanFlow (200)                                                    |
+| Routage OTP  | http://localhost:8080          | client de debug OpenTripPlanner (200)                                             |
+| Flux Vélo'v  | `GET /api/transport/status`    | source `gbfs` en `ok` — flux public, rien à installer (voir `docs/gbfs-velov.md`) |
 
 > ℹ️ La base est exposée sur le **port hôte 5433** (et non 5432) pour éviter un conflit
 > avec un PostgreSQL déjà installé localement — voir `POSTGRES_PORT` dans `.env` et la
@@ -125,12 +126,12 @@ Les serveurs applicatifs restent lancés via npm (`npm run dev:api` / `npm run d
 
 ## Fonctionnalités (périmètre MVP)
 
-| ID  | Fonctionnalité                                    | Statut            |
-| --- | ------------------------------------------------- | ----------------- |
-| F1  | Inscription / connexion + profils de mobilité     | squelette (stubs) |
-| F2  | Planificateur d'itinéraires multimodal            | squelette (stubs) |
-| F3  | Intégration GTFS + GBFS                           | squelette (stubs) |
-| —   | Calculateur d'empreinte carbone + suivi personnel | squelette (stubs) |
+| ID  | Fonctionnalité                                    | Statut                                    |
+| --- | ------------------------------------------------- | ----------------------------------------- |
+| F1  | Inscription / connexion + profils de mobilité     | squelette (stubs)                         |
+| F2  | Planificateur d'itinéraires multimodal            | squelette (stubs)                         |
+| F3  | Intégration GTFS + GBFS                           | connecteurs implémentés (UF-302 / UF-303) |
+| —   | Calculateur d'empreinte carbone + suivi personnel | squelette (stubs)                         |
 
 ## Qualité de code & contribution
 
