@@ -30,6 +30,31 @@ class EnvironmentVariables {
   @IsString()
   @MinLength(2)
   JWT_EXPIRES_IN!: string;
+
+  /**
+   * Racine du moteur de routage OpenTripPlanner auto-hébergé (UF-301).
+   * Le connecteur TC y ajoute le chemin de l'API GraphQL (`/otp/gtfs/v1`).
+   */
+  @IsUrl({ require_tld: false, require_protocol: true })
+  OTP_BASE_URL!: string;
+
+  /**
+   * Délai maximal accordé à OpenTripPlanner, en millisecondes.
+   *
+   * Mesuré sur le graphe lyonnais en développement : 1,7 s à 8,3 s selon la
+   * charge de la machine et selon que la journée d'exploitation demandée est
+   * déjà en cache côté OTP. 12 s laissent passer ce pire cas sans immobiliser la
+   * requête indéfiniment ; une instance correctement dimensionnée répond bien
+   * en deçà, d'où le réglage par variable d'environnement.
+   *
+   * Borne haute à 30 s : au-delà, l'usager en mobilité aurait abandonné depuis
+   * longtemps, et la requête mobiliserait une connexion pour rien (C5/C10).
+   * Passé ce délai, le mode TC est simplement ignoré (dégradation gracieuse).
+   */
+  @IsInt()
+  @Min(1000)
+  @Max(30000)
+  OTP_TIMEOUT_MS!: number;
 }
 
 /**

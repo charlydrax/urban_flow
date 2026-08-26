@@ -13,6 +13,8 @@ describe('validateEnv', () => {
     DATABASE_URL: 'postgresql://urbanflow:secret@localhost:5433/urbanflow?schema=public',
     JWT_SECRET: 'a'.repeat(32),
     JWT_EXPIRES_IN: '15m',
+    OTP_BASE_URL: 'http://localhost:8080',
+    OTP_TIMEOUT_MS: '8000',
   };
 
   it('accepte une configuration complète et convertit PORT en nombre', () => {
@@ -41,6 +43,20 @@ describe('validateEnv', () => {
 
   it("rejette une CORS_ORIGIN qui n'est pas une URL", () => {
     expect(() => validateEnv({ ...validConfig, CORS_ORIGIN: 'not-a-url' })).toThrow(/CORS_ORIGIN/);
+  });
+
+  it('rejette une OTP_BASE_URL absente (UF-302)', () => {
+    const { OTP_BASE_URL: _omitted, ...withoutOtp } = validConfig;
+
+    expect(() => validateEnv(withoutOtp)).toThrow(/OTP_BASE_URL/);
+  });
+
+  it('rejette un OTP_TIMEOUT_MS hors plage (UF-302)', () => {
+    // Un délai démesuré immobiliserait la requête d'un usager en mobilité pour
+    // une source qui, de toute façon, est optionnelle (C5/C10).
+    expect(() => validateEnv({ ...validConfig, OTP_TIMEOUT_MS: '120000' })).toThrow(
+      /OTP_TIMEOUT_MS/,
+    );
   });
 
   it("n'inclut jamais la valeur reçue dans le message d'erreur (pas de fuite de secret — C11)", () => {
