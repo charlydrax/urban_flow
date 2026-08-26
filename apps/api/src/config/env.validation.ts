@@ -1,5 +1,15 @@
 import { plainToInstance } from 'class-transformer';
-import { IsInt, IsString, IsUrl, Max, Min, MinLength, validateSync } from 'class-validator';
+import {
+  IsIn,
+  IsInt,
+  IsOptional,
+  IsString,
+  IsUrl,
+  Max,
+  Min,
+  MinLength,
+  validateSync,
+} from 'class-validator';
 
 /**
  * Schéma de validation des variables d'environnement.
@@ -98,6 +108,27 @@ class EnvironmentVariables {
   @Min(5000)
   @Max(600000)
   GBFS_STATUS_TTL_MS!: number;
+
+  /**
+   * Autorise l'endpoint interne de test des sources (UF-306),
+   * `POST /api/routes/sources`.
+   *
+   * **Facultative**, et c'est délibéré : sans elle, l'endpoint est ouvert en
+   * développement et fermé dès que `NODE_ENV` vaut `production`. Il ne faut donc
+   * rien configurer pour être en sécurité, et une ligne explicite pour ne pas
+   * l'être — l'inverse ferait qu'un `.env` incomplet ouvrirait la route.
+   *
+   * Elle existe pour les deux cas où le défaut ne suffit pas : ouvrir
+   * temporairement le diagnostic sur un environnement de recette bâti en mode
+   * production, ou le fermer en développement pour vérifier le `404`.
+   *
+   * Pourquoi une chaîne et non un booléen : `process.env` ne porte que du texte,
+   * et la conversion implicite de class-transformer ferait de `"false"` un
+   * booléen vrai — une variable censée fermer la route l'ouvrirait (C4).
+   */
+  @IsOptional()
+  @IsIn(['true', 'false'])
+  ROUTES_SOURCES_DEBUG?: string;
 }
 
 /**
