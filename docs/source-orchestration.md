@@ -15,8 +15,8 @@ trois sources prises isolément.
 
 > Pour **observer** cette collecte sur un trajet réel — durées par source,
 > données brutes, causes de panne —, voir
-> [`source-diagnostics-endpoint.md`](./source-diagnostics-endpoint.md) (UF-306)
-> et l'écran `/dev/sources`.
+> [`source-diagnostics-endpoint.md`](./source-diagnostics-endpoint.md) (UF-306),
+> **archive** : l'endpoint et son écran ont été retirés par UF-402.
 
 ---
 
@@ -330,5 +330,7 @@ savoir que les promesses progressent réellement en même temps.
 - **Le calcul carbone** et **l'écriture de `search_history`** (étapes 6 et 7),
   qui viennent après la fusion.
 - **L'exposition de la collecte** : rien ne permet encore de voir ces données
-  brutes depuis l'extérieur. C'est l'objet d'UF-306
-  ([`source-diagnostics-endpoint.md`](./source-diagnostics-endpoint.md)).
+  brutes depuis l'extérieur. Ce fut l'objet d'UF-306
+  ([`source-diagnostics-endpoint.md`](./source-diagnostics-endpoint.md)), dont
+  l'endpoint a été retiré par UF-402 : le détail des pannes se lit désormais
+  dans les logs du serveur, et non plus dans une réponse HTTP (C11).

@@ -1,12 +1,28 @@
-# Endpoint interne de test des sources (UF-306)
+# Endpoint interne de test des sources (UF-306) — _retiré_
 
-`POST /api/routes/sources` — déclenche la collecte parallèle des trois sources
-(UF-305) et renvoie leurs **données brutes**, sans fusion. Écran de vérification
-associé : [`/dev/sources`](../apps/web/app/dev/sources/page.tsx).
-
-> ⚠️ **Endpoint temporaire.** Il existe pour valider le Sprint 3 de bout en bout
-> avant d'écrire la fusion multimodale, et disparaîtra au Sprint 4 au profit de
-> `POST /api/routes/plan`. Il est **désactivé hors développement**.
+> 🗄️ **Archive.** `POST /api/routes/sources` **n'existe plus** : il a été
+> supprimé par UF-402, avec l'écran `/dev/sources`, le
+> `SourceDiagnosticsService`, ses DTO et la variable `ROUTES_SOURCES_DEBUG`.
+> Cette page reste en place parce qu'elle documente une décision d'architecture
+> du Sprint 3 — pourquoi vérifier les connecteurs avant d'écrire la fusion — et
+> parce que la démarche est reproductible ; elle ne décrit plus le code courant.
+>
+> **Ce qui le remplace :** `POST /api/routes/plan` rend de vrais itinéraires
+> depuis UF-401, et publie un champ `sources` qui dit quelle source a répondu.
+> Ce que le diagnostic apportait en plus — la **cause technique réelle** de
+> chaque panne — reste volontairement absent de l'API : il n'apprendrait rien à
+> l'usager et exposerait notre topologie (C11). Il se lit dans les **logs du
+> serveur**, où `SourceCollectorService` journalise chaque échec.
+>
+> **Pourquoi le supprimer plutôt que de le laisser fermé en production.** Il
+> était déjà éteint hors développement (`404`), mais son code partait quand même
+> dans le bundle de production : une route qui publie nos causes de panne y
+> restait à un drapeau d'environnement près. Un accessoire de vérification qui a
+> fait son office se retire, il ne se garde pas « au cas où » — c'est la
+> recette 4 d'UF-402.
+>
+> **Le rejouer si besoin :** `git show 6c78520` (merge d'UF-306) contient le
+> service, l'écran et leurs tests.
 
 ---
 
@@ -263,8 +279,13 @@ docker compose stop otp
 
 ### Vérification de la fermeture hors développement
 
+> Sans objet depuis UF-402 : l'endpoint et sa variable `ROUTES_SOURCES_DEBUG`
+> ont été retirés. `POST /api/routes/sources` répond désormais `404` sur **tous**
+> les environnements, sans qu'aucune configuration ne puisse l'ouvrir.
+
+À l'époque, dans `apps/api/.env` :
+
 ```bash
-# dans apps/api/.env
 ROUTES_SOURCES_DEBUG=false
 # → 404 sur POST /api/routes/sources, y compris avec un token valide
 ```

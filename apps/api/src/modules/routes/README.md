@@ -8,13 +8,15 @@
 
 ## Endpoints (protégés par le guard JWT global)
 
-| Méthode | Route                 | Description                                             | Statut                                            |
-| ------- | --------------------- | ------------------------------------------------------- | ------------------------------------------------- |
-| POST    | `/api/routes/plan`    | Itinéraires multimodaux + CO₂, classés selon le profil  | collecte réelle (UF-305) + fusion réelle (UF-401) |
-| POST    | `/api/routes/sources` | **[dev]** Données brutes des trois sources, sans fusion | UF-306 — diagnostic, fermé en production          |
+| Méthode | Route              | Description                                            | Statut                      |
+| ------- | ------------------ | ------------------------------------------------------ | --------------------------- |
+| POST    | `/api/routes/plan` | Itinéraires multimodaux + CO₂, classés selon le profil | définitif (UF-402), le seul |
 
-Contrat d'entrée : `{ from: {label, lat, lng}, to: {...}, userId }` — `userId` est
-supplanté par l'identité du JWT (anti-IDOR, C4).
+Contrat d'entrée : `{ from: {label, lat, lng}, to: {...} }` — **sans `userId`**.
+L'identité vient du JWT et de lui seul (anti-IDOR, C4) ; le `ValidationPipe`
+global rejette en `400` une requête qui en enverrait encore un.
+
+Contrat de sortie : `{ itineraries, sortedBy, sources, searchHistoryId }`.
 
 ⚠️ Les **coordonnées sont obligatoires** depuis UF-305 : les trois sources
 travaillent sur des points, et le géocodage est fait par le client (UF-203). Un
@@ -29,7 +31,7 @@ label seul donne un `400` explicite — pas une liste vide inexplicable.
 | 5. Fusion en itinéraires multimodaux            | UF-401 | ✅   |
 | 6. `computeFootprint` par itinéraire            | UF-401 | ✅   |
 | 9. Tri selon la priorité du profil              | UF-401 | ✅   |
-| 7. Sauvegarde `search_history`                  | UF-402 | ⏳   |
+| 7 et 18. Sauvegarde `search_history`            | UF-402 | ✅   |
 
 **Plus aucun itinéraire n'est simulé.** Une liste vide signifie désormais
 qu'aucune chaîne continue n'a pu être formée — et `sources` dit si c'est faute de
@@ -210,38 +212,74 @@ vitesse moyenne (`travel-model.ts`), et leur tracé est une droite. C'est
 suffisant pour comparer des options à quelques minutes près ; ce n'est pas une
 feuille de route au carrefour près, et c'est assumé.
 
-## Endpoint interne de test des sources (UF-306)
+## L'endpoint définitif (UF-402)
 
-`POST /api/routes/sources` déclenche la même collecte que `/routes/plan` et rend
-les données **brutes** de chaque source, séparément — sans fusion, sans CO₂,
-sans écriture d'historique.
+`POST /api/routes/plan` enchaîne désormais toute la séquence de référence :
+vérification du JWT → lecture du profil → collecte parallèle → fusion → carbone →
+**historique** → réponse. C'est le seul endpoint du module.
 
-```
-routes/
-└── sources/
-    └── source-diagnostics.service.ts   résolution du trajet, projection, garde d'environnement
-```
+### Deux extrémités, et rien d'autre
 
-Il existe parce qu'une liste d'itinéraires vide ne dit pas où est le tort : la
-fusion, ou une source muette ? Le vérifier **avant** d'écrire la fusion évitait
-d'empiler deux étages non validés ; il garde exactement cette valeur maintenant
-que la fusion existe.
+Le diagramme de séquence du MVP portait un `{ from, to, userId }`. L'endpoint
+définitif **n'accepte plus de `userId`**. Le service l'ignorait déjà — il lisait
+l'identité du JWT — mais le garder dans le contrat entretenait l'idée qu'un
+compte se désigne depuis le corps de la requête, et laissait un champ à
+falsifier au premier oubli de contrôle.
 
-Le corps accepte `{ from, to }` ou `{ searchHistoryId }` pour rejouer une
-recherche enregistrée (UF-204) — relue avec l'identité du JWT, un identifiant
-d'autrui donnant un `404` indiscernable d'un identifiant inexistant (C4).
+Le supprimer transforme la précaution en garde active : le `ValidationPipe`
+global (`whitelist` + `forbidNonWhitelisted`) rejette en `400` toute requête qui
+en envoie un. C'est déjà le contrat de `POST /api/search-history` (UF-204) — les
+deux écritures de trajet parlent le même langage.
 
-**Il ne passe pas par `RoutesService.plan`** : l'emprunter mesurerait la fusion
-en plus des sources, et il ne saurait plus dire laquelle des deux a échoué. Les
-deux services partagent `UsersService` et `SourceCollectorService`, rien de plus.
+### La recherche est enregistrée à chaque appel (étape 18)
 
-**Il est fermé hors développement** (`404`), parce qu'il publie la cause
-technique réelle de chaque panne — là où `sources` de `/routes/plan` s'en tient
-à un vocabulaire générique (C11). `ROUTES_SOURCES_DEBUG=true|false` force le
-comportement ; sans la variable, `NODE_ENV` décide.
+Chaque planification écrit une ligne dans `search_history` pour le compte du JWT,
+et la réponse porte son identifiant dans `searchHistoryId`.
 
-Écran associé : `/dev/sources` (apps/web). Détail complet et recette :
-[`docs/source-diagnostics-endpoint.md`](../../../../../docs/source-diagnostics-endpoint.md).
+| Question                               | Réponse                                                              |
+| -------------------------------------- | -------------------------------------------------------------------- |
+| Quand ?                                | dès la soumission, **en parallèle de la collecte**                   |
+| Même si les trois sources se taisent ? | oui — l'historique dit ce qui a été _cherché_, pas ce qu'on a trouvé |
+| Avec l'option retenue ?                | non : à l'étape 18, aucune option n'est encore choisie               |
+| Et si l'écriture échoue ?              | `searchHistoryId: null`, les itinéraires sont rendus quand même      |
+
+**Pourquoi en parallèle.** Le trajet est connu dès la validation des extrémités ;
+attendre la collecte pour l'écrire ajouterait l'insertion à la latence de la
+source la plus lente au lieu de la glisser dessous (C5).
+
+**Pourquoi sans `selectedSummary` ni `carbonGrams`.** Inscrire d'office la
+première proposition ferait passer un classement du serveur pour un choix de
+l'usager, et fausserait le tableau de bord carbone du Sprint 5 — qui doit
+compter des déplacements, pas des suggestions. C'est l'écran de résultats
+(UF-404) qui saura ce qui a été retenu.
+
+**Pourquoi un échec ne remonte pas.** Ne pas mémoriser un trajet est un
+désagrément ; perdre pour cette raison des itinéraires déjà calculés serait une
+régression fonctionnelle (C10). La cause reste dans les logs du serveur, sans
+libellé ni coordonnées (C11).
+
+> Le client n'a donc **plus** à appeler `POST /search-history` après un
+> `planRoutes` : il dupliquerait la ligne que le serveur vient d'écrire.
+
+### L'endpoint de test UF-306 a été retiré
+
+`POST /api/routes/sources`, le `SourceDiagnosticsService`, l'écran
+`/dev/sources`, leurs DTO et la variable `ROUTES_SOURCES_DEBUG` ont été
+**supprimés**. Il avait servi à vérifier les trois connecteurs avant que la
+fusion n'existe — une liste d'itinéraires vide ne disait alors pas si le tort
+revenait à la fusion ou à une source muette.
+
+Il était déjà éteint hors développement (`404`), mais son code partait dans le
+bundle de production : une route qui publie la **cause technique réelle** de nos
+pannes y restait à un drapeau d'environnement près (C11). Un accessoire de
+vérification qui a fait son office se retire.
+
+Ce qu'il apportait est couvert autrement : le champ `sources` de `/routes/plan`
+dit quelle source a répondu, et le détail technique se lit dans les logs du
+serveur, où `SourceCollectorService` journalise chaque échec. L'archive de sa
+conception reste dans
+[`docs/source-diagnostics-endpoint.md`](../../../../../docs/source-diagnostics-endpoint.md) ;
+le code est retrouvable dans l'historique Git (`git show 6c78520`).
 
 ## Dépendances
 
@@ -249,8 +287,8 @@ comportement ; sans la variable, `NODE_ENV` décide.
   `SharedMobilityService` (GBFS, UF-303) et `CyclePathsService`
   (`ST_DWithin` sur PostGIS, UF-304)
 - `UsersModule` (préférences, étape 3), `CarbonModule` (barème CO₂, étape 6)
-- `SearchHistoryModule` — **lecture seule** (UF-306) : rejouer une recherche
-  enregistrée. Le planificateur y écrira au Sprint 4 ; le diagnostic, jamais (C8)
+- `SearchHistoryModule` — en **écriture** (UF-402, étape 18) : chaque
+  planification enregistre le trajet cherché sur le compte du JWT
 - `SourceCollectorService` — interne au module, volontairement **non exporté** :
   l'orchestration est une étape du planificateur, pas un service que d'autres
   modules auraient à consommer. L'exporter laisserait court-circuiter la lecture
@@ -262,7 +300,7 @@ comportement ; sans la variable, `NODE_ENV` décide.
 cd apps/api && npx jest src/modules/routes
 ```
 
-Six suites, sans réseau ni base. Les horloges ne sont **pas** simulées dans les
+Cinq suites, sans réseau ni base. Les horloges ne sont **pas** simulées dans les
 tests de collecte : les faux minuteurs de Jest masqueraient exactement ce qu'on
 veut mesurer, à savoir que les trois promesses progressent réellement en même
 temps.
@@ -273,8 +311,9 @@ continue, préférences (deux profils), plafond.
 
 ## Contraintes couvertes
 
-C4 (validation, anti-IDOR, coordonnées exigées, surface de diagnostic fermée en
-production), C8 (le diagnostic n'écrit pas dans l'historique), C9 (GeoJSON
+C4 (validation, anti-IDOR, coordonnées exigées, plus aucun `userId` dans le
+corps, surface de diagnostic retirée), C8 (l'historique enregistre la recherche,
+pas un choix qui n'a pas eu lieu), C9 (GeoJSON
 LineString, contrats partagés), C10 (appels parallèles, budget borné,
 dégradation gracieuse, durées mesurées), C11 (logs sans donnée de déplacement,
 cause publiée générique hors diagnostic), C12 (préférence PMR propagée au moteur

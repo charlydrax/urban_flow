@@ -104,18 +104,20 @@ le corps est rejeté en `400` par le `ValidationPipe` global
 (`forbidNonWhitelisted`). Le service n'expose délibérément aucune méthode
 « lire l'historique de X » — recette 2 du ticket.
 
-`findOwnedById(userId, id)` (ajoutée par UF-306, pour rejouer un trajet dans le
-diagnostic des sources) ne fait pas exception : le `user_id` est **dans la clause
-`WHERE`**, pas vérifié après coup.
+Le `user_id` est **dans la clause `WHERE`** de chaque requête, jamais vérifié
+après coup :
 
 ```sql
-WHERE id = $1::uuid AND user_id = $2::uuid
+WHERE user_id = $1::uuid
 ```
 
-Une entrée appartenant à quelqu'un d'autre ne remonte donc aucune ligne, et
-l'appelant ne peut pas distinguer « n'existe pas » de « n'est pas à vous » —
-sans quoi l'endpoint de diagnostic serait devenu un moyen de lire les trajets
-d'autrui en les faisant rejouer.
+Une ligne appartenant à quelqu'un d'autre ne remonte donc aucun résultat, et
+l'appelant ne peut pas distinguer « n'existe pas » de « n'est pas à vous ».
+
+> `findOwnedById(userId, id)`, ajoutée par UF-306 pour rejouer un trajet dans le
+> diagnostic des sources, a été **retirée par UF-402** en même temps que cet
+> endpoint : plus personne ne l'appelait. Elle appliquait la même règle, et
+> reviendra telle quelle le jour où un écran aura besoin de relire une entrée.
 
 **Injection SQL (OWASP A03)** : le SQL brut est écrit en _tagged template_
 `$queryRaw`, où chaque `${…}` devient un paramètre lié côté PostgreSQL. Aucune
@@ -149,15 +151,17 @@ le vérifie explicitement.
 
 ## Consommateurs du service
 
-- `SourceDiagnosticsService` (UF-306) — **lecture seule** : `findOwnedById` pour
-  rejouer un trajet enregistré et sonder les trois sources dessus. Il n'écrit
-  jamais ici : sonder l'infrastructure n'est pas un déplacement, et l'inscrire
-  fausserait les rappels récents puis le bilan carbone de l'usager (C8).
+- `RoutesService` (UF-402) — **écriture** : `create` à chaque planification
+  (étape 18). Le planificateur est le premier consommateur du module hors de son
+  propre contrôleur.
+- ~~`SourceDiagnosticsService` (UF-306)~~ — **retiré par UF-402**, avec son
+  endpoint. Il lisait l'historique pour rejouer un trajet et sonder les trois
+  sources dessus, et n'y écrivait jamais : sonder l'infrastructure n'est pas un
+  déplacement, et l'inscrire aurait faussé les rappels récents puis le bilan
+  carbone de l'usager (C8).
 
 ## Reste à faire (hors UF-204)
 
-- Écriture depuis le planificateur lui-même (étape 18 du flux) : le service est
-  exporté et prêt, `RoutesService` l'appellera quand le calcul réel arrivera.
 - Agrégation par le tableau de bord carbone (`CarbonService.getDashboard`,
   encore stub).
 - **Politique de rétention** (C8/C11) : les trajets ne devraient pas être
