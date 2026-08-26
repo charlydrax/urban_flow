@@ -24,8 +24,11 @@ supplanté par l'identité du JWT (anti-IDOR, C4).
 
 ## Dépendances
 
-- `TransportModule` (F3 — GTFS/GBFS), `UsersModule` (préférences), `CarbonModule` (CO₂)
-- `PrismaService` (`ST_DWithin` via `$queryRaw`, `SearchHistory`)
+- `TransportModule` — les **trois** sources de l'étape 2 : `TransitService` (GTFS,
+  UF-302), `SharedMobilityService` (GBFS, UF-303) et `CyclePathsService`
+  (`ST_DWithin` sur PostGIS, UF-304)
+- `UsersModule` (préférences), `CarbonModule` (CO₂)
+- `PrismaService` (`SearchHistory` via `$queryRaw`)
 
 ## Contraintes couvertes
 
