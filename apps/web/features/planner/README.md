@@ -18,6 +18,7 @@ F2 », « 03 · Maquettes desktop → DESKTOP 2 : PLANIFICATEUR ».
 | `use-route-plan.ts`               | Appel `POST /routes/plan`, état de la recherche, sélection (UF-403)      |
 | `itinerary-list.tsx`              | Panneau de résultats — groupe radio de cartes comparables (UF-404)       |
 | `itinerary-card.tsx`              | Carte d'un itinéraire : durée, séquence de modes, CO₂, horaires (UF-404) |
+| `itinerary-sort-toggle.tsx`       | Sélecteur de tri « Écologique / Rapide » du panneau (UF-503)             |
 | `carbon-breakdown.tsx`            | Détail CO₂ de l'option retenue : segment, facteur, comparaison (UF-501)  |
 | `itinerary-skeleton.tsx`          | Esquisse du panneau pendant le calcul — réserve la place (UF-405)        |
 | `plan-notice.tsx`                 | Message d'état : vide, panne, session expirée, mode dégradé (UF-405)     |
@@ -429,6 +430,10 @@ Rejouer ces décisions côté client garantirait qu'un jour les deux divergent. 
 sélecteur se contente donc d'**annoncer** le classement appliqué (« classés par
 empreinte carbone croissante »), sans le déduire en comparant les valeurs.
 
+> UF-503 ajoute un retri d'affichage, et n'entame pas cette règle : il réordonne
+> des valeurs publiées, il n'en produit aucune. Voir « Tri par empreinte
+> croissante » plus bas.
+
 ### Périmètre : ce qui restait à UF-404 et UF-405
 
 `itinerary-switcher.tsx` n'était **pas** le panneau de résultats de la maquette :
@@ -465,7 +470,7 @@ Une carte par itinéraire, pour **comparer** avant de choisir. C'est la maquette
 
 ```
 ┌──────────────────────────────────────────────┐
-│ ● [Meilleur choix · le plus rapide]   22 min │  ← la durée d'abord : c'est
+│ ● [🌱 Choix vert] [⚡ Le plus rapide]  22 min │  ← la durée d'abord : c'est
 │                                              │    ce qu'on compare
 │ 🚶 3 › 🚲 11 › 🚌 C3 6 › 🚶 2                │  ← la séquence de modes
 │                                              │
@@ -488,14 +493,14 @@ un même bus rompraient le lien que la recette demande d'établir.
 
 ### Ce que la carte affiche, et pourquoi dans cet ordre
 
-| Élément                  | Pourquoi il est là                                                             |
-| ------------------------ | ------------------------------------------------------------------------------ |
-| Durée, en gras à droite  | c'est le critère que l'œil balaye verticalement d'une carte à l'autre          |
-| Séquence de modes        | « Marche + Bus » de 22 min peut cacher 18 min de marche : les durées le disent |
-| Badge « Meilleur choix » | dit **pourquoi** le premier est premier, d'après `sortedBy` du serveur         |
-| Badge CO₂                | l'emplacement de la maquette, rempli (cf. plus bas)                            |
-| Mention PMR              | `Itinerary.accessible` — une contrainte, pas un agrément (C12)                 |
-| Créneau horaire          | deux options de même durée ne partent pas à la même heure                      |
+| Élément                 | Pourquoi il est là                                                             |
+| ----------------------- | ------------------------------------------------------------------------------ |
+| Durée, en gras à droite | c'est le critère que l'œil balaye verticalement d'une carte à l'autre          |
+| Séquence de modes       | « Marche + Bus » de 22 min peut cacher 18 min de marche : les durées le disent |
+| Badges de mise en avant | désignent l'option la moins émettrice et la plus rapide (UF-503)               |
+| Badge CO₂               | l'emplacement de la maquette, rempli (cf. plus bas)                            |
+| Mention PMR             | `Itinerary.accessible` — une contrainte, pas un agrément (C12)                 |
+| Créneau horaire         | deux options de même durée ne partent pas à la même heure                      |
 
 Les segments **consécutifs de même mode et même ligne** sont fusionnés : un métro
 B repris après un changement de quai afficherait sinon deux pastilles identiques
@@ -561,6 +566,115 @@ de Londres afficherait sinon 08:41 pour un bus qui passe à 09:41.
 - **Mobile-first (C2)** : les cartes s'empilent sur toute la largeur, sans
   dépendre d'un point de rupture ; la séquence de modes passe à la ligne au lieu
   de déborder. À partir de `md`, seule la largeur du conteneur change.
+
+## Tri par empreinte croissante (UF-503) — C2 / C5 / C7
+
+La liste s'ouvre **du moins au plus émetteur**. C'est le parti pris du produit :
+l'ordre de lecture est ce qui oriente vraiment un choix, bien plus qu'un chiffre
+affiché à côté d'une option déjà mise en tête.
+
+### Le partage avec le serveur
+
+| Décision                       | Qui la prend | Ce qui la porte                            |
+| ------------------------------ | ------------ | ------------------------------------------ |
+| Ordre **publié** (le défaut)   | serveur      | `sortedBy` dans la réponse                 |
+| Ordre **affiché** (le retri)   | client       | état local d'`ItineraryList`, non persisté |
+| Valeurs comparées              | serveur      | `carbonGrams`, `durationMinutes`           |
+| Qui est « le plus écologique » | client       | minimum sur les valeurs publiées           |
+
+Le dernier point est le seul qui puisse surprendre, et il ne contredit pas la
+règle « le client ne rejoue pas les décisions du serveur » : chercher le minimum
+d'une liste de nombres n'est pas un second barème carbone. Il n'y a rien à garder
+en phase — l'alternative aurait été un champ `greenestId` dans la réponse, à
+tenir cohérent avec `carbonGrams` pour dire exactement la même chose.
+
+La justification côté API est dans
+[`apps/api/src/modules/routes/README.md`](../../../api/src/modules/routes/README.md),
+section « Tri par empreinte croissante ».
+
+### Pourquoi le retri ne repasse pas par l'API (C5)
+
+Rappeler `POST /routes/plan` pour relire cinq itinéraires dans l'autre sens
+relancerait la collecte des trois sources — plusieurs secondes — et pourrait
+rendre des itinéraires **différents** (horaires GTFS avancés, borne Vélo'v vidée
+entre-temps). Un retri doit réordonner ce qu'on a sous les yeux, jamais en
+changer le contenu. Zéro requête pour un changement de vue.
+
+`sortItineraries` (dans `lib/itinerary-cards.ts`) applique les **mêmes règles de
+départage** que le serveur : à empreinte égale on classe sur la durée, et
+réciproquement. Sans ce second critère, l'ordre d'un ex æquo dépendrait de la
+stabilité du `sort` du moteur JavaScript.
+
+### Ce qui garantit que la durée ne devient jamais le défaut
+
+Trois choses, et aucune n'est une convention à respecter de bonne foi :
+
+1. le choix vit dans l'état local du panneau — ni `localStorage`, ni profil, ni
+   paramètre d'URL ;
+2. il est **repris au tri du serveur dès que `sortedBy` change**, c'est-à-dire à
+   chaque nouvelle recherche. La remise à zéro est faite pendant le rendu (motif
+   React d'ajustement d'état sur changement de prop) et non dans un `useEffect`,
+   qui provoquerait un premier rendu avec l'ancien tri — donc un
+   réordonnancement visible des cartes juste après l'arrivée des résultats ;
+3. « Écologique » est le premier bouton du groupe, donc le premier atteint au
+   clavier.
+
+Le point 2 ne repose volontairement pas sur le démontage du composant. Il a lieu
+aujourd'hui — l'écran affiche un squelette pendant le calcul, donc la liste
+disparaît — mais c'est un détail de mise en page d'UF-405, pas une garantie :
+une liste qui resterait montée pendant la recherche garderait sinon le tri
+précédent sans que rien ne le signale.
+
+### Les badges ne dépendent plus de la position
+
+UF-404 badgeait la première carte et traduisait `sortedBy` pour dire pourquoi
+elle était première. Cela ne tient plus dès qu'on peut retrier : le badge
+désignerait l'option la plus rapide comme la plus écologique sitôt le tri par
+durée choisi.
+
+La mise en avant est donc devenue une **propriété de l'itinéraire**
+(`itineraryHighlights`), et elle suit sa carte :
+
+| Badge                                    | Qui le porte                   |
+| ---------------------------------------- | ------------------------------ |
+| 🌱 Choix vert · empreinte la plus faible | l'itinéraire le moins émetteur |
+| ⚡ Le plus rapide                        | l'itinéraire le plus court     |
+
+Un même itinéraire peut porter les deux — c'est le cas heureux, et le cacher
+priverait l'usager de l'argument le plus fort qu'on ait à lui donner. En cas
+d'ex æquo, un seul est badgé : deux « choix vert » côte à côte ne mettent plus
+rien en avant, et c'est le départage du serveur qui tranche.
+
+**L'option la plus écologique reste mise en avant même quand la liste est
+classée par durée** — c'est précisément là qu'elle en a le plus besoin.
+
+### Accessibilité (C7)
+
+- **Un groupe radio, pas deux boutons** : choisir un tri, c'est retenir une
+  option parmi deux qui s'excluent. Le motif radio le dit aux technologies
+  d'assistance et donne la navigation aux flèches (WCAG 4.1.2).
+- **Le radio natif est masqué mais pas retiré du flux** (`peer` + `sr-only`) : il
+  garde le focus clavier, et l'anneau de focus est repeint sur l'étiquette qui le
+  suit (WCAG 2.4.7).
+- **L'état retenu se lit au fond plein et au texte en gras**, jamais à la seule
+  couleur (WCAG 1.4.1). Le tri du serveur est en plus signalé « (tri par défaut) »
+  en `sr-only` : sans cette mention, un usager qui a basculé sur « Rapide »
+  n'aurait plus aucun moyen de savoir lequel des deux est le classement d'origine.
+- **Les badges sont repris dans l'`aria-label` du radio** de la carte
+  (`describeItinerary`), et posés en `aria-hidden` dans le visuel : ils y sont
+  peints en couleur et en gras, ce qui ne dit rien à un lecteur d'écran.
+- **`aria-live` sur le décompte, pas sur la liste** : un retri ne change aucune
+  carte, seulement leur ordre. Réannoncer les quatre à chaque bascule noierait
+  l'information utile — « c'est maintenant classé par durée » — sous la relecture
+  de tout le panneau.
+- **Mobile-first (C2)** : le décompte et le sélecteur tiennent sur une ligne et
+  passent l'un sous l'autre quand la colonne est trop étroite.
+
+### Ce que le retri ne touche pas
+
+Ni les tracés de la carte, ni l'itinéraire retenu. Réordonner des cartes ne
+change pas ce qui est dessiné, et déplacer la sélection ferait bouger la caméra
+pour une raison purement cosmétique.
 
 ## Cas non nominaux (UF-405) — C7 / C10 / C11
 

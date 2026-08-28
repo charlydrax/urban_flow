@@ -362,6 +362,29 @@ describe('RoutesService', () => {
     expect(fast.sortedBy).toBe('durationAsc');
   });
 
+  it('publishes the carbon order by default, so the greener option is read first (UF-503)', async () => {
+    // Recette 1 d'UF-503 : « les itinéraires sont affichés du moins au plus
+    // émetteur par défaut ». Le défaut est celui d'un compte qui n'a jamais
+    // touché à ses préférences — `DEFAULT_PREFERENCES`, priorité « écolo ».
+    //
+    // Ce test verrouille le lien entre ce défaut produit et l'ordre publié. Le
+    // jour où quelqu'un passerait `DEFAULT_PREFERENCES.priority` à `FASTEST`
+    // pour raccourcir une démo, la liste s'ouvrirait sur l'option la plus
+    // rapide et le choix de conception du ticket tomberait sans bruit.
+    getPreferences.mockResolvedValue(DEFAULT_PREFERENCES);
+    collectAllSources.mockResolvedValue(collected({ transit: twoJourneys() }));
+    computeFootprint.mockImplementation((segments: StubSegment[]) =>
+      footprint(segments, segments.some((segment) => segment.line === 'B') ? 900 : 100),
+    );
+
+    const result = await service.plan(dto(), userId);
+
+    expect(result.sortedBy).toBe('carbonAsc');
+    expect(result.itineraries[0]?.carbonGrams).toBe(
+      Math.min(...result.itineraries.map((itinerary) => itinerary.carbonGrams)),
+    );
+  });
+
   it('answers with an empty list when every source failed, without throwing', async () => {
     collectAllSources.mockResolvedValue(collected({ allSourcesFailed: true }));
     toAvailability.mockReturnValue([

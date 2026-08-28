@@ -2,12 +2,15 @@ import { TransportMode, type Itinerary, type RouteSegment } from '@urbanflow/sha
 import { describe, expect, it } from 'vitest';
 
 import {
-  BEST_OPTION_REASON,
+  HIGHLIGHT_LABELS,
   MODE_ICONS,
+  SORT_OPTIONS,
   describeItinerary,
   formatClock,
   itineraryClock,
+  itineraryHighlights,
   modeSequence,
+  sortItineraries,
 } from './itinerary-cards';
 import { MODE_TRACK_STYLES } from './route-map-layers';
 
@@ -168,6 +171,19 @@ describe('describeItinerary', () => {
     );
   });
 
+  it('annonce la mise en avant, que les badges ne disent qu’en couleur (UF-503)', () => {
+    const description = describeItinerary(
+      itinerary([segment(TransportMode.BIKE, 28)], { durationMinutes: 28, carbonGrams: 0 }),
+      3,
+      4,
+      { greenest: true, fastest: false },
+    );
+
+    expect(description).toBe(
+      'Option 3 sur 4. Choix vert · empreinte la plus faible. 28 minutes. Vélo 28 min. 0 g CO₂.',
+    );
+  });
+
   it('n’annonce ni horaire ni mention PMR quand la donnée est absente', () => {
     const description = describeItinerary(
       itinerary([segment(TransportMode.BIKE, 28)], { durationMinutes: 28, carbonGrams: 0 }),
@@ -179,10 +195,124 @@ describe('describeItinerary', () => {
   });
 });
 
-describe('BEST_OPTION_REASON', () => {
-  it('formule la mise en tête à partir de la clé de tri publiée par le serveur', () => {
-    // Le client n'invente pas le classement : il traduit `sortedBy`.
-    expect(BEST_OPTION_REASON.durationAsc).toContain('rapide');
-    expect(BEST_OPTION_REASON.carbonAsc).toContain('empreinte');
+describe('itineraryHighlights', () => {
+  // Trois options qui ne se classent pas dans le même ordre selon le critère :
+  // c'est exactement la situation que le ticket veut rendre lisible.
+  const velo = itinerary([segment(TransportMode.BIKE, 28)], {
+    id: 'velo',
+    durationMinutes: 28,
+    carbonGrams: 0,
+  });
+  const metro = itinerary([segment(TransportMode.METRO, 18)], {
+    id: 'metro',
+    durationMinutes: 18,
+    carbonGrams: 120,
+  });
+  const bus = itinerary([segment(TransportMode.BUS, 22)], {
+    id: 'bus',
+    durationMinutes: 22,
+    carbonGrams: 310,
+  });
+
+  it('désigne le moins émetteur, quel que soit son rang dans la liste', () => {
+    // Liste classée par durée : le vélo est dernier, il reste le choix vert.
+    const highlights = itineraryHighlights([metro, bus, velo]);
+
+    expect(highlights['velo']?.greenest).toBe(true);
+    expect(highlights['metro']?.greenest).toBeFalsy();
+    expect(highlights['bus']).toBeUndefined();
+  });
+
+  it('désigne aussi le plus rapide — les deux badges coexistent', () => {
+    const highlights = itineraryHighlights([velo, metro, bus]);
+
+    expect(highlights['metro']?.fastest).toBe(true);
+    expect(highlights['velo']?.fastest).toBeFalsy();
+  });
+
+  it('pose les deux badges sur le même itinéraire quand il gagne sur les deux', () => {
+    const imbattable = itinerary([segment(TransportMode.BIKE, 9)], {
+      id: 'imbattable',
+      durationMinutes: 9,
+      carbonGrams: 0,
+    });
+
+    expect(itineraryHighlights([imbattable, metro])['imbattable']).toEqual({
+      greenest: true,
+      fastest: true,
+    });
+  });
+
+  it('ne badge qu’un seul ex æquo — deux « choix vert » ne mettent plus rien en avant', () => {
+    const autreVelo = { ...velo, id: 'velo-2' };
+    const highlights = itineraryHighlights([velo, autreVelo]);
+
+    expect(highlights['velo']?.greenest).toBe(true);
+    expect(highlights['velo-2']).toBeUndefined();
+  });
+
+  it('rend un objet vide sur une liste vide', () => {
+    expect(itineraryHighlights([])).toEqual({});
+  });
+});
+
+describe('sortItineraries', () => {
+  const rapideEtSale = itinerary([segment(TransportMode.BUS, 12)], {
+    id: 'rapide',
+    durationMinutes: 12,
+    carbonGrams: 400,
+  });
+  const lentEtPropre = itinerary([segment(TransportMode.BIKE, 30)], {
+    id: 'propre',
+    durationMinutes: 30,
+    carbonGrams: 0,
+  });
+
+  it('classe par empreinte croissante — le défaut assumé du produit', () => {
+    const sorted = sortItineraries([rapideEtSale, lentEtPropre], 'carbonAsc');
+
+    expect(sorted.map((option) => option.id)).toEqual(['propre', 'rapide']);
+  });
+
+  it('classe par durée croissante quand l’usager le demande', () => {
+    const sorted = sortItineraries([lentEtPropre, rapideEtSale], 'durationAsc');
+
+    expect(sorted.map((option) => option.id)).toEqual(['rapide', 'propre']);
+  });
+
+  it('départage les ex æquo sur l’autre critère, comme le serveur', () => {
+    // Même empreinte : sans second critère, l'ordre dépendrait de la stabilité
+    // du `sort` du moteur — donc du hasard.
+    const lourd = { ...lentEtPropre, id: 'lourd', durationMinutes: 40, carbonGrams: 400 };
+    const sorted = sortItineraries([lourd, rapideEtSale], 'carbonAsc');
+
+    expect(sorted.map((option) => option.id)).toEqual(['rapide', 'lourd']);
+  });
+
+  it('ne modifie pas la liste reçue — l’état React ne se mute pas', () => {
+    const received = [rapideEtSale, lentEtPropre];
+    const sorted = sortItineraries(received, 'carbonAsc');
+
+    expect(received.map((option) => option.id)).toEqual(['rapide', 'propre']);
+    expect(sorted).not.toBe(received);
+  });
+});
+
+describe('SORT_OPTIONS', () => {
+  it('propose l’empreinte en premier — l’ordre de lecture dit le défaut (UF-503)', () => {
+    expect(SORT_OPTIONS.map((option) => option.key)).toEqual(['carbonAsc', 'durationAsc']);
+  });
+
+  it('nomme le tri écologique sans jargon de clé de tri', () => {
+    expect(SORT_OPTIONS[0]!.label).toBe('Écologique');
+    expect(SORT_OPTIONS[1]!.label).toBe('Rapide');
+  });
+});
+
+describe('HIGHLIGHT_LABELS', () => {
+  it('dit « choix vert » et dit pourquoi', () => {
+    expect(HIGHLIGHT_LABELS.greenest).toContain('Choix vert');
+    expect(HIGHLIGHT_LABELS.greenest).toContain('empreinte');
+    expect(HIGHLIGHT_LABELS.fastest).toContain('rapide');
   });
 });

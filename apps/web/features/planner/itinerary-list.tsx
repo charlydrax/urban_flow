@@ -1,15 +1,11 @@
 'use client';
 
 import type { Itinerary, ItinerarySortKey } from '@urbanflow/shared';
+import { useState } from 'react';
 
-import { BEST_OPTION_REASON } from '../../lib/itinerary-cards';
+import { SORT_LABELS, itineraryHighlights, sortItineraries } from '../../lib/itinerary-cards';
 import { ItineraryCard } from './itinerary-card';
-
-/** Comment le serveur a classé la liste — annoncé tel qu'il l'a publié, jamais redéduit. */
-const SORT_LABELS: Record<ItinerarySortKey, string> = {
-  carbonAsc: 'classés par empreinte carbone croissante',
-  durationAsc: 'classés par durée croissante',
-};
+import { ItinerarySortToggle } from './itinerary-sort-toggle';
 
 export interface ItineraryListProps {
   itineraries: readonly Itinerary[];
@@ -34,6 +30,41 @@ export interface ItineraryListProps {
  * option par option (C7 — WCAG 4.1.2). Avec quatre cartes de six lignes
  * chacune, la différence à la navigation clavier n'est pas théorique.
  *
+ * ## Le tri par empreinte est le défaut, la durée est l'alternative (UF-503)
+ *
+ * La liste s'ouvre **dans l'ordre publié par le serveur**, annoncé par
+ * `sortedBy` — par défaut l'empreinte croissante, puisque la priorité « écolo »
+ * est le défaut du profil de mobilité (`DEFAULT_PREFERENCES`, côté API). Le
+ * sélecteur permet de relire la même liste par durée croissante ; ce choix est
+ * une **vue**, pas une préférence :
+ *
+ * ```
+ * réponse serveur ──► sortedBy ──► vue initiale
+ *                                      │
+ *                        clic « Rapide » ▼
+ *                                  vue = durationAsc   (état local, non persisté)
+ *                                      │
+ *                     nouvelle recherche ▼
+ *                                  vue = sortedBy      (le défaut reprend la main)
+ * ```
+ *
+ * Le troisième temps est ce qui tient la recette « sans en faire le défaut » :
+ * une bascule oubliée sur « Rapide » ne suit pas l'usager d'une recherche à la
+ * suivante. Il est obtenu en **remettant l'état à zéro quand `sortedBy`
+ * change**, plutôt qu'en faisant confiance au démontage du composant : celui-ci
+ * a lieu aujourd'hui (l'écran affiche un squelette pendant le calcul), mais
+ * c'est un détail de mise en page, et une liste qui resterait montée pendant
+ * une recherche garderait sinon le tri précédent sans que rien ne le signale.
+ *
+ * ## La mise en avant ne dépend plus de la position
+ *
+ * Tant que l'ordre venait du serveur seul, badger la première carte suffisait à
+ * désigner la meilleure option. Ce n'est plus vrai dès qu'on peut retrier : les
+ * badges « Choix vert » et « Le plus rapide » sont donc calculés sur les valeurs
+ * des itinéraires (`itineraryHighlights`) et suivent leur carte où qu'elle
+ * aille. L'option la plus écologique reste mise en avant **y compris** quand la
+ * liste est classée par durée — c'est là qu'elle en a le plus besoin.
+ *
  * ## Le lien avec la carte
  *
  * Sélectionner une carte remonte l'identifiant à `PlannerScreen`, qui le passe
@@ -42,12 +73,18 @@ export interface ItineraryListProps {
  * recadre dessus. Le composant ne touche jamais MapLibre — c'est la recette 2 du
  * ticket, obtenue sans coupler la liste au moteur de rendu.
  *
+ * Le retri, lui, ne touche pas à la carte : réordonner des cartes ne change ni
+ * les tracés ni l'itinéraire retenu. Une bascule qui déplacerait la sélection
+ * ferait bouger la caméra pour une raison purement cosmétique.
+ *
  * ## Mobile-first (C2)
  *
  * Les cartes s'empilent sur toute la largeur et ne dépendent d'aucun point de
  * rupture : c'est la mise en page de la maquette mobile. À partir de `md`, la
  * colonne du planificateur les contient telles quelles, à côté de la carte —
- * rien à réorganiser, seule la largeur du conteneur change.
+ * rien à réorganiser, seule la largeur du conteneur change. L'en-tête met le
+ * décompte et le sélecteur sur une ligne, et les laisse passer l'un sous
+ * l'autre quand la colonne est trop étroite.
  *
  * Le vide, l'attente et le mode dégradé sont gérés par `PlannerScreen`
  * (UF-405) : cette liste rend `null` plutôt qu'un cadre creux, et n'a pas à
@@ -55,31 +92,75 @@ export interface ItineraryListProps {
  * répondu » ne se disent pas pareil, mais cela se décide au-dessus d'elle.
  */
 export function ItineraryList({ itineraries, selectedId, sortedBy, onSelect }: ItineraryListProps) {
+  // Tri demandé par l'usager, `null` tant qu'il n'a rien demandé — c'est-à-dire
+  // tant que l'ordre affiché est celui du serveur. Distinguer « pas de choix »
+  // de « choix qui coïncide avec le défaut » est ce qui permet de rendre la main
+  // au serveur si sa clé change, sans écraser une bascule volontaire.
+  const [viewSort, setViewSort] = useState<ItinerarySortKey | null>(null);
+
+  // Remise à zéro sur changement de prop, selon le motif React officiel
+  // (ajustement d'état pendant le rendu, pas d'`useEffect`) : un effet
+  // provoquerait un premier rendu avec l'ancien tri, donc un réordonnancement
+  // visible des cartes juste après l'arrivée des résultats.
+  const [lastServerSort, setLastServerSort] = useState(sortedBy);
+  if (sortedBy !== lastServerSort) {
+    setLastServerSort(sortedBy);
+    setViewSort(null);
+  }
+
   if (itineraries.length === 0) return null;
 
-  return (
-    <fieldset className="flex flex-col gap-2">
-      <legend className="mb-1 text-sm font-bold text-ink">
-        Itinéraires proposés&nbsp;: {itineraries.length}
-        {sortedBy && (
-          <span className="ml-1 font-normal text-ink-500">— {SORT_LABELS[sortedBy]}</span>
-        )}
-      </legend>
+  // `sortedBy` est absent tant qu'aucune réponse n'est arrivée. Le repli sur
+  // l'empreinte n'est pas arbitraire : c'est le défaut du produit, et il vaut
+  // mieux que l'ordre d'arrivée des sources.
+  const serverDefault = sortedBy ?? 'carbonAsc';
+  const activeSort = viewSort ?? serverDefault;
 
-      {itineraries.map((itinerary, index) => (
-        <ItineraryCard
-          key={itinerary.id}
-          itinerary={itinerary}
-          position={index + 1}
-          total={itineraries.length}
-          selected={itinerary.id === selectedId}
-          // La mise en avant du premier n'est pas décorative : elle dit
-          // *pourquoi* il est premier, et cette raison vient du serveur. Sans
-          // `sortedBy`, on ne l'invente pas.
-          bestReason={index === 0 && sortedBy ? BEST_OPTION_REASON[sortedBy] : null}
-          onSelect={() => onSelect(itinerary.id)}
+  // Les mises en avant sont calculées sur la liste **du serveur**, avant retri :
+  // son ordre est le départage des ex æquo, et il ne doit pas dépendre de la vue.
+  const highlights = itineraryHighlights(itineraries);
+  const visible = sortItineraries(itineraries, activeSort);
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-sm font-bold text-ink">
+          Itinéraires proposés&nbsp;: {itineraries.length}
+          <span className="ml-1 font-normal text-ink-500">— {SORT_LABELS[activeSort]}</span>
+        </p>
+
+        <ItinerarySortToggle
+          value={activeSort}
+          serverDefault={serverDefault}
+          onChange={setViewSort}
         />
-      ))}
-    </fieldset>
+      </div>
+
+      {/*
+        `aria-live` sur le décompte plutôt que sur la liste : un retri ne change
+        aucune carte, seulement leur ordre. Réannoncer les quatre à chaque
+        bascule noierait l'information utile — « c'est maintenant classé par
+        durée » — sous la relecture de tout le panneau (C7).
+      */}
+      <p aria-live="polite" className="sr-only">
+        Itinéraires {SORT_LABELS[activeSort]}.
+      </p>
+
+      <fieldset className="flex flex-col gap-2">
+        <legend className="sr-only">Choisir un itinéraire</legend>
+
+        {visible.map((itinerary, index) => (
+          <ItineraryCard
+            key={itinerary.id}
+            itinerary={itinerary}
+            position={index + 1}
+            total={visible.length}
+            selected={itinerary.id === selectedId}
+            highlight={highlights[itinerary.id]}
+            onSelect={() => onSelect(itinerary.id)}
+          />
+        ))}
+      </fieldset>
+    </div>
   );
 }
