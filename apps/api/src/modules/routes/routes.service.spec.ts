@@ -28,6 +28,9 @@ import { SourceCollectorService } from './sources/source-collector.service';
  *    compte du JWT, et une écriture ratée ne coûte pas les itinéraires (UF-402).
  */
 describe('RoutesService', () => {
+  /** Ce que les faux du Service Carbone regardent d'un segment, et rien de plus. */
+  type StubSegment = { mode: TransportMode; line?: string };
+
   let service: RoutesService;
   let getPreferences: jest.Mock;
   let collectAllSources: jest.Mock;
@@ -97,6 +100,72 @@ describe('RoutesService', () => {
       elapsedMs: 14,
       ...overrides,
     }) as CollectedSources;
+
+  /**
+   * Une empreinte de la forme rendue par le Service Carbone, à total imposé.
+   *
+   * Le total est **réparti** sur les lignes plutôt que posé à côté d'elles :
+   * l'orchestrateur réécrit les `carbonGrams` des segments avec ces lignes, et
+   * un faux dont le total ne serait pas la somme du détail testerait une
+   * réponse que le vrai service ne peut pas produire.
+   */
+  const footprint = (segments: StubSegment[], totalGrams: number) => {
+    const share = Math.round(totalGrams / Math.max(1, segments.length));
+    const detail = segments.map((segment, index) => ({
+      mode: segment.mode,
+      distanceMeters: 1000,
+      factorGramsPerKm: 42,
+      // Le dernier absorbe l'arrondi : le total reste la somme exacte des lignes.
+      grams: index === segments.length - 1 ? totalGrams - share * (segments.length - 1) : share,
+    }));
+
+    return {
+      totalGrams,
+      segments: detail,
+      carEquivalentGrams: 218,
+      avoidedGrams: Math.max(0, 218 - totalGrams),
+    };
+  };
+
+  /**
+   * Collecte TC à **deux** trajets, dont le second est plus long.
+   *
+   * La fusion les classera donc dans cet ordre sur la durée, et sur l'empreinte
+   * qu'elle en déduit. C'est ce qui rend observable le reclassement d'UF-502 :
+   * avec un seul itinéraire, aucun tri ne se distingue de l'absence de tri.
+   */
+  const twoJourneys = () => {
+    const base = collected().transit as { data: { journeys: unknown[] } };
+    const [first] = base.data.journeys as Record<string, unknown>[];
+    const firstLeg = (first?.legs as Record<string, unknown>[])[0];
+
+    return {
+      ...base,
+      data: {
+        ...base.data,
+        journeys: [
+          first,
+          {
+            ...first,
+            id: 'transit-2',
+            durationMinutes: 19,
+            arrivalAt: '2026-08-26T08:19:00+02:00',
+            legs: [
+              {
+                ...firstLeg,
+                mode: TransportMode.TRAM,
+                sourceMode: 'TRAM',
+                durationMinutes: 19,
+                distanceMeters: 2600,
+                line: 'T1',
+                arrivalAt: '2026-08-26T08:19:00+02:00',
+              },
+            ],
+          },
+        ],
+      },
+    } as unknown as CollectedSources['transit'];
+  };
 
   beforeEach(async () => {
     getPreferences = jest.fn().mockResolvedValue(DEFAULT_PREFERENCES);
@@ -219,6 +288,66 @@ describe('RoutesService', () => {
     // fusion avait estimée : deux chiffres pour la même chose finiraient par
     // diverger, et c'est le service qui fait foi.
     expect(itinerary?.segments.every((segment) => segment.carbonGrams === 42)).toBe(true);
+  });
+
+  it('sorts the published list on the published footprint, not on the merge guess (UF-502)', async () => {
+    // Deux propositions, et un Service Carbone qui contredit l'estimation de la
+    // fusion : le second trajet — plus long, donc classé après par la fusion —
+    // est ici le moins émetteur. C'est le seul moyen de vérifier que l'ordre
+    // suit bien les nombres publiés et non ceux qui ont servi à les choisir.
+    collectAllSources.mockResolvedValue(collected({ transit: twoJourneys() }));
+    computeFootprint.mockImplementation((segments: StubSegment[]) => {
+      const heavy = segments.some((segment) => segment.line === 'B');
+      return footprint(segments, heavy ? 900 : 100);
+    });
+
+    const result = await service.plan(dto(), userId);
+
+    expect(result.itineraries.length).toBeGreaterThan(1);
+    expect(result.sortedBy).toBe('carbonAsc');
+    // `sortedBy` est une promesse : le client annonce « classés par empreinte »
+    // sans revérifier. La liste doit donc l'être sur les valeurs qu'elle porte.
+    const published = result.itineraries.map((itinerary) => itinerary.carbonGrams);
+    expect(published).toEqual([...published].sort((a, b) => a - b));
+    expect(published[0]).toBe(100);
+  });
+
+  it('keeps the duration order when the profile asks for the fastest (UF-502)', async () => {
+    // Le reclassement ne doit pas s'appliquer au-delà de sa raison d'être :
+    // sur un profil « rapide », l'empreinte n'est qu'un départage, et une
+    // valorisation carbone ne doit pas réordonner la liste par durée.
+    getPreferences.mockResolvedValue({ ...DEFAULT_PREFERENCES, priority: RoutePriority.FASTEST });
+    collectAllSources.mockResolvedValue(collected({ transit: twoJourneys() }));
+    computeFootprint.mockImplementation((segments: StubSegment[]) =>
+      footprint(segments, segments.some((segment) => segment.line === 'B') ? 900 : 100),
+    );
+
+    const result = await service.plan(dto(), userId);
+
+    expect(result.sortedBy).toBe('durationAsc');
+    const durations = result.itineraries.map((itinerary) => itinerary.durationMinutes);
+    expect(durations).toEqual([...durations].sort((a, b) => a - b));
+  });
+
+  it('prices every itinerary in a negligible share of the response time (UF-502)', async () => {
+    // Recette d'UF-502 : « le temps de réponse reste acceptable après ajout du
+    // calcul ». La collecte des trois sources se compte en centaines de
+    // millisecondes (voir docs/source-orchestration.md) ; la valorisation, elle,
+    // est une arithmétique en mémoire sur au plus cinq itinéraires. Le budget
+    // ci-dessous est délibérément lâche — il n'est pas là pour mesurer la
+    // machine de CI, mais pour faire échouer la construction le jour où
+    // quelqu'un glisserait une I/O dans le Service Carbone.
+    collectAllSources.mockResolvedValue(collected({ transit: twoJourneys() }));
+
+    const startedAt = performance.now();
+    const result = await service.plan(dto(), userId);
+    const elapsedMs = performance.now() - startedAt;
+
+    expect(result.itineraries.length).toBeGreaterThan(0);
+    expect(computeFootprint).toHaveBeenCalledTimes(result.itineraries.length);
+    // Une seule passe par itinéraire : ni recalcul par segment affiché, ni
+    // second appel pour le tri.
+    expect(elapsedMs).toBeLessThan(50);
   });
 
   it('publishes the sort key derived from the profile priority', async () => {
