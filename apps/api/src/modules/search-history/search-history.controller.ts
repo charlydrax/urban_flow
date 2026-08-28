@@ -1,11 +1,13 @@
-import { Body, Controller, Get, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
 import {
   ApiBadRequestResponse,
   ApiBearerAuth,
   ApiCookieAuth,
   ApiCreatedResponse,
+  ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
+  ApiParam,
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
@@ -18,6 +20,7 @@ import {
   SearchHistoryEntryDto,
   SearchHistoryListDto,
 } from './dto/list-search-history.dto';
+import { SelectItineraryDto } from './dto/select-itinerary.dto';
 import { SearchHistoryService } from './search-history.service';
 
 /**
@@ -76,5 +79,34 @@ export class SearchHistoryController {
   ): Promise<SearchHistoryListDto> {
     const entries = await this.searchHistoryService.findRecent(user.userId, query.limit);
     return { entries };
+  }
+
+  /**
+   * Enregistre l'itinéraire **retenu** pour une recherche déjà consignée
+   * (UF-505) — ce qui alimente le suivi carbone personnel.
+   *
+   * `PATCH` et non `PUT` : la ligne existe déjà et seuls le résumé et
+   * l'empreinte sont posés dessus ; les extrémités du trajet, elles, ne
+   * changent pas et n'ont pas à être renvoyées (C5).
+   *
+   * L'UUID vient du chemin, donc du client — d'où le `ParseUUIDPipe`, qui
+   * refuse en 400 ce qui n'est pas un identifiant avant que la valeur
+   * n'atteigne le SQL (C4), et la restriction au propriétaire côté service, qui
+   * répond 404 pour la ligne d'autrui (OWASP A01).
+   */
+  @Patch(':id/selection')
+  @ApiOperation({ summary: 'Enregistre l’itinéraire retenu pour une recherche' })
+  @ApiParam({ name: 'id', format: 'uuid', description: 'Ligne d’historique à compléter.' })
+  @ApiOkResponse({ type: SearchHistoryEntryDto })
+  @ApiBadRequestResponse({ description: 'Identifiant non-UUID ou corps invalide (C4).' })
+  @ApiNotFoundResponse({
+    description: 'Recherche inconnue — ou appartenant à un autre compte (OWASP A01).',
+  })
+  recordSelection(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SelectItineraryDto,
+  ): Promise<SearchHistoryEntryDto> {
+    return this.searchHistoryService.recordSelection(user.userId, id, dto);
   }
 }

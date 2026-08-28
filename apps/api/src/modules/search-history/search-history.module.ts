@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 
+import { CarbonModule } from '../carbon/carbon.module';
 import { SearchHistoryController } from './search-history.controller';
 import { SearchHistoryService } from './search-history.service';
 
@@ -12,6 +13,10 @@ import { SearchHistoryService } from './search-history.service';
  * des géométries PostGIS.
  */
 @Module({
+  // `CarbonModule` : l'enregistrement d'un itinéraire retenu (UF-505) fait
+  // valoriser ses segments par le Service Carbone plutôt que de croire les
+  // grammes annoncés par le client (C4).
+  imports: [CarbonModule],
   controllers: [SearchHistoryController],
   providers: [SearchHistoryService],
   exports: [SearchHistoryService],

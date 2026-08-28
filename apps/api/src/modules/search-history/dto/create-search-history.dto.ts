@@ -75,10 +75,32 @@ export class CreateSearchHistoryDto implements CreateSearchHistoryPayload {
   @MaxLength(200)
   selectedSummary?: string;
 
-  /** Empreinte de l'option retenue, en grammes de CO₂ (jamais négative). */
+  /**
+   * Empreinte de l'option retenue, en grammes de CO₂ (jamais négative).
+   *
+   * ⚠️ Depuis UF-505, ce n'est **pas** le chemin nominal pour valoriser un
+   * trajet : `PATCH /api/search-history/:id/selection` fait calculer l'empreinte
+   * par le Service Carbone à partir des segments, au lieu de croire un nombre
+   * venu du navigateur. Le champ reste au contrat pour les appelants qui
+   * connaissent déjà le chiffre — le parcours de la PWA n'en fait pas partie.
+   */
   @ApiPropertyOptional({ example: 14, minimum: 0 })
   @IsOptional()
   @IsInt()
   @Min(0)
   carbonGrams?: number;
+
+  /**
+   * Référence voiture du même trajet, en grammes de CO₂ (UF-505).
+   *
+   * Accepté avec les mêmes réserves que `carbonGrams`, et pour la même raison
+   * qu'il est stocké : les deux valeurs forment un couple. Une empreinte sans sa
+   * référence produirait une ligne dont le tableau de bord ne saurait pas dire
+   * ce qu'elle a fait économiser.
+   */
+  @ApiPropertyOptional({ example: 612, minimum: 0 })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  carEquivalentGrams?: number;
 }

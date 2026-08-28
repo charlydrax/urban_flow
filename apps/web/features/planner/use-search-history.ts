@@ -118,15 +118,19 @@ export function useSearchHistory(enabled: boolean): SearchHistoryState {
       // extrémités. Relire la collection pour retrouver ce qu'on sait déjà
       // coûterait un aller-retour à chaque recherche (C5).
       //
-      // `selectedSummary` et `carbonGrams` restent nuls tant qu'aucune option
-      // n'a été retenue — c'est exactement ce que contient la ligne en base à
-      // cet instant, et la liste n'affiche de toute façon que le trajet.
+      // `selectedSummary`, `carbonGrams` et `carEquivalentGrams` restent nuls
+      // tant qu'aucune option n'a été retenue — c'est exactement ce que contient
+      // la ligne en base à cet instant, et la liste n'affiche de toute façon que
+      // le trajet. Le choix arrive plus tard, par `PATCH .../selection`
+      // (UF-505), et cette liste n'a pas besoin d'en prendre acte : elle sert de
+      // rappels de trajets, pas de bilan.
       const created: SearchHistoryEntry = {
         id,
         from,
         to,
         selectedSummary: null,
         carbonGrams: null,
+        carEquivalentGrams: null,
         createdAt: new Date().toISOString(),
       };
 

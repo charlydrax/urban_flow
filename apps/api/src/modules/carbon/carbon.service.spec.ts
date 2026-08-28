@@ -1,6 +1,7 @@
 import { Test } from '@nestjs/testing';
 
 import { TransportMode } from '../../common/enums/transport-mode.enum';
+import { PrismaService } from '../../prisma/prisma.service';
 import { RouteSegmentDto } from '../routes/dto/itinerary.dto';
 import { CarbonService } from './carbon.service';
 import { CAR_REFERENCE_GRAMS_PER_KM, segmentCarbonGrams } from './emission-factors';
@@ -20,6 +21,7 @@ import { CAR_REFERENCE_GRAMS_PER_KM, segmentCarbonGrams } from './emission-facto
  */
 describe('CarbonService', () => {
   let service: CarbonService;
+  let queryRaw: jest.Mock;
 
   /** Segment d'essai — seuls le mode et la distance entrent dans le calcul. */
   const segment = (
@@ -36,8 +38,14 @@ describe('CarbonService', () => {
   });
 
   beforeEach(async () => {
+    // `getSummary` (UF-505) lit `search_history` en SQL brut : le mock reçoit
+    // les fragments du *tagged template* puis les valeurs liées, ce qui permet
+    // de vérifier séparément le texte de la requête et ses paramètres — et de
+    // prouver qu'aucune donnée client n'y est concaténée (C4 / OWASP A03).
+    queryRaw = jest.fn().mockResolvedValue([]);
+
     const moduleRef = await Test.createTestingModule({
-      providers: [CarbonService],
+      providers: [CarbonService, { provide: PrismaService, useValue: { $queryRaw: queryRaw } }],
     }).compile();
 
     service = moduleRef.get(CarbonService);
@@ -153,5 +161,165 @@ describe('CarbonService', () => {
     expect(footprint.totalGrams).toBe(0);
     expect(footprint.segments).toEqual([]);
     expect(footprint.carEquivalentGrams).toBe(0);
+  });
+
+  /**
+   * Suivi carbone personnel (UF-505) — `getSummary`.
+   *
+   * Fige les critères de recette du ticket :
+   *  1. la page affiche un **total** d'empreinte pour l'utilisateur connecté ;
+   *  2. les données sont **propres à chaque utilisateur** — la requête est
+   *     verrouillée sur l'identifiant du JWT, qu'aucun paramètre ne peut viser ;
+   *  3. un **indicateur d'évolution** compare deux périodes de même durée.
+   */
+  describe('getSummary', () => {
+    /** Instant de référence figé : les bornes de période doivent être déterministes. */
+    const now = new Date('2026-08-28T12:00:00.000Z');
+
+    /** Une tranche telle que la rend l'agrégat SQL. */
+    const bucketRow = (bucket: number, overrides: Record<string, number> = {}) => ({
+      bucket,
+      emittedGrams: 0,
+      carEquivalentGrams: 0,
+      tripsCount: 0,
+      unpricedCount: 0,
+      ...overrides,
+    });
+
+    /** Texte SQL reconstitué (fragments du template, sans les valeurs liées). */
+    const sqlOf = (call: unknown[]): string => (call[0] as string[]).join('?');
+
+    /** Valeurs effectivement liées par PostgreSQL, dans l'ordre du template. */
+    const paramsOf = (call: unknown[]): unknown[] => call.slice(1);
+
+    it('locks the aggregate on the JWT user and nothing else', async () => {
+      await service.getSummary('user-1', 30, now);
+
+      const [call] = queryRaw.mock.calls;
+      const sql = sqlOf(call);
+
+      // Recette 2 : le périmètre de lecture est l'utilisateur du token. Aucune
+      // autre clé de filtrage n'existe, donc rien à falsifier (OWASP A01).
+      expect(sql).toContain('user_id = ');
+      expect(paramsOf(call)).toContain('user-1');
+
+      // L'identifiant est un paramètre lié, jamais du texte concaténé (OWASP A03).
+      expect(sql).not.toContain('user-1');
+    });
+
+    it('counts only the searches on which an itinerary was actually chosen', async () => {
+      await service.getSummary('user-1', 30, now);
+
+      const sql = sqlOf(queryRaw.mock.calls[0]);
+
+      // Un trajet ne pèse dans le bilan que si une option a été retenue :
+      // additionner les suggestions du serveur gonflerait l'empreinte de
+      // déplacements que personne n'a faits.
+      expect(sql).toContain('FILTER (WHERE carbon_grams IS NOT NULL)');
+      // Les recherches sans choix restent dénombrées à part, pour que le total
+      // bas d'un compte qui cherche beaucoup s'explique.
+      expect(sql).toContain('FILTER (WHERE carbon_grams IS NULL)');
+    });
+
+    it('totals the current window and compares it with the one before', async () => {
+      // Quatre tranches par période : 0-3 = période précédente, 4-7 = courante.
+      queryRaw.mockResolvedValue([
+        bucketRow(1, { emittedGrams: 1000, carEquivalentGrams: 5000, tripsCount: 2 }),
+        bucketRow(5, { emittedGrams: 300, carEquivalentGrams: 2000, tripsCount: 1 }),
+        bucketRow(7, { emittedGrams: 500, carEquivalentGrams: 3000, tripsCount: 3 }),
+      ]);
+
+      const summary = await service.getSummary('user-1', 30, now);
+
+      // Recette 1 : un total d'empreinte pour la période affichée.
+      expect(summary.current.emittedGrams).toBe(800);
+      expect(summary.current.tripsCount).toBe(4);
+      expect(summary.previous.emittedGrams).toBe(1000);
+
+      // Recette 3 : l'évolution est lisible et va dans le bon sens — 800 après
+      // 1000, c'est une baisse de 20 %.
+      expect(summary.emittedChangePercent).toBe(-20);
+    });
+
+    it('publishes the avoided CO2 as the gap with the all-car reference', async () => {
+      queryRaw.mockResolvedValue([
+        bucketRow(4, { emittedGrams: 1350, carEquivalentGrams: 5630, tripsCount: 1 }),
+      ]);
+
+      const summary = await service.getSummary('user-1', 30, now);
+
+      expect(summary.current.avoidedGrams).toBe(5630 - 1350);
+    });
+
+    it('never announces a negative saving over a period', async () => {
+      // Aucun mode du barème ne fait pire que la voiture solo. Le jour où il
+      // s'affinera, « −40 g économisés » n'aurait aucun sens à l'écran.
+      queryRaw.mockResolvedValue([
+        bucketRow(4, { emittedGrams: 9000, carEquivalentGrams: 1000, tripsCount: 1 }),
+      ]);
+
+      const summary = await service.getSummary('user-1', 30, now);
+
+      expect(summary.current.avoidedGrams).toBe(0);
+    });
+
+    it('refuses to compare against an empty previous period', async () => {
+      queryRaw.mockResolvedValue([bucketRow(5, { emittedGrams: 400, tripsCount: 1 })]);
+
+      const summary = await service.getSummary('user-1', 30, now);
+
+      // Un compte neuf n'a pas « augmenté de l'infini » : il n'a rien à
+      // comparer, et l'écran doit pouvoir le dire avec des mots.
+      expect(summary.emittedChangePercent).toBeNull();
+    });
+
+    it('returns a full series of zeroed buckets when nothing was recorded', async () => {
+      queryRaw.mockResolvedValue([]);
+
+      const summary = await service.getSummary('user-1', 30, now);
+
+      // Le graphique doit tracer quatre barres nulles plutôt que disparaître :
+      // une période vide est une information, pas une absence de réponse.
+      expect(summary.buckets).toHaveLength(4);
+      expect(summary.buckets.every((bucket) => bucket.emittedGrams === 0)).toBe(true);
+      expect(summary.current.tripsCount).toBe(0);
+      expect(summary.unpricedTripsCount).toBe(0);
+    });
+
+    it('cuts the requested window into four contiguous buckets', async () => {
+      const summary = await service.getSummary('user-1', 30, now);
+
+      // La période courante se termine à l'instant de l'appel et couvre
+      // exactement `days` jours : c'est une fenêtre glissante, pas un mois
+      // calendaire — sinon l'évolution affichée un 1er du mois ne voudrait rien
+      // dire.
+      expect(summary.current.to).toBe(now.toISOString());
+      expect(
+        new Date(summary.current.to).getTime() - new Date(summary.current.from).getTime(),
+      ).toBe(30 * 24 * 60 * 60 * 1000);
+
+      // Les tranches se touchent sans trou ni recouvrement, et couvrent
+      // exactement la période affichée.
+      expect(summary.buckets[0]?.from).toBe(summary.current.from);
+      expect(summary.buckets[3]?.to).toBe(summary.current.to);
+      expect(summary.buckets[1]?.from).toBe(summary.buckets[0]?.to);
+
+      // La période précédente est sa jumelle immédiate : deux durées
+      // identiques, donc une comparaison qui a un sens.
+      expect(summary.previous.to).toBe(summary.current.from);
+    });
+
+    it('reports the searches left without a chosen itinerary', async () => {
+      queryRaw.mockResolvedValue([
+        bucketRow(4, { emittedGrams: 200, tripsCount: 1, unpricedCount: 2 }),
+        // Une recherche non valorisée de la période PRÉCÉDENTE ne doit pas
+        // remonter : l'écran explique le total qu'il affiche, pas un autre.
+        bucketRow(0, { unpricedCount: 7 }),
+      ]);
+
+      const summary = await service.getSummary('user-1', 30, now);
+
+      expect(summary.unpricedTripsCount).toBe(2);
+    });
   });
 });

@@ -7,7 +7,8 @@ import { useSession } from '../../features/auth/session-provider';
 
 const navLinks = [
   { href: '/', label: 'Itinéraires' },
-  { href: '/', label: 'Mon impact CO₂' },
+  // Pointait sur `/` en attendant l'écran de suivi carbone, livré par UF-505.
+  { href: '/impact', label: 'Mon impact CO₂' },
   { href: '/profil', label: 'Mon profil' },
 ];
 

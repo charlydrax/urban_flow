@@ -142,6 +142,17 @@ export function useRoutePlan(onSearchRecorded?: SearchRecordedHandler): RoutePla
   /** Numéro de la dernière recherche lancée — seule sa réponse a le droit d'écrire. */
   const requestIdRef = useRef(0);
 
+  /**
+   * Ligne d'historique de la recherche en cours, sur laquelle inscrire le choix
+   * de l'usager (UF-505). `null` quand l'API n'a pas pu écrire l'historique :
+   * il n'y a alors rien à compléter, et ce n'est pas une panne de la recherche.
+   */
+  const searchHistoryIdRef = useRef<string | null>(null);
+
+  /** Itinéraires de la réponse en cours, pour retrouver les segments d'un choix. */
+  const itinerariesRef = useRef<Itinerary[]>([]);
+  itinerariesRef.current = itineraries;
+
   // Le rappel passe par une ref : un appelant qui le recrée à chaque rendu ne
   // doit pas faire changer l'identité de `plan`, dont dépendent des `useCallback`
   // en amont.
@@ -164,6 +175,10 @@ export function useRoutePlan(onSearchRecorded?: SearchRecordedHandler): RoutePla
     setSortedBy(null);
     setSources([]);
     setSelectedId(null);
+    // La ligne d'historique de la recherche précédente n'a plus cours : un clic
+    // arrivé après le lancement d'une nouvelle recherche ne doit pas inscrire
+    // son choix sur l'ancien trajet (UF-505).
+    searchHistoryIdRef.current = null;
 
     void apiClient
       .planRoutes({ from, to })
@@ -175,6 +190,7 @@ export function useRoutePlan(onSearchRecorded?: SearchRecordedHandler): RoutePla
         setSources(response.sources);
         setSelectedId(response.itineraries[0]?.id ?? null);
         setStatus('ready');
+        searchHistoryIdRef.current = response.searchHistoryId;
 
         const historyFrom = toHistoryPlace(from);
         const historyTo = toHistoryPlace(to);
@@ -211,8 +227,53 @@ export function useRoutePlan(onSearchRecorded?: SearchRecordedHandler): RoutePla
       });
   }, []);
 
+  /**
+   * Retient un itinéraire : la carte le met en avant, et l'API l'inscrit sur la
+   * ligne d'historique de la recherche (UF-505).
+   *
+   * ## Pourquoi seul un clic compte
+   *
+   * La première option est présélectionnée à l'arrivée des résultats — c'est un
+   * classement du serveur, pas une décision. Elle n'est donc **pas** enregistrée :
+   * le suivi carbone doit compter des déplacements, pas des suggestions, et un
+   * bilan gonflé de trajets que personne n'a faits ne vaudrait rien. Seul le
+   * passage par cette fonction, déclenchée par le groupe de boutons radio,
+   * inscrit un choix.
+   *
+   * ## L'enregistrement ne doit jamais gêner la sélection
+   *
+   * La mise en avant est appliquée **avant** l'appel réseau et ne l'attend pas :
+   * une carte qui ne s'allumerait qu'après un aller-retour serait une régression
+   * d'interface. Un échec d'écriture est silencieux — ne pas comptabiliser un
+   * trajet est un désagrément, l'annoncer comme une panne en serait une vraie
+   * (dégradation gracieuse — C10). C'est la même règle que pour l'écriture de
+   * l'historique elle-même.
+   *
+   * Le corps ne porte **aucun gramme** : seulement le résumé de l'option et les
+   * couples (mode, distance) de ses segments. L'empreinte est calculée par le
+   * Service Carbone, côté serveur (C4).
+   */
   const select = useCallback((itineraryId: string) => {
     setSelectedId(itineraryId);
+
+    const searchHistoryId = searchHistoryIdRef.current;
+    const chosen = itinerariesRef.current.find((itinerary) => itinerary.id === itineraryId);
+    if (!searchHistoryId || !chosen) return;
+
+    void apiClient
+      .recordItinerarySelection(searchHistoryId, {
+        selectedSummary: chosen.summary,
+        segments: chosen.segments.map((segment) => ({
+          mode: segment.mode,
+          // Le serveur valide des entiers : une distance fractionnaire venue
+          // d'une source externe serait refusée en 400 pour rien.
+          distanceMeters: Math.round(Math.max(0, segment.distanceMeters)),
+        })),
+      })
+      .catch(() => {
+        // Volontairement muet — voir la docstring. Un 401 est déjà traité
+        // globalement par `SessionProvider`.
+      });
   }, []);
 
   return { status, itineraries, sortedBy, sources, selectedId, failure, plan, select };

@@ -1,8 +1,16 @@
+import { NotFoundException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
-import { DEFAULT_SEARCH_HISTORY_LIMIT, MAX_SEARCH_HISTORY_LIMIT } from '@urbanflow/shared';
+import {
+  DEFAULT_SEARCH_HISTORY_LIMIT,
+  MAX_SEARCH_HISTORY_LIMIT,
+  TransportMode,
+} from '@urbanflow/shared';
 
 import { PrismaService } from '../../prisma/prisma.service';
+import { CarbonService } from '../carbon/carbon.service';
+import { carReferenceGrams, segmentCarbonGrams } from '../carbon/emission-factors';
 import { CreateSearchHistoryDto } from './dto/create-search-history.dto';
+import { SelectItineraryDto } from './dto/select-itinerary.dto';
 import { SearchHistoryService } from './search-history.service';
 
 /**
@@ -38,6 +46,7 @@ describe('SearchHistoryService', () => {
     toLng: 4.832,
     selectedSummary: null,
     carbonGrams: null,
+    carEquivalentGrams: null,
     createdAt,
     ...overrides,
   });
@@ -61,6 +70,7 @@ describe('SearchHistoryService', () => {
     const moduleRef = await Test.createTestingModule({
       providers: [
         SearchHistoryService,
+        CarbonService,
         { provide: PrismaService, useValue: { $queryRaw: queryRaw } },
       ],
     }).compile();
@@ -117,7 +127,11 @@ describe('SearchHistoryService', () => {
         from: { label: 'Gare Part-Dieu, 69003 Lyon', lat: 45.7605, lng: 4.8596 },
         to: { label: 'Place Bellecour, 69002 Lyon', lat: 45.7578, lng: 4.832 },
         selectedSummary: null,
+        // Les deux montants naissent du choix d'itinéraire, qui n'a pas encore
+        // eu lieu à l'étape 18 : `null`, et non `0` qui signifierait « trajet à
+        // empreinte nulle » et fausserait le bilan (UF-505).
         carbonGrams: null,
+        carEquivalentGrams: null,
         // C9 : la date sort en ISO 8601, jamais en objet Date.
         createdAt: '2026-07-31T09:12:00.000Z',
       });
@@ -177,6 +191,89 @@ describe('SearchHistoryService', () => {
         lat: 45.7605,
         lng: 4.8596,
       });
+    });
+  });
+
+  /**
+   * Enregistrement de l'itinéraire retenu (UF-505) — ce qui alimente le suivi
+   * carbone personnel.
+   *
+   * Deux points s'y jouent, et ce sont les deux raisons d'être de l'endpoint :
+   *  - l'empreinte est **calculée par le Service Carbone**, jamais reçue du
+   *    client — sinon n'importe qui s'inscrirait un bilan à zéro (C4) ;
+   *  - la mise à jour est verrouillée sur le **couple (ligne, propriétaire)** :
+   *    l'UUID vient du chemin, donc du client (C4 / OWASP A01).
+   */
+  describe('recordSelection', () => {
+    /** Option retenue : 400 m de marche puis 4 km de bus. */
+    const selection = (overrides: Partial<SelectItineraryDto> = {}): SelectItineraryDto => ({
+      selectedSummary: 'Marche + Bus C3',
+      segments: [
+        { mode: TransportMode.WALK, distanceMeters: 400 },
+        { mode: TransportMode.BUS, distanceMeters: 4000 },
+      ],
+      ...overrides,
+    });
+
+    it('prices the chosen itinerary itself instead of trusting the client', async () => {
+      await service.recordSelection('user-1', 'history-1', selection());
+
+      const params = paramsOf(queryRaw.mock.calls[0]);
+
+      // Le corps ne porte aucune valeur en grammes : les deux montants écrits
+      // sortent du barème appliqué aux segments reçus.
+      expect(params).toContain(segmentCarbonGrams(TransportMode.BUS, 4000));
+      // La référence voiture porte sur la distance totale, marche comprise —
+      // c'est le trajet que l'usager avait à faire.
+      expect(params).toContain(carReferenceGrams(4400));
+    });
+
+    it('writes the footprint and its car reference together', async () => {
+      await service.recordSelection('user-1', 'history-1', selection());
+
+      const sql = sqlOf(queryRaw.mock.calls[0]);
+
+      // Les deux colonnes forment un couple : une empreinte sans sa référence
+      // donnerait une ligne dont le bilan ne saurait pas dire ce qu'elle a fait
+      // économiser.
+      expect(sql).toContain('carbon_grams');
+      expect(sql).toContain('car_equivalent_grams');
+      expect(sql).toContain('UPDATE search_history');
+    });
+
+    it('restricts the update to the row owned by the token holder', async () => {
+      await service.recordSelection('user-1', 'history-1', selection());
+
+      const call = queryRaw.mock.calls[0];
+
+      // OWASP A01 : l'identifiant de ligne vient du client, le WHERE porte donc
+      // sur le couple — viser la ligne d'autrui ne met rien à jour.
+      expect(sqlOf(call)).toContain('WHERE id = ');
+      expect(sqlOf(call)).toContain('AND user_id = ');
+      expect(paramsOf(call)).toEqual(expect.arrayContaining(['history-1', 'user-1']));
+    });
+
+    it('rejects a row that does not belong to the caller as if it did not exist', async () => {
+      // `RETURNING` vide = aucune ligne mise à jour. On ne distingue pas
+      // « inconnue » de « pas à vous » : la distinction permettrait d'énumérer
+      // les identifiants d'autrui.
+      queryRaw.mockResolvedValue([]);
+
+      await expect(service.recordSelection('user-2', 'history-1', selection())).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+
+    it('returns the updated entry, re-read from the database', async () => {
+      queryRaw.mockResolvedValue([
+        dbRow({ selectedSummary: 'Marche + Bus C3', carbonGrams: 380, carEquivalentGrams: 959 }),
+      ]);
+
+      const entry = await service.recordSelection('user-1', 'history-1', selection());
+
+      expect(entry.selectedSummary).toBe('Marche + Bus C3');
+      expect(entry.carbonGrams).toBe(380);
+      expect(entry.carEquivalentGrams).toBe(959);
     });
   });
 });

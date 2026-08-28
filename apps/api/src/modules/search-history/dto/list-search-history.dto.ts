@@ -54,6 +54,13 @@ export class SearchHistoryEntryDto implements SearchHistoryEntry {
   @ApiProperty({ nullable: true, example: 14 })
   carbonGrams!: number | null;
 
+  /**
+   * Ce que le même trajet aurait coûté seul en voiture, en grammes (UF-505).
+   * `null` en même temps que `carbonGrams` — les deux naissent du même choix.
+   */
+  @ApiProperty({ nullable: true, example: 612 })
+  carEquivalentGrams!: number | null;
+
   @ApiProperty({ format: 'date-time', example: '2026-07-31T09:12:00.000Z' })
   createdAt!: string;
 }

@@ -1,11 +1,13 @@
 import type {
   AuthResponse,
-  CarbonDashboard,
+  CarbonSummary,
+  CarbonSummaryDays,
   CreateSearchHistoryPayload,
   PlanRouteRequest,
   PlanRoutesResponse,
   SearchHistoryEntry,
   SearchHistoryList,
+  SelectItineraryPayload,
   SessionUser,
   UpdateUserProfilePayload,
   UserProfile,
@@ -203,8 +205,37 @@ export const apiClient = {
     return request(`/search-history${query}`);
   },
 
-  /** Tableau de bord carbone personnel. */
-  getCarbonDashboard(): Promise<CarbonDashboard> {
-    return request('/carbon/dashboard');
+  /**
+   * Inscrit sur une recherche l'itinéraire que l'usager vient de **retenir**
+   * (UF-505) — ce qui alimente la page « Mon impact ».
+   *
+   * Le corps ne porte **aucune empreinte** : seulement le résumé de l'option et
+   * ses segments (mode + distance). C'est le Service Carbone qui valorise, côté
+   * serveur, au même barème que la liste de résultats. Envoyer les grammes
+   * depuis le navigateur permettrait de se fabriquer un bilan flatteur, et un
+   * bilan qu'on peut se fabriquer ne vaut plus rien.
+   *
+   * @param searchHistoryId Ligne rendue par `planRoutes` dans `searchHistoryId`
+   * @param payload Résumé de l'option retenue et ses segments
+   */
+  recordItinerarySelection(
+    searchHistoryId: string,
+    payload: SelectItineraryPayload,
+  ): Promise<SearchHistoryEntry> {
+    return request(`/search-history/${searchHistoryId}/selection`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  /**
+   * Suivi carbone personnel sur une fenêtre glissante (UF-505).
+   * L'API résout le compte depuis le cookie de session : aucun identifiant ne
+   * transite, il n'y a donc rien à falsifier pour viser le bilan d'autrui (C4).
+   * @param days Durée de la période — l'API n'accepte que 7, 30 ou 90 (C5)
+   */
+  getCarbonSummary(days?: CarbonSummaryDays): Promise<CarbonSummary> {
+    const query = days === undefined ? '' : `?days=${days}`;
+    return request(`/carbon/summary${query}`);
   },
 };

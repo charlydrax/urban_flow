@@ -1,3 +1,5 @@
+import { TransportMode } from './transport-mode';
+
 /**
  * Contrats de l'historique de recherche (UF-204) — `POST/GET /api/search-history`.
  * Source de vérité unique du contrat front/back (C9) : les DTO NestJS
@@ -30,6 +32,8 @@ export interface CreateSearchHistoryPayload {
   selectedSummary?: string;
   /** Empreinte de l'option retenue, en grammes de CO₂ — alimente le dashboard carbone. */
   carbonGrams?: number;
+  /** Référence voiture du trajet retenu, en grammes de CO₂ (UF-505). */
+  carEquivalentGrams?: number;
 }
 
 /** Une recherche enregistrée, telle que relue par l'API. */
@@ -39,8 +43,49 @@ export interface SearchHistoryEntry {
   to: SearchHistoryPlace;
   selectedSummary: string | null;
   carbonGrams: number | null;
+  /**
+   * Référence voiture du trajet retenu, en grammes de CO₂ (UF-505).
+   *
+   * `null` tant qu'aucune option n'a été choisie, exactement comme
+   * `carbonGrams`. Stockée **à côté** de l'empreinte plutôt que recalculée à la
+   * lecture : le barème est appelé à s'affiner, et un bilan personnel dont les
+   * chiffres passés changeraient à chaque mise à jour du barème ne serait pas
+   * un historique.
+   */
+  carEquivalentGrams: number | null;
   /** Horodatage ISO 8601 (C9). */
   createdAt: string;
+}
+
+/**
+ * Segment de l'itinéraire retenu, tel que le client le renvoie pour le faire
+ * valoriser (`PATCH /api/search-history/:id/selection` — UF-505).
+ *
+ * Volontairement réduit au **mode et à la distance** : ce sont les deux seules
+ * variables du barème. Renvoyer l'itinéraire entier ferait transiter des
+ * tracés GeoJSON dont le serveur n'a rien à faire ici (C5).
+ */
+export interface SelectedSegmentPayload {
+  mode: TransportMode;
+  distanceMeters: number;
+}
+
+/**
+ * Corps de `PATCH /api/search-history/:id/selection` — l'option que l'usager a
+ * retenue dans la liste de résultats (UF-505).
+ *
+ * ⚠️ **Aucune empreinte n'est envoyée par le client.** Il transmet les
+ * segments ; le Service Carbone les valorise côté serveur, comme il le fait
+ * déjà à l'étape 6 du flux. C'est la même règle que pour l'identité : ce qui
+ * fait autorité ne vient jamais du navigateur. Un client qui pourrait poster
+ * « 0 g » se fabriquerait un bilan flatteur — et un bilan qu'on peut se
+ * fabriquer ne sert plus à rien, même sans autre victime que soi-même.
+ */
+export interface SelectItineraryPayload {
+  /** Résumé lisible de l'option retenue (ex. « Marche + Métro B »). */
+  selectedSummary: string;
+  /** Segments de l'option retenue, dans l'ordre du trajet. */
+  segments: SelectedSegmentPayload[];
 }
 
 /** Réponse de `GET /api/search-history` — les N dernières recherches du compte connecté. */
