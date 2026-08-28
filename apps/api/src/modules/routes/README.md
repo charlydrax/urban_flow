@@ -116,6 +116,20 @@ l'usager et exposerait notre topologie (C11).
 **Trois sources muettes donnent un `200`** avec une liste vide, jamais un `500` :
 un code d'erreur ferait croire que la requête de l'usager est fautive.
 
+### Pourquoi pas le `404` du diagramme (UF-405)
+
+Le flux de référence (CLAUDE.md §4, étape 5) prévoit un **404 si aucun trajet**.
+L'endpoint répond `200` avec une liste vide, et c'est un écart assumé : un corps
+d'erreur 404 ne transporterait pas `sources`, or c'est la **seule** chose qui
+distingue « aucun trajet ne relie ces deux points » de « aucune source n'a
+répondu ». Ces deux situations n'appellent pas le même message ni le même ton
+côté client — l'une est un résultat, l'autre une panne à réessayer (C10).
+
+Le client traite le `404` malgré tout, comme un résultat vide et jamais comme une
+panne : un proxy ou une `NEXT_PUBLIC_API_URL` mal réglée peut le produire sans
+que l'API en sache rien (voir `apps/web/features/planner/README.md`, « Cas non
+nominaux »).
+
 ### Où s'arrête la dégradation gracieuse
 
 Elle commence à la collecte. La lecture des préférences (étape 3) la précède et

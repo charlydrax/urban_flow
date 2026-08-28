@@ -18,6 +18,8 @@ F2 », « 03 · Maquettes desktop → DESKTOP 2 : PLANIFICATEUR ».
 | `use-route-plan.ts`               | Appel `POST /routes/plan`, état de la recherche, sélection (UF-403)      |
 | `itinerary-list.tsx`              | Panneau de résultats — groupe radio de cartes comparables (UF-404)       |
 | `itinerary-card.tsx`              | Carte d'un itinéraire : durée, séquence de modes, CO₂, horaires (UF-404) |
+| `itinerary-skeleton.tsx`          | Esquisse du panneau pendant le calcul — réserve la place (UF-405)        |
+| `plan-notice.tsx`                 | Message d'état : vide, panne, session expirée, mode dégradé (UF-405)     |
 | `trip-fields.tsx`                 | Carte départ/arrivée de la maquette + bouton d'inversion                 |
 | `address-autocomplete.tsx`        | Champ d'adresse au motif ARIA « combobox » + liste de suggestions        |
 | `use-address-search.ts`           | Débounce 300 ms, annulation de la requête précédente, états de recherche |
@@ -26,6 +28,7 @@ F2 », « 03 · Maquettes desktop → DESKTOP 2 : PLANIFICATEUR ».
 | `recent-searches.tsx`             | Trajets récents recliquables affichés sous les champs (UF-204)           |
 | `use-search-history.ts`           | Lecture unique de l'historique, entretenue localement ensuite (UF-204)   |
 | `../../lib/itinerary-cards.ts`    | Itinéraire → séquence de modes, horaires, phrase lue (pur, testé)        |
+| `../../lib/plan-feedback.ts`      | Erreur ou état des sources → message et rôle ARIA (pur, testé)           |
 | `../../lib/route-map-layers.ts`   | Itinéraires → GeoJSON, emprise, repères, légende (pur, testé)            |
 | `../../lib/geocoding.ts`          | Appels BAN normalisés : recherche, géocodage inverse (pur, testé)        |
 | `../../lib/geolocation.ts`        | Appel `navigator.geolocation` normalisé + formats (pur, testé)           |
@@ -424,8 +427,9 @@ UF-403 n'en livrait que le strict nécessaire pour rendre le tracé _pilotable_.
 Il a été **remplacé** par `itinerary-list.tsx` + `itinerary-card.tsx` (UF-404,
 section suivante).
 
-Le bandeau « mode dégradé » alimenté par `sources[]` relève toujours d'UF-405 :
-`useRoutePlan` expose déjà la donnée, personne ne l'affiche encore.
+Le bandeau « mode dégradé » alimenté par `sources[]` a été livré par **UF-405**
+(dernière section de ce README), avec le squelette de chargement et le tri des
+cas d'erreur.
 
 ### Accessibilité (C7)
 
@@ -439,7 +443,8 @@ Le bandeau « mode dégradé » alimenté par `sources[]` relève toujours d'UF-
   désactivé, doublé d'un `role="status"` masqué (WCAG 4.1.3).
 - **Une liste vide est un résultat, pas une erreur** : elle est rendue en
   `role="status"` et non en `role="alert"`. L'inverse enverrait l'usager vérifier
-  sa connexion pour rien.
+  sa connexion pour rien. Depuis UF-405, avec une exception : quand les **trois**
+  sources se sont tues, la liste vide est une panne et repasse en `role="alert"`.
 - **L'échec réseau est en `role="alert"`**, avec un message générique : le statut
   HTTP et le détail renvoyé par l'API restent côté serveur (C11).
 - Le tracé lui-même : voir `components/map/README.md`.
@@ -547,3 +552,102 @@ de Londres afficherait sinon 08:41 pour un bus qui passe à 09:41.
 - **Mobile-first (C2)** : les cartes s'empilent sur toute la largeur, sans
   dépendre d'un point de rupture ; la séquence de modes passe à la ligne au lieu
   de déborder. À partir de `md`, seule la largeur du conteneur change.
+
+## Cas non nominaux (UF-405) — C7 / C10 / C11
+
+Les branches d'erreur du diagramme de séquence, traitées une par une. Le principe
+tient en une phrase : **quatre situations très différentes se ressemblent toutes à
+l'écran quand on ne fait rien** — une liste vide.
+
+### Les quatre cas, et ce qui les distingue
+
+| Situation                   | Ce qui l'identifie                          | Ce que l'écran fait                                        |
+| --------------------------- | ------------------------------------------- | ---------------------------------------------------------- |
+| Aucun trajet trouvé         | `200`, liste vide, sources disponibles      | message neutre en `role="status"`                          |
+| Aucune source n'a répondu   | `200`, liste vide, `sources` tous à `false` | message d'échec en `role="alert"` + invitation à réessayer |
+| Une source manque sur trois | `200`, liste pleine, un `available: false`  | note discrète « certaines options peuvent manquer »        |
+| Session expirée             | `401` sur `POST /routes/plan`               | message expliquant la redirection, déjà lancée             |
+
+`sources[]` est la **seule** chose qui sépare les deux premières lignes, et c'est
+exactement pourquoi l'API le publie depuis UF-305. Sans lui, « votre trajet n'a
+pas de solution » et « nos fournisseurs sont en panne » seraient le même écran.
+
+### Où vit la décision
+
+```
+apiClient.planRoutes ──rejette──> classifyPlanFailure(error)   ← lib/plan-feedback.ts (pur, testé)
+                                        │
+                     ┌──────────────────┼───────────────────┐
+                     ▼                  ▼                   ▼
+              session-expired     invalid-request      unavailable
+                     │                  │                   │
+                     └──────> PLAN_FAILURE_NOTICES { role, message }
+                                        │
+   200 + liste vide ──> describeEmptyResult(sources) ──────┤
+   200 + liste pleine ─> describeDegradedSources(sources) ─┤
+                                                           ▼
+                                                    <PlanNotice> (peint)
+```
+
+Le hook publie la **nature** de l'échec (`failure`), jamais une phrase toute
+faite : le texte et le rôle ARIA sont décidés dans un module pur, donc testables
+sans React ni jsdom — la même stratégie que `itinerary-cards.ts`.
+
+### Le 404 « aucun trajet » du diagramme
+
+Le flux de référence (CLAUDE.md §4, étape 5) prévoit un **404 si aucun trajet**.
+Notre API ne le renvoie pas, et c'est assumé : depuis UF-402 elle répond `200`
+avec une liste vide **et** l'état des sources. Un corps d'erreur 404 ne
+transporterait pas cette nuance, et l'écran perdrait le seul moyen qu'il a de
+distinguer « rien à proposer » de « personne n'a répondu ».
+
+Le client traite quand même le 404 — un proxy ou une `NEXT_PUBLIC_API_URL` mal
+réglée peut le produire sans que l'API en sache rien. Il tombe alors dans le cas
+« résultat vide », pas dans le cas « panne » : afficher « vérifiez votre
+connexion » à quelqu'un dont la recherche a simplement abouti à rien serait faux.
+
+### Le 401 en cours d'usage
+
+Rien de neuf n'est câblé : l'intercepteur d'UF-106 (`setUnauthorizedHandler` →
+`SessionProvider`) purge la session et redirige vers `/login` en mémorisant la
+page. Ce que UF-405 ajoute, c'est de **ne plus mentir** entre-temps : avant, un
+401 affichait « vérifiez votre connexion » pendant la demi-seconde qui précédait
+la redirection. Il affiche maintenant la vraie raison, en `role="status"` — un
+`alert` couperait la parole au lecteur d'écran juste avant de changer de page,
+sans rien lui apprendre.
+
+### L'attente : squelette, pas spinner
+
+Le calcul dure le temps de la source la plus lente (~2 à 8 s selon la charge
+d'OpenTripPlanner). Un spinner laisserait la colonne s'effondrer puis se remplir
+d'un coup, et la carte à droite sauterait. Le squelette **réserve la place** des
+cartes à venir : la mise en page ne bouge plus à l'arrivée de la réponse (C2, pas
+de reflow inutile — C5). Trois blocs et une pulsation d'opacité, aucune image.
+
+Il est en `aria-hidden` : l'attente est déjà annoncée par le formulaire (bouton
+« Calcul en cours… » + `role="status"` masqué). Deux régions vivantes pour la
+même attente la feraient énoncer deux fois (WCAG 4.1.3).
+
+Les résultats précédents sont écartés **au départ** de la recherche, pas à
+l'arrivée de la suivante : sinon le panneau afficherait un squelette pendant que
+la carte garde les anciens tracés, et une option périmée resterait cliquable.
+
+### Le contraste des bandeaux (C7)
+
+Un bandeau pose du **texte courant** sur un fond teinté : le seuil applicable est
+4.5:1 entre les deux tokens, pas celui de la couleur seule sur blanc que
+vérifiait UF-007. Les trois teintes ont donc rejoint le miroir
+`lib/design-tokens.ts`, et un test y contrôle les trois couples.
+
+C'est ce test qui a écarté `text-gold` du bandeau de mode dégradé : 4.28:1 sur
+Gold 100. Le badge « récompense » s'en accommode à 12 px gras, un paragraphe de
+14 px non — la note porte donc `text-warning` (5.73:1), qui est de toute façon la
+couleur système du bon sens ici.
+
+### Ce que les messages ne disent jamais (C11)
+
+Ni statut HTTP, ni cause technique (`timeout`, `upstream-error`), ni nom de
+service. Le bandeau de mode dégradé nomme les sources absentes en français
+(« vélos et trottinettes en libre-service »), pas leur protocole : il s'adresse à
+un usager, pas à un intégrateur. Deux tests de `plan-feedback.test.ts` verrouillent
+cette règle.
