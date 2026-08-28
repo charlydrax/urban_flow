@@ -339,6 +339,32 @@ describe('mergeIntoItineraries', () => {
     }
   });
 
+  // UF-403 : sans tracé par segment, la carte ne peut pas colorer par mode — la
+  // géométrie d'ensemble ne dit pas où la marche s'arrête et où le métro commence.
+  it('publishes a LineString on each segment, matching the itinerary geometry (UF-403)', () => {
+    const { itineraries } = mergeIntoItineraries(sources(), PART_DIEU, BELLECOUR, prefs());
+
+    for (const itinerary of itineraries) {
+      const points: [number, number][] = [];
+
+      for (const segment of itinerary.segments) {
+        expect(segment.geometry?.type).toBe('LineString');
+        expect(segment.geometry?.coordinates.length ?? 0).toBeGreaterThanOrEqual(2);
+
+        for (const point of segment.geometry?.coordinates ?? []) {
+          const last = points[points.length - 1];
+          if (last && last[0] === point[0] && last[1] === point[1]) continue;
+          points.push(point);
+        }
+      }
+
+      // Les tracés de segments recollés doivent redonner exactement celui de
+      // l'itinéraire : deux sources de vérité géométriques qui divergeraient
+      // afficheraient un trait coloré à côté du trajet réel.
+      expect(points).toEqual(itinerary.geometry?.coordinates);
+    }
+  });
+
   it('keeps totals equal to the sum of the segments', () => {
     const { itineraries } = mergeIntoItineraries(sources(), PART_DIEU, BELLECOUR, prefs());
 
