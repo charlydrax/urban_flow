@@ -119,6 +119,35 @@ a besoin. Un ticket dédié affinera : taux d'occupation réels des lignes TCL, 
 sont regroupées dans un seul fichier précisément pour que cet affinage n'ait
 qu'un endroit à toucher.
 
+## Qui appelle, et quand (UF-502)
+
+`computeFootprint` est appelé **une fois par itinéraire**, dans
+`RoutesService.priceItineraries`, juste après la fusion et avant le tri publié.
+C'est le seul point d'entrée du barème dans la réponse de `/api/routes/plan`.
+
+| Appelant                    | Ce qu'il en fait                                                 |
+| --------------------------- | ---------------------------------------------------------------- |
+| `RoutesService`             | **publie** le total, le détail et la référence voiture           |
+| `merge/itinerary-merger.ts` | **estime** (via `segmentCarbonGrams`) pour choisir ses candidats |
+
+La distinction est volontaire : la fusion a besoin d'un ordre de grandeur pour
+retenir cinq propositions parmi les candidates, mais elle ne publie rien. Ses
+`carbonGrams` sont écrasés par les lignes du service, et la liste est
+**reclassée** sur les valeurs ainsi publiées — sans quoi un affinage du barème
+ici laisserait `/routes/plan` annoncer un tri `carbonAsc` qu'il n'appliquerait
+plus. Détail : [`modules/routes/README.md`](../routes/README.md), section
+« Intégration dans `/routes/plan` ».
+
+Ce service reste donc libre d'évoluer sans coordination avec la fusion : le seul
+contrat entre les deux est le fichier de facteurs.
+
+**Le calcul est purement arithmétique** — aucune I/O, aucun accès base. C'est ce
+qui permet de le placer sur le chemin de la réponse sans la rallonger : au plus
+cinq itinéraires de quelques segments, contre des centaines de millisecondes de
+collecte réseau. La condition à préserver le jour où le barème s'affinera : un
+facteur qui devrait être _lu_ quelque part (mix électrique horaire, par exemple)
+doit être chargé en amont et mémoïsé, pas récupéré dans `computeFootprint`.
+
 ## Reste à faire
 
 - Agrégation de `SearchHistory` (PostGIS) pour le tableau de bord (aujourd'hui un
