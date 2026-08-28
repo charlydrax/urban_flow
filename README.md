@@ -126,15 +126,20 @@ Les serveurs applicatifs restent lancés via npm (`npm run dev:api` / `npm run d
 
 ## Fonctionnalités (périmètre MVP)
 
-| ID  | Fonctionnalité                                     | Statut                                                                 |
-| --- | -------------------------------------------------- | ---------------------------------------------------------------------- |
-| F1  | Inscription / connexion + profils de mobilité      | implémenté (UF-101 → UF-107)                                           |
-| F2  | Planificateur d'itinéraires multimodal             | fusion réelle côté API (UF-401) ; affichage front à venir (UF-403/404) |
-| F3  | Intégration GTFS + GBFS + pistes cyclables PostGIS | connecteurs implémentés (UF-302 / UF-303 / UF-304)                     |
-| —   | Calculateur d'empreinte carbone + suivi personnel  | barème par mode branché (UF-401) ; tableau de bord encore un stub      |
+| ID  | Fonctionnalité                                     | Statut                                                            |
+| --- | -------------------------------------------------- | ----------------------------------------------------------------- |
+| F1  | Inscription / connexion + profils de mobilité      | implémenté (UF-101 → UF-107)                                      |
+| F2  | Planificateur d'itinéraires multimodal             | bout en bout : saisie → API → tracé sur la carte (UF-403)         |
+| F3  | Intégration GTFS + GBFS + pistes cyclables PostGIS | connecteurs implémentés (UF-302 / UF-303 / UF-304)                |
+| —   | Calculateur d'empreinte carbone + suivi personnel  | barème par mode branché (UF-401) ; tableau de bord encore un stub |
 
 Le détail de l'algorithme de fusion multimodale est documenté dans
-[`docs/itinerary-merge.md`](docs/itinerary-merge.md).
+[`docs/itinerary-merge.md`](docs/itinerary-merge.md), et le rendu cartographique
+des itinéraires (code couleur par mode, repères, cadrage) dans
+[`apps/web/components/map/README.md`](apps/web/components/map/README.md).
+
+> Le **panneau de résultats détaillé** (cartes d'itinéraires de la maquette) et
+> le bandeau « mode dégradé » restent à faire — UF-404 et UF-405.
 
 ## Qualité de code & contribution
 
