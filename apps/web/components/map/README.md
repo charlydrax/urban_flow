@@ -8,11 +8,14 @@ PLANIFICATEUR » (carte en volet droit) et « 02 · Maquettes mobile → 6. NAVI
 
 ## Fichiers
 
-| Fichier                  | Rôle                                                                                |
-| ------------------------ | ----------------------------------------------------------------------------------- |
-| `lazy-map.tsx`           | **Point d'entrée des pages** — chargement différé, `ssr: false`, réserve la hauteur |
-| `map-view.tsx`           | Composant carte : instance MapLibre, contrôles, accessibilité, nettoyage            |
-| `../../lib/map-style.ts` | Résolution du fond de carte depuis l'environnement (logique pure, testée)           |
+| Fichier                         | Rôle                                                                                |
+| ------------------------------- | ----------------------------------------------------------------------------------- |
+| `lazy-map.tsx`                  | **Point d'entrée des pages** — chargement différé, `ssr: false`, réserve la hauteur |
+| `map-view.tsx`                  | Composant carte : instance MapLibre, contrôles, accessibilité, nettoyage            |
+| `use-route-overlay.ts`          | Tracés, repères et cadrage des itinéraires (UF-403) — pendant impératif             |
+| `route-legend.tsx`              | Clé de lecture du code couleur, posée sur la carte (UF-403)                         |
+| `../../lib/map-style.ts`        | Résolution du fond de carte depuis l'environnement (logique pure, testée)           |
+| `../../lib/route-map-layers.ts` | Itinéraires → GeoJSON, emprise, repères, légende (logique pure, testée)             |
 
 Les pages n'importent **jamais** `map-view` directement : MapLibre touche
 `window` et WebGL dès l'import, un rendu serveur planterait sur
@@ -45,6 +48,8 @@ import { LazyMap } from '../components/map/lazy-map';
 | `ariaLabel`            | `Carte des itinéraires`  | Étiquette de la région (C7)                                |
 | `textAlternative`      | liste textuelle          | Équivalent non visuel lu par les lecteurs d'écran (C7)     |
 | `userPosition`         | `null`                   | Marqueur « ma position » (UF-202) — voir plus bas          |
+| `itineraries`          | `[]`                     | Itinéraires à tracer (UF-403) — voir plus bas              |
+| `selectedItineraryId`  | `null`                   | Itinéraire mis en avant et cadré (UF-403)                  |
 | `showGeolocateControl` | `false`                  | Contrôle natif MapLibre — **déconseillé**, voir plus bas   |
 | `onReady`              | —                        | Accès à l'instance MapLibre après `load` (sources GeoJSON) |
 | `children`             | —                        | Surcouches positionnées au-dessus de la carte (légende…)   |
@@ -145,3 +150,111 @@ de quota gonflé.
   GeoJSON via `onReady` (couleurs par mode : `lib/design-tokens.ts`).
 - Placer la légende « Segment vélo / Segment bus » de la maquette dans la
   surcouche `children` (carte blanche, rayon 14, ombre, en bas à droite).
+
+## Tracé des itinéraires (UF-403) — C7 / C9 / C5
+
+La carte reçoit une liste d'itinéraires et l'identifiant de celui à mettre en
+avant. Elle ne calcule rien et ne choisit rien : c'est `PlannerScreen` qui
+détient les deux (voir `features/planner/README.md`).
+
+### Deux modules, une frontière nette
+
+```
+lib/route-map-layers.ts          components/map/use-route-overlay.ts
+  (pur, testé en node)                (impératif, exige WebGL)
+        │                                        │
+  itinéraires ──► FeatureCollection ──► source `uf-routes` + 5 couches
+             ──► emprise            ──► fitBounds
+             ──► repères            ──► Marker MapLibre
+             ──► légende            ──► RouteLegend
+```
+
+La logique décidable vit hors du DOM, donc testable sans navigateur
+(`lib/route-map-layers.test.ts`, 14 cas). Le pendant impératif ne contient plus
+que des appels MapLibre.
+
+### Cinq couches, et pourquoi pas une
+
+`line-dasharray` **n'est pas une propriété pilotable par la donnée** dans
+MapLibre : on ne peut pas écrire `["get", "pattern"]` dans un `dasharray`. Un
+motif par mode impose donc une couche par motif. La couleur, elle, est bien
+data-driven — une seule expression `["get", "color"]` couvre les sept modes.
+
+| Couche                   | Filtre                 | Rôle                                               |
+| ------------------------ | ---------------------- | -------------------------------------------------- |
+| `uf-routes-alternatives` | non sélectionné        | Les autres options, à 30 % d'opacité               |
+| `uf-routes-casing`       | sélectionné            | Liseré blanc — garantit le contraste (WCAG 1.4.11) |
+| `uf-routes-solid`        | sélectionné + `solid`  | Vélo, trottinette                                  |
+| `uf-routes-dashed`       | sélectionné + `dashed` | Bus, tram, métro, covoiturage                      |
+| `uf-routes-dotted`       | sélectionné + `dotted` | Marche                                             |
+
+Une **seule** source (`uf-routes`) porte tous les itinéraires : changer de
+sélection repousse la même donnée avec un booléen différent, là où des sources
+par itinéraire imposeraient d'en créer et d'en détruire à chaque clic (C5).
+
+### Code couleur des modes
+
+Repris des tokens `--color-mode-*` de la charte (UF-007, maquette Figma
+« DESKTOP 2 : PLANIFICATEUR ») — jamais redéfini ici, pour que la pastille d'une
+carte de résultat et le tracé correspondant restent la même couleur.
+
+| Mode        | Couleur   | Motif     |
+| ----------- | --------- | --------- |
+| Marche      | `#5a6478` | pointillé |
+| Vélo        | `#1fa85c` | plein     |
+| Trottinette | `#b85000` | plein     |
+| Bus         | `#1e66e0` | tirets    |
+| Tram        | `#00746a` | tirets    |
+| Métro       | `#7a2ebf` | tirets    |
+| Covoiturage | `#8a5300` | tirets    |
+
+**Écarts assumés à la maquette**, tous deux faute de tracé maquetté :
+
+- la **marche** n'y figure pas ; elle prend l'encre neutre Ink 500 plutôt qu'une
+  sixième couleur vive, qui concurrencerait le mode caractérisant l'option. Le
+  pointillé demandé par le ticket la rend malgré tout identifiable ;
+- le **covoiturage** n'est encore produit par aucune source (F3 = GTFS + GBFS).
+  Il est mappé sur l'ocre « warning » pour que le tableau des modes reste
+  exhaustif — ajouter un mode doit casser la compilation, pas passer inaperçu.
+
+### Repères
+
+| Repère         | Apparence (maquette)               | Position                         |
+| -------------- | ---------------------------------- | -------------------------------- |
+| Départ         | pastille bleue pleine, « A » blanc | premier point du premier segment |
+| Arrivée        | pastille verte pleine, « B » blanc | dernier point du dernier segment |
+| Correspondance | pastille creuse cerclée de couleur | changement de **mode**           |
+
+Une correspondance est un **changement de mode**, pas une jonction de segments :
+marcher puis marcher encore ne mérite pas de repère, descendre du vélo pour
+prendre le bus, si. Elle est colorée par le mode qui **commence** — le repère
+annonce ce qu'on prend, il ne commémore pas ce qu'on quitte.
+
+### Accessibilité (C7)
+
+- **Le motif double la couleur** (WCAG 1.4.1) : un daltonisme deutan rapproche
+  fortement le vert vélo et le brun trottinette, le trait plein contre le tireté
+  reste lisible. Un test vérifie qu'aucun couple (couleur, motif) n'est partagé.
+- **Le liseré blanc** garantit ≥ 3:1 sous chaque trait, quel que soit ce qu'il
+  recouvre — bâti gris, parc vert, fleuve bleu (WCAG 1.4.11). Un test le vérifie
+  couleur par couleur.
+- **L'alternative textuelle décrit le tracé** dès qu'il y en a un, en `aria-live`
+  poli : « Itinéraire tracé sur la carte : Marche de … à … (5 min), puis Métro B
+  … ». Annoncer « les itinéraires y seront tracés » alors qu'ils le sont déjà
+  n'apprendrait plus rien (WCAG 1.1.1).
+- **Les repères portent une étiquette** (`role="img"` + `aria-label`) : sans
+  elle, ils ne seraient que des `div` vides au milieu du canvas.
+- **Le cadrage respecte `prefers-reduced-motion`** : `fitBounds` sans animation
+  (WCAG 2.3.3), comme le recentrage de la caméra.
+
+### Tests
+
+```bash
+cd apps/web && npm run test    # dont lib/route-map-layers.test.ts
+```
+
+Couvre la construction du GeoJSON (un tronçon par segment, couleur par mode,
+drapeau de sélection), le fait qu'un segment sans tracé soit ignoré sans faire
+tomber le reste (C10), l'emprise, la pose des repères et le non-doublonnage des
+correspondances, la légende dynamique, la description textuelle, et les deux
+garanties d'accessibilité du code couleur.
