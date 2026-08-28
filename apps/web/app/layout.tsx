@@ -3,6 +3,7 @@ import { Bricolage_Grotesque, JetBrains_Mono, Plus_Jakarta_Sans } from 'next/fon
 import Link from 'next/link';
 
 import { SiteHeader } from '../components/layout/site-header';
+import { OfflineBanner } from '../components/offline/offline-banner';
 import { ServiceWorkerRegister } from '../components/service-worker-register';
 import { SessionProvider } from '../features/auth/session-provider';
 import { getServerSession } from '../lib/session-server';
@@ -57,7 +58,8 @@ export const viewport: Viewport = {
  * - C7 (WCAG 2.1 AA) : `lang="fr"`, lien d'évitement, landmarks header/nav/main/footer,
  *   focus visible (globals.css), contrastes AA (vérifiés par lib/design-tokens.test.ts).
  * - C2 : mobile-first (navigation repliable, viewport configuré).
- * - C1 : manifest lié + enregistrement du service worker.
+ * - C1/C10 : manifest lié, enregistrement du service worker, et indicateur
+ *   global « mode hors-ligne » (UF-601).
  * - C4/C11 (UF-106) : l'état de session est résolu **côté serveur** depuis le
  *   cookie httpOnly et diffusé par `SessionProvider` — aucun token en JS, et
  *   pas de flash « déconnecté » au chargement.
@@ -77,6 +79,13 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           </a>
 
           <SiteHeader />
+
+          {/*
+            Indicateur global de perte de connexion (UF-601, C10) : entre
+            l'en-tête et le contenu, donc visible dès le premier coup d'oeil sur
+            n'importe quelle page, sans recouvrir la navigation.
+          */}
+          <OfflineBanner />
 
           <main id="contenu" className="mx-auto w-full max-w-5xl flex-1 px-4 py-6">
             {children}

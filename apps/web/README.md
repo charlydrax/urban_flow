@@ -7,9 +7,14 @@ authentification (F1), préférences de mobilité et tableau de bord carbone.
 
 ## Points clés
 
-- **PWA (C1)** : `public/manifest.json` + service worker maison (`sw.ts`, compilé vers
-  `public/sw.js` par esbuild via `npm run build:sw`). Stratégie : network-first avec
-  repli cache pour les navigations et pour le **dernier itinéraire calculé** (C10).
+- **PWA & hors-ligne (C1/C10, UF-601)** : `public/manifest.json` + service worker maison
+  (`sw.ts`, compilé vers `public/sw.js` par esbuild via `npm run build:sw`).
+  Network-first avec repli cache pour les navigations et pour le **dernier itinéraire
+  calculé** ; cache-first pour les assets de build, le manifest, les icônes et le
+  **fond de carte déjà consulté** (borné à 250 entrées — C5). Un bandeau global
+  « mode hors-ligne » (`components/offline/`) et une mention explicite sur les
+  résultats rejoués évitent de faire passer un trajet périmé pour un calcul frais.
+  Tableau complet des stratégies, recette et limites : `docs/pwa-offline.md`.
 - **Carte (C5/C6, UF-201)** : MapLibre GL JS chargé en lazy (`components/map/lazy-map.tsx`,
   `ssr: false`) — exclu du bundle initial. Fond de carte résolu depuis
   l'environnement (`NEXT_PUBLIC_MAPTILER_KEY` / `NEXT_PUBLIC_MAP_STYLE_URL`,
@@ -28,11 +33,11 @@ authentification (F1), préférences de mobilité et tableau de bord carbone.
 
 ```
 app/           # App Router (layout accessible, pages)
-components/    # UI transverse (carte MapLibre — voir components/map/README.md, enregistrement SW)
+components/    # UI transverse (carte MapLibre, indicateur hors-ligne — README par dossier, enregistrement SW)
 features/      # auth/ (câblé — UF-105/106), planner/, profile/, carbon/ (stubs)
 lib/           # client API, session, géolocalisation (C6), helpers
 middleware.ts  # protection des routes privées (UF-106)
-sw.ts          # service worker (C1, C10)
+sw.ts          # service worker (C1, C10) — voir docs/pwa-offline.md
 ```
 
 ## Commandes
