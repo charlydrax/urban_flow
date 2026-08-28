@@ -30,6 +30,7 @@ label seul donne un `400` explicite — pas une liste vide inexplicable.
 | 13-18. Collecte **parallèle** des trois sources | UF-305 | ✅   |
 | 5. Fusion en itinéraires multimodaux            | UF-401 | ✅   |
 | 6. `computeFootprint` par itinéraire            | UF-401 | ✅   |
+| 16-17. Détail carbone **par segment**           | UF-501 | ✅   |
 | 9. Tri selon la priorité du profil              | UF-401 | ✅   |
 | 7 et 18. Sauvegarde `search_history`            | UF-402 | ✅   |
 
@@ -355,6 +356,30 @@ Prendre le métro de 08:15 après onze minutes de vélo, c'est partir à 08:04.
 Quand **aucun** segment n'est daté (itinéraire tout-vélo), les deux champs sont
 absents : cet itinéraire ne part à aucune heure particulière, il part quand
 l'usager décide. Le client affiche alors sa seule durée.
+
+## Empreinte publiée (UF-501)
+
+Chaque itinéraire porte deux champs carbone, et ils ne font pas double emploi :
+
+| Champ                   | À quoi il sert                                           |
+| ----------------------- | -------------------------------------------------------- |
+| `Itinerary.carbonGrams` | la **clé de tri**, comparée d'une carte à l'autre        |
+| `Itinerary.carbon`      | la **justification** : ligne par segment + facteur ADEME |
+
+Les deux sortent du **même appel** à `CarbonService.computeFootprint`, donc
+`carbonGrams === carbon.totalGrams` par construction — il n'y a pas deux calculs
+à garder en phase.
+
+Le service étant l'autorité sur le barème, ses lignes **écrasent** les
+`carbonGrams` que la fusion avait posés sur les segments : la fusion n'estime que
+pour classer ses candidats, elle ne publie pas. Deux chiffres pour la même chose
+à l'écran, l'un de la fusion et l'autre du service, finiraient un jour par ne
+plus coïncider.
+
+La réponse porte aussi `carbon.carEquivalentGrams` — ce que la même distance
+aurait coûté seul en voiture. La voiture solo n'est pas un mode que le
+planificateur propose ; c'est l'étalon qui rend un gramme lisible. Barème,
+méthodologie et source : [`modules/carbon/README.md`](../carbon/README.md).
 
 ## Géométrie publiée (C9)
 
