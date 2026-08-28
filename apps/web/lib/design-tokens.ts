@@ -44,6 +44,12 @@ export const urbanflowColors = {
    * un contraste que personne ne teste.
    */
   tintNeutral: '#f1f3f8',
+  /**
+   * Vert 50 — ajouté au miroir par UF-504 : le badge CO₂ pose du texte
+   * `primaryDark` dessus, et un fond de badge absent d'ici est un contraste que
+   * personne ne teste.
+   */
+  tintGreen: '#e8f7ee',
   tintGold: '#fbf3e0',
   tintRed: '#fceaea',
 

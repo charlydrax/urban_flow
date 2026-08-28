@@ -193,6 +193,40 @@ describe('describeItinerary', () => {
 
     expect(description).toBe('Option 2 sur 3. 28 minutes. Vélo 28 min. 0 g CO₂.');
   });
+
+  /**
+   * UF-504 : la pastille CO₂ ne dit son niveau qu'en teinte et en pictogramme.
+   * Sans cette reprise écrite, « c'est une option à faible empreinte » ne
+   * serait accessible qu'à l'œil (C7 — WCAG 1.4.1).
+   */
+  it('annonce le niveau d’empreinte et sa comparaison voiture (UF-504)', () => {
+    const description = describeItinerary(
+      itinerary([segment(TransportMode.BIKE, 28)], {
+        durationMinutes: 28,
+        carbonGrams: 20,
+        carbon: {
+          totalGrams: 20,
+          segments: [
+            {
+              mode: TransportMode.BIKE,
+              distanceMeters: 10_000,
+              factorGramsPerKm: 2,
+              grams: 20,
+            },
+          ],
+          carEquivalentGrams: 2180,
+          avoidedGrams: 2160,
+        },
+      }),
+      1,
+      2,
+    );
+
+    expect(description).toBe(
+      'Option 1 sur 2. 28 minutes. Vélo 28 min. ' +
+        'Très faible empreinte, 20 g CO₂, −99 % vs voiture.',
+    );
+  });
 });
 
 describe('itineraryHighlights', () => {

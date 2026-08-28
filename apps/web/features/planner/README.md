@@ -31,6 +31,7 @@ F2 », « 03 · Maquettes desktop → DESKTOP 2 : PLANIFICATEUR ».
 | `use-search-history.ts`           | Lecture unique de l'historique, entretenue localement ensuite (UF-204)   |
 | `../../lib/itinerary-cards.ts`    | Itinéraire → séquence de modes, horaires, phrase lue (pur, testé)        |
 | `../../lib/carbon-breakdown.ts`   | Détail carbone publié → lignes, barres, phrase lue (pur, testé)          |
+| `../../lib/carbon-badge.ts`       | Empreinte publiée → pastille, niveau, comparaison voiture (pur, testé)   |
 | `../../lib/plan-feedback.ts`      | Erreur ou état des sources → message et rôle ARIA (pur, testé)           |
 | `../../lib/route-map-layers.ts`   | Itinéraires → GeoJSON, emprise, repères, légende (pur, testé)            |
 | `../../lib/geocoding.ts`          | Appels BAN normalisés : recherche, géocodage inverse (pur, testé)        |
@@ -474,7 +475,7 @@ Une carte par itinéraire, pour **comparer** avant de choisir. C'est la maquette
 │                                              │    ce qu'on compare
 │ 🚶 3 › 🚲 11 › 🚌 C3 6 › 🚶 2                │  ← la séquence de modes
 │                                              │
-│ 🌱 240 g CO₂   ♿ Accessible   09:41 → 10:03 │  ← les infos secondaires
+│ (🌱 240 g CO₂) −89 % vs voiture   ♿   09:41 │  ← les infos secondaires
 └──────────────────────────────────────────────┘
 ```
 
@@ -498,7 +499,7 @@ un même bus rompraient le lien que la recette demande d'établir.
 | Durée, en gras à droite | c'est le critère que l'œil balaye verticalement d'une carte à l'autre          |
 | Séquence de modes       | « Marche + Bus » de 22 min peut cacher 18 min de marche : les durées le disent |
 | Badges de mise en avant | désignent l'option la moins émettrice et la plus rapide (UF-503)               |
-| Badge CO₂               | l'emplacement de la maquette, rempli (cf. plus bas)                            |
+| Badge CO₂               | l'empreinte **et son niveau**, teinté selon le rapport à la voiture (UF-504)   |
 | Mention PMR             | `Itinerary.accessible` — une contrainte, pas un agrément (C12)                 |
 | Créneau horaire         | deux options de même durée ne partent pas à la même heure                      |
 
@@ -834,3 +835,113 @@ Les couleurs de modes sont portées par des **pastilles** et par les barres, pas
 par du texte : elles sont validées au seuil des objets graphiques (3:1), pas à
 celui du texte courant — la même règle que la carte de résultat. Elles restent
 redondantes : le pictogramme et le libellé écrit disent déjà le mode.
+
+---
+
+## Badge CO₂ sur les cartes de résultat (UF-504) — C2 / C5 / C7
+
+UF-404 avait rempli l'emplacement du badge réservé par la maquette : chaque carte
+affichait déjà « 🌱 240 g CO₂ ». Ce qui manquait n'était pas la valeur, c'était
+son **sens** — 240 g, c'est bien ou c'est mal ? Et le badge était vert quel que
+soit le trajet, y compris sur un itinéraire tout-bus : un satisfecit décerné à
+tout ce qui passe ne distingue plus rien.
+
+```
+┌──────────────────────────────────────────────┐
+│ ● [🌱 Choix vert]                     22 min │
+│ 🚶 3 › 🚲 11 › 🚌 C3 6 › 🚶 2                │
+│ (🌱 240 g CO₂) −89 % vs voiture   ♿   09:41 │  ← vert : très faible empreinte
+└──────────────────────────────────────────────┘
+┌──────────────────────────────────────────────┐
+│ ● [⚡ Le plus rapide]                 18 min │
+│ 🚶 2 › 🚌 C3 14 › 🚶 2                       │
+│ (🍂 980 g CO₂) −55 % vs voiture       09:38  │  ← gold : empreinte modérée
+└──────────────────────────────────────────────┘
+```
+
+### Le niveau se lit sur le rapport à la voiture, jamais sur les grammes
+
+C'est la décision structurante du ticket. Un seuil en grammes absolus — « vert
+sous 200 g » — classerait les trajets par **longueur** bien plus que par vertu :
+un long trajet en métro à travers la métropole émet plus de grammes qu'une courte
+course en bus tout en étant incomparablement plus sobre, et finirait peint en
+rouge. Le niveau est donc lu sur `totalGrams / carEquivalentGrams`, le rapport à
+ce que la **même distance** aurait coûté seul en voiture (UF-501). La distance
+se simplifie, il ne reste que les modes.
+
+| Part de la référence voiture | Niveau     | Teinte de la charte           | Mode qui y tombe                       |
+| ---------------------------- | ---------- | ----------------------------- | -------------------------------------- |
+| ≤ 20 %                       | `low`      | `tint-green` / `primary-dark` | marche, vélo, tram, métro, trottinette |
+| ≤ 50 %                       | `moderate` | `tint-gold` / `warning`       | bus thermique, covoiturage             |
+| > 50 %                       | `high`     | `tint-red` / `error`          | itinéraires mixtes très motorisés      |
+
+Les bornes ne sont pas des dixièmes ronds choisis à vue : 20 % laisse la
+trottinette (≈ 11 % de la voiture) du bon côté sans y faire entrer le bus
+(≈ 44 %), et 50 % dit « vous avez au moins divisé par deux ». Aucun mode du
+catalogue n'atteint `high` à lui seul aujourd'hui — le niveau existe pour les
+itinéraires mixtes, et pour que l'écran ne mente pas si le barème évolue.
+
+Les trois couples fond/texte viennent du bloc « Badges — états & modes » de la
+charte (UF-007) : ce sont ceux de « ✓ Acquis », « ★ Récompense » et
+« ⚠ Perturbation ». Aucune couleur n'a été inventée pour ce ticket.
+
+### Quatre signaux pour une seule information (C7 — WCAG 1.4.1)
+
+La teinte ne porte jamais le niveau seule :
+
+| Signal                           | Pour qui                                                 |
+| -------------------------------- | -------------------------------------------------------- |
+| Teinte du fond                   | le balayage visuel, d'une carte à l'autre                |
+| Pictogramme (🌱 / 🍂 / 🔥)       | qui ne distingue pas le vert du gold                     |
+| « −89 % vs voiture »             | qui veut le chiffre — et le repère que demande le ticket |
+| Niveau nommé dans l'`aria-label` | les technologies d'assistance                            |
+
+Le pourcentage est le repère qui rend l'empreinte _parlante_ : « 240 g » ne dit à
+personne si c'est bien ou mal, « 89 % de moins qu'en voiture » se comprend sans
+connaître la Base Empreinte de l'ADEME. Il est lu sur `avoidedGrams`, que l'API
+publie déjà borné à zéro — refaire la soustraction côté client rouvrirait le cas
+d'une « économie négative » que le serveur a fermé.
+
+Les trois couples sont vérifiés au seuil AA du **texte courant sur fond teinté**
+(4,5:1) par `carbon-badge.test.ts`, et non au seuil de la couleur sur blanc :
+c'est ce test qui impose `text-warning` (#8a5300) plutôt que `text-gold`
+(4,28:1 sur Gold 100), comme pour les bandeaux d'UF-405.
+
+### Cohérence avec le « choix vert » d'UF-503 (recette 4)
+
+Deux pastilles vertes coexistent sur la meilleure carte, et c'est voulu — elles
+ne disent pas la même chose :
+
+| Badge             | Nature  | Ce qu'il affirme                     |
+| ----------------- | ------- | ------------------------------------ |
+| 🌱 **Choix vert** | relatif | « c'est le meilleur des quatre »     |
+| 🌱 240 g CO₂      | absolu  | « et voici ce que ce meilleur vaut » |
+
+La hiérarchie visuelle les sépare : le premier est une pastille **pleine** en
+haut de carte, le second une pastille **teintée** en bas, avec les infos
+secondaires. Une liste où toutes les options seraient mauvaises affichera donc un
+« choix vert » portant une pastille rouge — ce n'est pas une incohérence, c'est
+précisément ce qu'il faut montrer.
+
+### Quand le niveau ne peut pas être établi
+
+Un itinéraire servi depuis un cache antérieur à UF-501 ne porte pas de champ
+`carbon`, donc pas de référence voiture, donc pas de dénominateur. La pastille
+passe alors au **gris neutre** de la charte, sans pourcentage, et l'`aria-label`
+énonce la valeur seule. Le repli est un aveu d'ignorance, pas une note : peindre
+en vert « par défaut » — ce que faisait UF-404 — reviendrait à qualifier un
+trajet dont on ne sait rien (C10).
+
+### Rien n'est recalculé côté client (C5)
+
+Le total et la référence viennent tous deux de la réponse. Le seul chiffre
+fabriqué ici est le **pourcentage d'affichage**, qui ne sort jamais de l'écran —
+même règle que les barres du détail carbone.
+
+### Mobile (C2)
+
+La pastille et son pourcentage vivent dans la ligne d'infos secondaires, en
+`flex-wrap` : sur un écran de 320 px la comparaison passe sous la pastille
+plutôt que de déborder, et la pastille elle-même ne se coupe jamais. Le détail
+segment par segment reste hors de la carte, sous la liste, et replié par défaut
+(`CarbonBreakdown`, UF-501) — le panneau sert à comparer, pas à tout déplier.
