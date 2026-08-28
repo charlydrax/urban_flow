@@ -39,6 +39,14 @@ export interface RoutePlanState {
   /** Itinéraire mis en avant sur la carte. */
   selectedId: string | null;
   /**
+   * `true` quand les itinéraires affichés viennent du **cache hors-ligne** du
+   * service worker et non d'un calcul (UF-601).
+   *
+   * Publié comme un drapeau et non comme un message : c'est l'écran qui
+   * affiche, et `lib/plan-feedback.ts` qui rédige — même partage que `failure`.
+   */
+  servedFromCache: boolean;
+  /**
    * Nature de l'échec quand `status` vaut `error`, `null` sinon (UF-405).
    *
    * Le hook publie la **nature**, pas le texte : c'est l'écran qui affiche, et
@@ -113,7 +121,15 @@ function toHistoryPlace(place: Place): SearchHistoryPlace | null {
  * 404                 → ready   avec une liste vide — voir plus bas
  * 401                 → error   `session-expired` ; SessionProvider redirige (UF-106)
  * 400 / 5xx / réseau  → error
+ * hors-ligne, cache   → ready   avec `servedFromCache` (UF-601)
+ * hors-ligne, à vide  → error   `offline` — rien à réessayer avant le réseau
  * ```
+ *
+ * Les deux dernières lignes viennent du **service worker**, pas de l'API : hors
+ * réseau, il intercepte `POST /routes/plan` et rejoue le dernier itinéraire
+ * mémorisé (marqué par un en-tête), ou fabrique un `503` s'il n'en a aucun.
+ * Le hook n'a donc rien de particulier à faire pour être utilisable hors-ligne
+ * — il lui suffit de **dire** d'où viennent ses résultats.
  *
  * Un **404 est traité comme un résultat vide**, pas comme une panne. Notre API
  * ne le renvoie pas (elle répond `200` + liste vide + état des sources, plus
@@ -138,6 +154,7 @@ export function useRoutePlan(onSearchRecorded?: SearchRecordedHandler): RoutePla
   const [sources, setSources] = useState<SourceAvailability[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [failure, setFailure] = useState<PlanFailure | null>(null);
+  const [servedFromCache, setServedFromCache] = useState(false);
 
   /** Numéro de la dernière recherche lancée — seule sa réponse a le droit d'écrire. */
   const requestIdRef = useRef(0);
@@ -165,6 +182,7 @@ export function useRoutePlan(onSearchRecorded?: SearchRecordedHandler): RoutePla
 
     setStatus('loading');
     setFailure(null);
+    setServedFromCache(false);
 
     // La réponse précédente est écartée **dès le départ** de la nouvelle
     // recherche, et pas seulement à l'arrivée de la suivante : laisser les
@@ -182,7 +200,7 @@ export function useRoutePlan(onSearchRecorded?: SearchRecordedHandler): RoutePla
 
     void apiClient
       .planRoutes({ from, to })
-      .then((response) => {
+      .then(({ response, servedFromCache: fromCache }) => {
         if (requestIdRef.current !== requestId) return;
 
         setItineraries(response.itineraries);
@@ -190,6 +208,18 @@ export function useRoutePlan(onSearchRecorded?: SearchRecordedHandler): RoutePla
         setSources(response.sources);
         setSelectedId(response.itineraries[0]?.id ?? null);
         setStatus('ready');
+        setServedFromCache(fromCache);
+
+        // Une réponse rejouée depuis le cache hors-ligne porte le
+        // `searchHistoryId` de la recherche **précédente** (UF-601). S'en
+        // servir inscrirait le choix de l'usager sur un trajet qu'il n'a pas
+        // demandé, et fausserait son bilan carbone ; la recherche courante,
+        // elle, n'a jamais atteint l'API et n'existe donc pas en base.
+        if (fromCache) {
+          searchHistoryIdRef.current = null;
+          return;
+        }
+
         searchHistoryIdRef.current = response.searchHistoryId;
 
         const historyFrom = toHistoryPlace(from);
@@ -208,7 +238,11 @@ export function useRoutePlan(onSearchRecorded?: SearchRecordedHandler): RoutePla
         setSelectedId(null);
         setSortedBy(null);
 
-        const kind = classifyPlanFailure(error);
+        // `navigator.onLine` distingue « nos serveurs n'ont pas répondu » de
+        // « cet appareil n'a plus de réseau » : les deux ne se disent pas
+        // pareil, et inviter à vérifier une connexion qu'on sait absente
+        // n'aide personne (UF-601).
+        const kind = classifyPlanFailure(error, { online: navigator.onLine });
         if (kind === 'no-route') {
           // « Aucun trajet » n'est pas une panne. Sans corps de réponse, on ne
           // sait pas quelles sources ont parlé : `sources` reste vide, et le
@@ -276,5 +310,15 @@ export function useRoutePlan(onSearchRecorded?: SearchRecordedHandler): RoutePla
       });
   }, []);
 
-  return { status, itineraries, sortedBy, sources, selectedId, failure, plan, select };
+  return {
+    status,
+    itineraries,
+    sortedBy,
+    sources,
+    selectedId,
+    servedFromCache,
+    failure,
+    plan,
+    select,
+  };
 }

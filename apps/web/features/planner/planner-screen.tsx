@@ -4,6 +4,7 @@ import { LazyMap } from '../../components/map/lazy-map';
 import { toLngLat } from '../../lib/geolocation';
 import { DEFAULT_ZOOM, LYON_CENTER } from '../../lib/map-style';
 import {
+  CACHED_ROUTE_NOTICE,
   PLAN_FAILURE_NOTICES,
   SOURCE_LABELS,
   describeDegradedSources,
@@ -88,6 +89,16 @@ export function PlannerScreen() {
   // le résultat, et la panne totale des sources est déjà dite par le message de
   // liste vide — `describeDegradedSources` rend `null` dans ce cas.
   const failureNotice = routePlan.failure ? PLAN_FAILURE_NOTICES[routePlan.failure] : null;
+  // Ni `session-expired` ni `offline` ne sont des pannes : la première est déjà
+  // suivie d'une redirection, la seconde est un état de l'appareil qu'aucune
+  // relance ne corrigera. Les peindre en rouge ferait chercher un problème là
+  // où il n'y en a pas (C7).
+  const failureTone =
+    routePlan.failure === 'session-expired'
+      ? 'info'
+      : routePlan.failure === 'offline'
+        ? 'warning'
+        : 'error';
   const emptyNotice = isEmptyResult ? describeEmptyResult(routePlan.sources) : null;
   const degraded = routePlan.status === 'ready' ? describeDegradedSources(routePlan.sources) : null;
 
@@ -113,9 +124,22 @@ export function PlannerScreen() {
         */}
         {failureNotice && (
           <PlanNotice
-            tone={routePlan.failure === 'session-expired' ? 'info' : 'error'}
+            tone={failureTone}
             role={failureNotice.role}
             message={failureNotice.message}
+          />
+        )}
+
+        {/*
+          Résultats rejoués depuis le cache du service worker (UF-601) : ils
+          répondent à la recherche PRÉCÉDENTE. Le dire est la seule chose qui
+          sépare une dégradation gracieuse d'un mensonge à l'écran (C10).
+        */}
+        {routePlan.servedFromCache && (
+          <PlanNotice
+            tone="warning"
+            role={CACHED_ROUTE_NOTICE.role}
+            message={CACHED_ROUTE_NOTICE.message}
           />
         )}
 

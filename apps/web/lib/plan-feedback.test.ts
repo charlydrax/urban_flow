@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 
 import { ApiError } from './api-client';
 import {
+  CACHED_ROUTE_NOTICE,
   PLAN_FAILURE_NOTICES,
   SOURCE_LABELS,
   classifyPlanFailure,
@@ -53,6 +54,36 @@ describe('classifyPlanFailure', () => {
     expect(classifyPlanFailure(new TypeError('Failed to fetch'))).toBe('unavailable');
     expect(classifyPlanFailure(undefined)).toBe('unavailable');
   });
+
+  /** UF-601 — l'appareil hors-ligne ne se dit pas comme une panne de service. */
+  describe('appareil hors-ligne (UF-601)', () => {
+    it('distingue « hors-ligne » de « service indisponible »', () => {
+      expect(classifyPlanFailure(new TypeError('Failed to fetch'), { online: false })).toBe(
+        'offline',
+      );
+      // Le 503 fabriqué par le service worker quand il n'a aucun itinéraire en
+      // cache : c'est encore l'appareil qui est hors-ligne, pas notre API.
+      expect(classifyPlanFailure(new ApiError(503, 'Hors-ligne'), { online: false })).toBe(
+        'offline',
+      );
+    });
+
+    it('ne réécrit pas les erreurs de contrat, qui gardent leur sens', () => {
+      const offline = { online: false };
+      expect(classifyPlanFailure(new ApiError(401, 'Unauthorized'), offline)).toBe(
+        'session-expired',
+      );
+      expect(classifyPlanFailure(new ApiError(400, 'invalide'), offline)).toBe('invalid-request');
+      expect(classifyPlanFailure(new ApiError(404, 'Not Found'), offline)).toBe('no-route');
+    });
+
+    it('suppose le réseau présent quand rien n’est précisé (comportement d’avant UF-601)', () => {
+      expect(classifyPlanFailure(new TypeError('Failed to fetch'), {})).toBe('unavailable');
+      expect(classifyPlanFailure(new TypeError('Failed to fetch'), { online: true })).toBe(
+        'unavailable',
+      );
+    });
+  });
 });
 
 describe('PLAN_FAILURE_NOTICES', () => {
@@ -69,6 +100,27 @@ describe('PLAN_FAILURE_NOTICES', () => {
     expect(PLAN_FAILURE_NOTICES['session-expired'].role).toBe('status');
     expect(PLAN_FAILURE_NOTICES.unavailable.role).toBe('alert');
     expect(PLAN_FAILURE_NOTICES['invalid-request'].role).toBe('alert');
+
+    // Hors-ligne (UF-601) : l'appareil n'a plus de réseau, aucune relance n'y
+    // changera rien avant son retour. Couper la parole au lecteur d'écran pour
+    // annoncer un état qu'on ne peut pas corriger serait gratuit.
+    expect(PLAN_FAILURE_NOTICES.offline.role).toBe('status');
+  });
+
+  it('n’invite pas à vérifier une connexion connue pour absente (UF-601)', () => {
+    expect(PLAN_FAILURE_NOTICES.offline.message).not.toMatch(/[Vv]érifiez/);
+  });
+});
+
+describe('CACHED_ROUTE_NOTICE (UF-601)', () => {
+  it('annonce des résultats rejoués sans les faire passer pour une panne', () => {
+    expect(CACHED_ROUTE_NOTICE.role).toBe('status');
+  });
+
+  it('dit explicitement que le trajet répond à la recherche précédente', () => {
+    // C'est tout l'enjeu : un itinéraire d'hier affiché sans cette phrase se
+    // lit comme la réponse à la question qu'on vient de poser.
+    expect(CACHED_ROUTE_NOTICE.message).toMatch(/précédente/);
   });
 });
 

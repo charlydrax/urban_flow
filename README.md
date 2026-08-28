@@ -143,6 +143,11 @@ Le **panneau de résultats** (UF-404) et le traitement des **cas non nominaux**
 sont documentés dans
 [`apps/web/features/planner/README.md`](apps/web/features/planner/README.md).
 
+Le **mode hors-ligne** de la PWA (UF-601) — stratégies de cache ressource par
+ressource, dernier itinéraire rejoué sans réseau, fond de carte déjà consulté et
+indicateur « hors-ligne » — est documenté dans
+[`docs/pwa-offline.md`](docs/pwa-offline.md).
+
 ## Qualité de code & contribution
 
 Lint strict (ESLint + Prettier partagés), hooks Git (Husky : lint-staged en `pre-commit`,

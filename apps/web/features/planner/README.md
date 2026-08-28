@@ -967,3 +967,43 @@ La pastille et son pourcentage vivent dans la ligne d'infos secondaires, en
 plutôt que de déborder, et la pastille elle-même ne se coupe jamais. Le détail
 segment par segment reste hors de la carte, sous la liste, et replié par défaut
 (`CarbonBreakdown`, UF-501) — le panneau sert à comparer, pas à tout déplier.
+
+## Résultats hors-ligne (UF-601) — C1 / C10 / C7
+
+Le planificateur est le seul écran dont les **données** survivent à la coupure :
+le service worker mémorise chaque réponse réussie de `POST /routes/plan` et la
+rejoue quand le réseau manque. Stratégies de cache complètes, schéma du flux et
+recette : [`docs/pwa-offline.md`](../../../../docs/pwa-offline.md).
+
+### Ce que le planificateur ajoute au dispositif
+
+| Élément                                        | Rôle                                                                |
+| ---------------------------------------------- | ------------------------------------------------------------------- |
+| `useRoutePlan().servedFromCache`               | Publie la **provenance** des résultats affichés                     |
+| `CACHED_ROUTE_NOTICE` (`lib/plan-feedback.ts`) | Le texte « recherche précédente », en ton `warning`                 |
+| `PLAN_FAILURE_NOTICES.offline`                 | Hors-ligne **sans** itinéraire en cache — ton `status`, pas `alert` |
+
+### Dire d'où viennent les résultats n'est pas facultatif
+
+Une réponse rejouée est un `200` en tout point identique à la vraie. Sans le
+bandeau, quelqu'un qui saisit deux adresses dans un tunnel lirait le trajet
+**précédent** en croyant lire le sien — et descendrait au mauvais arrêt. C'est la
+seule chose qui sépare une dégradation gracieuse d'un mensonge à l'écran.
+
+### L'historique n'est pas complété sur un résultat rejoué
+
+La réponse en cache porte le `searchHistoryId` de la recherche précédente.
+`use-route-plan.ts` l'écarte explicitement : retenir un itinéraire inscrirait le
+choix sur un trajet que l'usager n'a pas demandé et gonflerait son bilan carbone
+de déplacements qui n'ont pas eu lieu — la règle est la même qu'à UF-505, où
+seule une **décision** est enregistrée. La recherche courante, elle, n'a jamais
+atteint l'API et n'existe pas en base.
+
+### « Hors-ligne » ne se dit pas comme « indisponible »
+
+`classifyPlanFailure` reçoit désormais `navigator.onLine`. Un échec réseau alors
+que l'appareil se sait déconnecté devient `offline` : le message ne demande pas
+de « vérifier votre connexion » — elle est déjà connue pour absente — et n'est
+pas peint en rouge, puisqu'il n'y a rien à réparer avant le retour du réseau.
+Les erreurs qui viennent de notre **contrat** (401, 400, 404) gardent leur sens
+même hors-ligne : ce sont des réponses lues, pas des suppositions.

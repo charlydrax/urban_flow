@@ -13,6 +13,8 @@ import type {
   UserProfile,
 } from '@urbanflow/shared';
 
+import { isServedFromCache } from './offline';
+
 /** Erreur API normalisée (corps du filtre d'exceptions global côté NestJS). */
 export class ApiError extends Error {
   constructor(
@@ -73,6 +75,16 @@ interface RequestOptions extends RequestInit {
    * l'écran de connexion depuis l'écran de connexion ferait perdre le message.
    */
   skipUnauthorizedHandler?: boolean;
+  /**
+   * Inspecte la réponse brute avant qu'elle ne soit consommée (UF-601).
+   *
+   * Le client rend des objets typés, pas des `Response` : c'est ce qui le rend
+   * agréable à appeler. Mais le service worker communique par un **en-tête**
+   * (`X-UrbanFlow-Cache`), invisible dans le corps. Ce rappel est la plus
+   * petite ouverture qui laisse un appelant lire cette information sans que
+   * tous les autres aient à démêler une enveloppe.
+   */
+  onResponse?: (response: Response) => void;
 }
 
 /**
@@ -88,13 +100,15 @@ interface RequestOptions extends RequestInit {
  * l'appelant puisse arrêter proprement son rendu.
  */
 async function request<T>(path: string, options?: RequestOptions): Promise<T> {
-  const { skipUnauthorizedHandler, ...init } = options ?? {};
+  const { skipUnauthorizedHandler, onResponse, ...init } = options ?? {};
 
   const response = await fetch(`${BASE_URL}${path}`, {
     credentials: 'include',
     headers: { 'Content-Type': 'application/json', ...init.headers },
     ...init,
   });
+
+  onResponse?.(response);
 
   if (!response.ok) {
     if (response.status === 401 && !skipUnauthorizedHandler) {
@@ -109,6 +123,24 @@ async function request<T>(path: string, options?: RequestOptions): Promise<T> {
   // 204 No Content (déconnexion) : pas de corps à parser.
   if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
+}
+
+/**
+ * Résultat d'une planification, **avec sa provenance** (UF-601).
+ *
+ * La provenance ne peut pas être un champ de `PlanRoutesResponse` : ce type est
+ * le contrat partagé avec l'API (`@urbanflow/shared`), et le serveur ne sait
+ * rien du cache du navigateur. C'est une information du transport, elle
+ * s'ajoute donc autour du corps de la réponse, pas dedans.
+ */
+export interface PlanRoutesResult {
+  /** Corps de la réponse, au contrat `@urbanflow/shared` habituel. */
+  response: PlanRoutesResponse;
+  /**
+   * `true` quand le service worker a servi le dernier itinéraire mémorisé au
+   * lieu d'un calcul frais — l'écran doit alors le dire (C10).
+   */
+  servedFromCache: boolean;
 }
 
 /**
@@ -180,10 +212,19 @@ export const apiClient = {
    * ligne créée dans `searchHistoryId` : appeler `createSearchHistory` après un
    * `planRoutes` créerait un doublon.
    *
-   * La réponse est mise en cache par le service worker pour l'accès hors-ligne (C1/C10).
+   * La réponse est mise en cache par le service worker pour l'accès hors-ligne
+   * (C1/C10) : hors réseau, c'est le **dernier itinéraire mémorisé** qui
+   * revient, et `servedFromCache` le signale — voir {@link PlanRoutesResult}.
    */
-  planRoutes(payload: PlanRouteRequest): Promise<PlanRoutesResponse> {
-    return request('/routes/plan', { method: 'POST', body: JSON.stringify(payload) });
+  planRoutes(payload: PlanRouteRequest): Promise<PlanRoutesResult> {
+    let servedFromCache = false;
+    return request<PlanRoutesResponse>('/routes/plan', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+      onResponse: (response) => {
+        servedFromCache = isServedFromCache(response.headers);
+      },
+    }).then((response) => ({ response, servedFromCache }));
   },
 
   /**

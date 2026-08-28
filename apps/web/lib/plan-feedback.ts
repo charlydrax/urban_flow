@@ -19,6 +19,7 @@ import { ApiError } from './api-client';
  * | Aucune source n'a répondu      | La recherche n'a pas pu aboutir ; réessayer      |
  * | Une source manque sur trois    | Les résultats sont exploitables mais incomplets  |
  * | Session expirée                | Rien n'est cassé ; il faut se reconnecter        |
+ * | Connexion perdue (UF-601)      | L'appareil est hors-ligne ; rien à réessayer     |
  *
  * Les confondre, c'est envoyer quelqu'un vérifier sa connexion alors que son
  * trajet n'existe pas, ou lui faire croire que l'application est en panne alors
@@ -54,21 +55,54 @@ export type PlanFailureKind =
    * « aucun trajet », jamais sur une erreur rouge.
    */
   | 'no-route'
-  /** Tout le reste : 5xx, coupure réseau, réponse illisible. */
+  /**
+   * L'appareil n'a plus de réseau, et le service worker n'avait aucun
+   * itinéraire en cache à servir (UF-601).
+   *
+   * Distinct de `unavailable`, qui accuse implicitement nos serveurs et
+   * demande de « vérifier votre connexion » : ici la connexion est déjà connue
+   * pour absente, l'inviter à la vérifier est un contresens, et il n'y a rien à
+   * relancer avant le retour du réseau.
+   */
+  | 'offline'
+  /** Tout le reste : 5xx, réponse illisible, réseau défaillant sans être coupé. */
   | 'unavailable';
 
+/** Ce que l'appelant sait du réseau au moment où il classe l'échec. */
+export interface PlanFailureContext {
+  /**
+   * État de la connexion vu par le navigateur (`navigator.onLine`).
+   *
+   * Passé en paramètre et non lu ici : `plan-feedback.ts` est un module pur,
+   * testé sans DOM. `true` par défaut — sans information, on suppose le réseau
+   * présent, ce qui conserve le comportement d'avant UF-601.
+   */
+  online?: boolean;
+}
+
 /**
- * Range l'erreur levée par `apiClient.planRoutes` dans une des quatre cases.
+ * Range l'erreur levée par `apiClient.planRoutes` dans une des cases ci-dessus.
+ *
+ * Les erreurs qui viennent de **notre contrat** (401, 400, 404) sont classées
+ * telles quelles, même hors-ligne : ce sont des réponses lues, pas des
+ * suppositions, et elles gardent leur sens. Seul le fourre-tout `unavailable`
+ * bascule en `offline` quand le navigateur se sait déconnecté — y compris le
+ * `503` que le service worker fabrique lui-même faute d'itinéraire en cache.
  *
  * @param error Ce que la promesse a rejeté — jamais supposé être une `ApiError`
+ * @param context Ce qu'on sait du réseau ; voir {@link PlanFailureContext}
  * @returns La nature de l'échec ; `unavailable` par défaut, faute de mieux
  */
-export function classifyPlanFailure(error: unknown): PlanFailureKind {
-  if (!(error instanceof ApiError)) return 'unavailable';
+export function classifyPlanFailure(
+  error: unknown,
+  context: PlanFailureContext = {},
+): PlanFailureKind {
+  const fallback = context.online === false ? 'offline' : 'unavailable';
+  if (!(error instanceof ApiError)) return fallback;
   if (error.status === 401) return 'session-expired';
   if (error.status === 400) return 'invalid-request';
   if (error.status === 404) return 'no-route';
-  return 'unavailable';
+  return fallback;
 }
 
 /** Un message d'écran, avec le rôle ARIA qui va avec. */
@@ -107,11 +141,34 @@ export const PLAN_FAILURE_NOTICES: Record<Exclude<PlanFailureKind, 'no-route'>, 
     message:
       'Les points de départ et d’arrivée doivent être choisis dans la liste de suggestions, pour que nous connaissions leur position exacte.',
   },
+  offline: {
+    role: 'status',
+    message:
+      'Vous êtes hors connexion et aucun itinéraire récent n’est enregistré sur cet appareil. Votre recherche sera possible dès le retour du réseau.',
+  },
   unavailable: {
     role: 'alert',
     message:
       'Le calcul d’itinéraires n’a pas abouti. Vérifiez votre connexion, puis relancez la recherche.',
   },
+};
+
+/**
+ * Note affichée quand le service worker a servi le **dernier itinéraire
+ * mémorisé** à la place d'un calcul (UF-601, étape 22 du flux de référence).
+ *
+ * Ton `warning` et non `error` : l'écran est utilisable, les itinéraires sont
+ * réels — ils répondent seulement à la recherche *précédente*. C'est exactement
+ * la nuance du mode dégradé des sources, et elle mérite le même traitement.
+ *
+ * Le message dit explicitement « recherche précédente » : sans cela, quelqu'un
+ * qui vient de saisir deux adresses dans un tunnel croirait lire le trajet
+ * qu'il vient de demander, et descendrait au mauvais arrêt.
+ */
+export const CACHED_ROUTE_NOTICE: PlanNotice = {
+  role: 'status',
+  message:
+    'Affichage hors-ligne : voici le dernier itinéraire calculé lors de votre recherche précédente, pas le résultat de celle-ci.',
 };
 
 /**
