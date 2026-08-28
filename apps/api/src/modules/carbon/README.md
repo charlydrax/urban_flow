@@ -11,9 +11,14 @@
 
 ## Endpoints (protégés par le guard JWT global)
 
-| Méthode | Route                   | Description                             | Statut |
-| ------- | ----------------------- | --------------------------------------- | ------ |
-| GET     | `/api/carbon/dashboard` | CO₂ émis/évité + trajets sur la période | stub   |
+| Méthode | Route                                | Description                                             |
+| ------- | ------------------------------------ | ------------------------------------------------------- |
+| GET     | `/api/carbon/summary?days=7\|30\|90` | Suivi personnel : totaux, évolution, série du graphique |
+
+> `GET /api/carbon/dashboard` a été **retiré** par UF-505. C'était un stub à
+> valeurs figées, sans lecture en base et sans autre appelant que le squelette
+> d'écran remplacé par le même ticket : le laisser au contrat public aurait
+> signifié publier une route qui ment.
 
 ## `computeFootprint(segments)` — total **et** détail (UF-501)
 
@@ -148,20 +153,75 @@ collecte réseau. La condition à préserver le jour où le barème s'affinera :
 facteur qui devrait être _lu_ quelque part (mix électrique horaire, par exemple)
 doit être chargé en amont et mémoïsé, pas récupéré dans `computeFootprint`.
 
+## `getSummary(userId, days)` — le suivi personnel (UF-505)
+
+```
+        │◄──── période précédente ────►│◄──── période affichée ────►│
+tranche │  0  │  1  │  2  │  3  │      │  4  │  5  │  6  │  7  │   maintenant
+        └─────┴─────┴─────┴─────┘      └─────┴─────┴─────┴─────┘
+             previous (total)               current + buckets[]
+```
+
+Un **unique** `GROUP BY` produit les huit tranches ; le service en tire les deux
+totaux, la variation entre eux et la série du graphique. Une requête par tranche
+en aurait fait huit pour un seul écran (C5/C10). Les bornes sont calculées en
+TypeScript pour que le SQL n'ait aucune arithmétique de calendrier à faire.
+
+**Fenêtre glissante, pas mois calendaire.** « Les 30 derniers jours » et non « ce
+mois-ci » : un bilan mensuel est quasiment vide le 1er du mois, et l'évolution
+qu'il afficherait le 2 ne voudrait rien dire. Une fenêtre glissante et sa jumelle
+immédiatement antérieure comparent toujours deux durées identiques.
+
+**Seuls les trajets retenus comptent.** Une ligne de `search_history` n'entre
+dans les totaux qu'une fois son `carbon_grams` posé, c'est-à-dire une fois que
+l'usager a **choisi** une option (voir plus bas). Additionner les recherches
+abandonnées ferait un bilan de déplacements que personne n'a faits. Ces
+recherches sont tout de même dénombrées à part (`unpricedTripsCount`) : sans
+cela, un total bas serait incompréhensible pour quelqu'un qui a beaucoup cherché.
+
+**Le module lit `search_history` directement**, sans passer par
+`SearchHistoryService`. Ce service existe pour encapsuler les géométries PostGIS
+(`ST_MakePoint`, `ST_X`) — or un agrégat de sommes n'en touche aucune et ne
+matérialise jamais une entrée d'historique. L'y loger imposerait par ailleurs un
+cycle entre les deux modules, `search-history` dépendant déjà de ce service-ci
+pour valoriser une sélection.
+
+## Comment l'empreinte arrive en base (UF-505)
+
+La ligne d'historique naît à l'étape 18 du flux, **avant** qu'aucune option
+n'existe : `carbon_grams` et `car_equivalent_grams` y sont `NULL`. C'est
+`PATCH /api/search-history/:id/selection` (module `search-history`) qui les pose,
+quand l'usager retient un itinéraire.
+
+Cet endpoint n'accepte **aucun gramme du client** : il reçoit les couples
+(mode, distance) des segments retenus et appelle `computeFootprint`. Le Service
+Carbone reste l'autorité unique sur le barème, ici comme à l'étape 6 — un client
+qui pourrait poster « 0 g » se fabriquerait un bilan flatteur, et un bilan qu'on
+peut se fabriquer ne sert plus à rien.
+
+Les deux valeurs sont **figées** au barème du jour du trajet plutôt que
+recalculées à la lecture : le barème est explicitement provisoire, et un bilan
+personnel dont les mois passés se réécriraient à chaque affinage ne serait pas un
+historique.
+
 ## Reste à faire
 
-- Agrégation de `SearchHistory` (PostGIS) pour le tableau de bord (aujourd'hui un
-  stub à valeurs figées) — le CO₂ **évité** y sera cumulé à partir de la même
-  référence voiture que celle publiée par `computeFootprint`.
+- **Répartition par mode** (« Bus 44 %, Métro 28 % … » de la maquette) : suppose
+  de stocker le détail par segment de chaque trajet retenu, donc une table de
+  plus. Hors périmètre du MVP, qui demande explicitement une ou deux
+  visualisations sobres.
+- **Facteur d'absorption « arbres équivalents »** de la maquette : il ne figure
+  pas dans le barème transport de l'ADEME et demanderait sa propre source.
 
 ## Dépendances
 
-- `PrismaService` (`SearchHistory`) — branché lors de l'implémentation du
-  tableau de bord.
-- Consommé par `RoutesModule` (étape 6 du flux) et par `merge/itinerary-merger.ts`
-  via les facteurs d'émission.
+- `PrismaService` — agrégation de `search_history` pour `getSummary`.
+- Consommé par `RoutesModule` (étape 6 du flux), par `SearchHistoryModule`
+  (valorisation d'un itinéraire retenu) et par `merge/itinerary-merger.ts` via
+  les facteurs d'émission.
 - Contrats publiés dans `@urbanflow/shared` (`CarbonFootprint`,
-  `CarbonSegmentFootprint`) : le front les consomme sans les redéclarer (C9).
+  `CarbonSegmentFootprint`, `CarbonSummary`, `CarbonPeriodTotals`,
+  `CAR_REFERENCE_GRAMS_PER_KM`) : le front les consomme sans les redéclarer (C9).
 
 ## Tests
 
@@ -173,6 +233,13 @@ cd apps/api && npx jest src/modules/carbon
 affinage du barème est attendu, mais il ne doit jamais retourner l'ordre sans que
 le test le signale. Il vérifie aussi que la référence voiture reste au-dessus de
 tout mode proposé — sinon « vous avez évité … » deviendrait un reproche.
+
+`carbon.service.spec.ts` fige en plus les trois critères de recette d'UF-505 : un
+total pour l'utilisateur connecté, un périmètre de lecture verrouillé sur le JWT
+(aucun paramètre ne peut viser un autre compte), et une évolution comparant deux
+périodes de **même durée**. Il vérifie également qu'une période vide rend quatre
+tranches à zéro plutôt qu'une série absente, et qu'une période précédente vide
+rend `null` plutôt qu'une division par zéro.
 
 ## Contraintes couvertes
 

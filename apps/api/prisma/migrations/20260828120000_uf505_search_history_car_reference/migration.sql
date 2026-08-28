@@ -1,0 +1,15 @@
+-- UF-505 — suivi carbone personnel.
+--
+-- Ajoute la référence voiture du trajet retenu à côté de son empreinte réelle.
+-- Les deux colonnes sont écrites ensemble, au barème en vigueur le jour du
+-- trajet : le tableau de bord additionne des valeurs figées, et un affinage
+-- ultérieur du barème ADEME ne réécrit pas le passé de l'utilisateur.
+--
+-- Nullable et sans valeur par défaut : une recherche est enregistrée dès sa
+-- soumission (étape 18 du flux), c'est-à-dire avant que la moindre option
+-- n'ait été retenue. `NULL` dit exactement cela — « aucun choix » — là où un
+-- `0` dirait « un trajet à empreinte nulle » et fausserait les moyennes.
+--
+-- Les lignes déjà en base restent donc à NULL : elles ne sont pas comptées par
+-- `GET /api/carbon/summary`, qui les rapporte séparément (`unpricedTripsCount`).
+ALTER TABLE "search_history" ADD COLUMN "car_equivalent_grams" INTEGER;

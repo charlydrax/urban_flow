@@ -94,6 +94,19 @@ model SearchHistory {
   selectedSummary String? @map("selected_summary")
   /// Empreinte CO₂ de l'option retenue, en grammes — alimente le dashboard carbone.
   carbonGrams     Int?    @map("carbon_grams")
+  /// Ce que le **même** trajet aurait coûté seul en voiture, en grammes (UF-505).
+  ///
+  /// Stockée plutôt que recalculée à la lecture, pour deux raisons. D'abord la
+  /// distance parcourue n'est pas conservée ici — seuls les deux points le
+  /// sont, et la distance à vol d'oiseau n'est pas celle du trajet réel.
+  /// Ensuite le barème (`emission-factors.ts`) est explicitement provisoire :
+  /// un bilan personnel dont les mois passés changeraient à chaque affinage du
+  /// barème ne serait pas un historique. Les deux colonnes sont donc écrites
+  /// ensemble, au barème du jour du trajet, et ne bougent plus.
+  ///
+  /// `NULL` en même temps que `carbonGrams` : les deux naissent du même choix
+  /// d'itinéraire, il n'existe pas d'état où l'une serait connue sans l'autre.
+  carEquivalentGrams Int? @map("car_equivalent_grams")
 
   createdAt DateTime @default(now()) @map("created_at")
 

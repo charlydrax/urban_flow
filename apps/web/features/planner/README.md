@@ -492,6 +492,28 @@ tracé (`MODE_TRACK_STYLES`, UF-403). C'est ce qui fait reconnaître, dans le tr
 bleu tireté dessiné à droite, le « 🚌 » lu à gauche. Deux nuances différentes pour
 un même bus rompraient le lien que la recette demande d'établir.
 
+### Le choix alimente le bilan carbone (UF-505)
+
+Depuis UF-505, sélectionner une carte fait aussi un second travail :
+`useRoutePlan.select` appelle `PATCH /api/search-history/:id/selection` pour
+inscrire l'option retenue sur la ligne d'historique de la recherche. C'est ce qui
+remplit la page « Mon impact ».
+
+**Seul un clic compte.** La première option est présélectionnée à l'arrivée des
+résultats, mais c'est un classement du serveur, pas une décision — elle n'est
+donc pas enregistrée. Un bilan carbone doit compter des déplacements, pas des
+suggestions.
+
+**L'enregistrement ne gêne jamais la sélection.** La mise en avant est appliquée
+avant l'appel réseau et ne l'attend pas ; un échec d'écriture est silencieux. Ne
+pas comptabiliser un trajet est un désagrément, l'annoncer comme une panne en
+serait une vraie (dégradation gracieuse — C10). Même règle que pour l'écriture de
+l'historique elle-même.
+
+**Le corps ne porte aucun gramme** : seulement le résumé de l'option et les
+couples (mode, distance) de ses segments. Le Service Carbone valorise côté
+serveur — sinon n'importe qui s'inscrirait un bilan à zéro (C4).
+
 ### Ce que la carte affiche, et pourquoi dans cet ordre
 
 | Élément                 | Pourquoi il est là                                                             |

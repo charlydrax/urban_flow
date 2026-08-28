@@ -15,10 +15,11 @@ Deux usages en découlent :
 
 ## Endpoints (tous protégés par le guard JWT global)
 
-| Méthode | Route                         | Description                          |
-| ------- | ----------------------------- | ------------------------------------ |
-| POST    | `/api/search-history`         | Enregistre une recherche             |
-| GET     | `/api/search-history?limit=N` | Les N dernières recherches du compte |
+| Méthode | Route                               | Description                          |
+| ------- | ----------------------------------- | ------------------------------------ |
+| POST    | `/api/search-history`               | Enregistre une recherche             |
+| GET     | `/api/search-history?limit=N`       | Les N dernières recherches du compte |
+| PATCH   | `/api/search-history/:id/selection` | Inscrit l'itinéraire retenu (UF-505) |
 
 ### `POST /api/search-history`
 
@@ -49,6 +50,7 @@ Réponses : `201` (l'entrée créée, relue depuis les colonnes géométriques),
       "to": { "label": "Place Bellecour, 69002 Lyon", "lat": 45.7578, "lng": 4.832 },
       "selectedSummary": null,
       "carbonGrams": null,
+      "carEquivalentGrams": null,
       "createdAt": "2026-07-31T09:12:00.000Z"
     }
   ]
@@ -63,7 +65,43 @@ balayer tout un historique et d'en faire transiter le poids sur un réseau mobil
 `DISTINCT ON (from_label, to_label)` et garde l'occurrence la plus récente.
 Chercher trois fois « Part-Dieu → Bellecour » remplirait sinon toute la liste de
 rappels d'une seule ligne. La base conserve bien les trois lignes — c'est
-l'affichage qui les replie, et le tableau de bord carbone aura besoin du détail.
+l'affichage qui les replie, et le tableau de bord carbone a besoin du détail.
+
+### `PATCH /api/search-history/:id/selection` (UF-505)
+
+Ce qui alimente le suivi carbone personnel. La ligne d'historique naît à
+l'étape 18 du flux, **avant** qu'aucune option n'existe : inscrire d'office la
+première proposition ferait passer un classement du serveur pour une décision de
+l'usager. Le choix arrive plus tard — ou n'arrive jamais — d'où un second appel.
+
+```jsonc
+// Corps : aucun gramme. Le mode et la distance, rien d'autre.
+{
+  "selectedSummary": "Marche + Métro B",
+  "segments": [
+    { "mode": "WALK", "distanceMeters": 400 },
+    { "mode": "METRO", "distanceMeters": 3200 },
+  ],
+}
+```
+
+**L'empreinte est calculée, pas reçue.** Le service appelle
+`CarbonService.computeFootprint` sur les segments et écrit lui-même
+`carbon_grams` et `car_equivalent_grams`. Accepter un nombre de grammes venu du
+navigateur laisserait n'importe qui s'inscrire un bilan à zéro — et un bilan
+qu'on peut se fabriquer n'a plus de valeur, même quand la seule personne trompée
+est son auteur.
+
+**Les deux colonnes sont figées** au barème du jour du trajet, jamais recalculées
+à la lecture. Le barème est explicitement provisoire ; un bilan personnel dont
+les mois passés se réécriraient à chaque affinage ne serait pas un historique.
+
+**L'UUID vient du chemin, donc du client** : `ParseUUIDPipe` refuse en `400` ce
+qui n'est pas un identifiant avant que la valeur n'atteigne le SQL, et le `WHERE`
+porte sur le **couple** `(id, user_id)` — viser la ligne d'un autre compte ne met
+rien à jour et répond `404`, indiscernable d'un identifiant inexistant.
+
+Réponses : `200` (l'entrée mise à jour), `400`, `401`, `404`.
 
 ## Stockage PostGIS
 
@@ -127,9 +165,12 @@ le vérifie explicitement.
 ## Dépendances
 
 - `PrismaService` — table `search_history` via `$queryRaw` (géométries PostGIS)
+- `CarbonService` (UF-505) — valorise les segments d'un itinéraire retenu, pour
+  que l'empreinte écrite ne vienne jamais du client
 - `@CurrentUser()` — identité issue du JWT (jamais du corps — C4)
 - `@urbanflow/shared` — contrats `SearchHistoryEntry`,
-  `CreateSearchHistoryPayload`, bornes `DEFAULT/MAX_SEARCH_HISTORY_LIMIT` (C9)
+  `CreateSearchHistoryPayload`, `SelectItineraryPayload`, bornes
+  `DEFAULT/MAX_SEARCH_HISTORY_LIMIT` (C9)
 
 ## Contraintes couvertes
 
@@ -147,7 +188,10 @@ le vérifie explicitement.
 - `search-history.service.spec.ts` — rattachement au compte du token, périmètre
   de lecture verrouillé (recette 2), écriture en géométrie SRID 4326 avec l'ordre
   (lng, lat) (recette 3), paramétrage des valeurs client, plafonnement du
-  `limit`, dédoublonnage des trajets répétés.
+  `limit`, dédoublonnage des trajets répétés. Depuis UF-505 : l'empreinte d'une
+  sélection est **calculée par le barème** et non reprise du corps, les deux
+  colonnes carbone sont écrites ensemble, et une ligne appartenant à un autre
+  compte remonte `NotFoundException`.
 
 ## Consommateurs du service
 
@@ -162,8 +206,8 @@ le vérifie explicitement.
 
 ## Reste à faire (hors UF-204)
 
-- Agrégation par le tableau de bord carbone (`CarbonService.getDashboard`,
-  encore stub).
+- ~~Agrégation par le tableau de bord carbone~~ — livrée par UF-505
+  (`CarbonService.getSummary`, qui agrège `search_history` directement).
 - **Politique de rétention** (C8/C11) : les trajets ne devraient pas être
   conservés indéfiniment. Purge au-delà de N mois + suppression manuelle d'une
   entrée à exposer — la cascade avec le compte est en place, pas la durée de vie.

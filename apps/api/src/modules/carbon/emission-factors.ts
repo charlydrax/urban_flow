@@ -1,3 +1,5 @@
+import { CAR_REFERENCE_GRAMS_PER_KM } from '@urbanflow/shared';
+
 import { TransportMode } from '../../common/enums/transport-mode.enum';
 
 /**
@@ -97,8 +99,13 @@ export const GRAMS_PER_PASSENGER_KM: Readonly<Record<TransportMode, number>> = {
  * ≈ 218 g CO₂e/km pour le parc français moyen (Base Empreinte ADEME, périmètre
  * usage + amont énergie). Un seul occupant, donc autant par passager que par
  * véhicule — et c'est bien le trajet que l'usager a évité en ouvrant l'app.
+ *
+ * ⚠️ Sa **valeur** vit dans `@urbanflow/shared` depuis UF-505 : la page « Mon
+ * impact » convertit la référence voiture en kilomètres, et cette division doit
+ * porter sur le même nombre des deux côtés. Elle est ré-exportée ici pour que
+ * le barème se lise d'un seul tenant, comme l'est déjà `TransportMode`.
  */
-export const CAR_REFERENCE_GRAMS_PER_KM = 218;
+export { CAR_REFERENCE_GRAMS_PER_KM } from '@urbanflow/shared';
 
 /**
  * Empreinte d'un segment, à partir de son mode et de sa distance.
