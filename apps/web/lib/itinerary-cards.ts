@@ -1,6 +1,6 @@
 import { TransportMode, type Itinerary, type ItinerarySortKey } from '@urbanflow/shared';
 
-import { formatCarbon } from './format-carbon';
+import { carbonBadge } from './carbon-badge';
 import { MODE_TRACK_STYLES } from './route-map-layers';
 
 /**
@@ -353,7 +353,11 @@ export function describeItinerary(
   const clock = itineraryClock(itinerary);
   if (clock) parts.push(`départ ${clock.departure}, arrivée ${clock.arrival}`);
 
-  parts.push(formatCarbon(itinerary.carbonGrams));
+  // Le badge CO₂ est peint en couleur et en pictogramme (UF-504) : sans cette
+  // reprise écrite, « c'est celui-ci qui pèse le moins » n'existerait que
+  // visuellement. La phrase du badge nomme le niveau *et* la comparaison
+  // voiture — « 240 g CO₂ » seul ne dit toujours pas si c'est bien ou mal.
+  parts.push(carbonBadge(itinerary).description);
   if (itinerary.accessible) parts.push('accessible en fauteuil roulant');
 
   return `${parts.join('. ')}.`;
