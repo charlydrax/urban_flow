@@ -35,6 +35,18 @@ export const urbanflowColors = {
   error: '#c62828',
   gold: '#9a6a00',
 
+  /**
+   * Fonds teintés — bandeaux d'état et badges (bloc « Teintes » de `globals.css`).
+   *
+   * Ajoutés au miroir par UF-405 : ils ne servaient qu'en CSS jusqu'ici, mais
+   * un message d'erreur pose du **texte** dessus, et le couple fond/texte doit
+   * alors être vérifié au seuil AA (C7). Un token de fond absent du miroir est
+   * un contraste que personne ne teste.
+   */
+  tintNeutral: '#f1f3f8',
+  tintGold: '#fbf3e0',
+  tintRed: '#fceaea',
+
   /** Modes de transport — badges et tracés d'itinéraires sur la carte. */
   modeBike: '#1fa85c',
   modeScooter: '#b85000',
