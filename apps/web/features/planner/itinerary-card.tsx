@@ -3,7 +3,13 @@
 import type { Itinerary } from '@urbanflow/shared';
 
 import { formatCarbon } from '../../lib/format-carbon';
-import { describeItinerary, itineraryClock, modeSequence } from '../../lib/itinerary-cards';
+import {
+  HIGHLIGHT_LABELS,
+  describeItinerary,
+  itineraryClock,
+  modeSequence,
+  type ItineraryHighlight,
+} from '../../lib/itinerary-cards';
 
 export interface ItineraryCardProps {
   itinerary: Itinerary;
@@ -12,10 +18,14 @@ export interface ItineraryCardProps {
   total: number;
   selected: boolean;
   /**
-   * Raison de la mise en tête (« le plus rapide », « empreinte la plus
-   * faible »), affichée sur la première carte seulement — `null` ailleurs.
+   * Mises en avant portées par **cet** itinéraire (UF-503) — `undefined` s'il
+   * n'en porte aucune.
+   *
+   * Ce n'est plus « la raison d'être en tête » d'UF-404 : depuis que l'usager
+   * peut retrier la liste, la position ne dit plus rien. Le badge appartient à
+   * l'itinéraire et le suit.
    */
-  bestReason: string | null;
+  highlight?: ItineraryHighlight;
   onSelect: () => void;
 }
 
@@ -27,7 +37,7 @@ export interface ItineraryCardProps {
  *
  * ```
  * ┌──────────────────────────────────────────────┐
- * │ ● [Meilleur choix · le plus rapide]   22 min │  ← la durée d'abord : c'est
+ * │ ● [🌱 Choix vert] [⚡ Le plus rapide]  22 min │  ← la durée d'abord : c'est
  * │                                              │    ce qu'on compare
  * │ 🚶 3 › 🚲 11 › 🚌 C3 6 › 🚶 2                │  ← la séquence de modes
  * │                                              │
@@ -76,7 +86,7 @@ export function ItineraryCard({
   position,
   total,
   selected,
-  bestReason,
+  highlight,
   onSelect,
 }: ItineraryCardProps) {
   const legs = modeSequence(itinerary);
@@ -104,12 +114,32 @@ export function ItineraryCard({
             value={itinerary.id}
             checked={selected}
             onChange={onSelect}
-            aria-label={describeItinerary(itinerary, position, total)}
+            aria-label={describeItinerary(itinerary, position, total, highlight)}
             className="mt-0.5 accent-primary"
           />
-          {bestReason && (
-            <span className="rounded-full bg-primary px-[10px] py-1 text-xs font-semibold text-white">
-              {bestReason}
+          {/*
+            Badges `aria-hidden` : l'`aria-label` du radio les reprend déjà en
+            toutes lettres, et les relire ici les ferait annoncer deux fois.
+
+            Le « choix vert » est plein et le « plus rapide » en contour : les
+            deux peuvent apparaître ensemble, et deux pastilles pleines côte à
+            côte se disputeraient l'attention au lieu de la hiérarchiser. C'est
+            l'option écologique que le produit met en avant (UF-503).
+          */}
+          {highlight?.greenest && (
+            <span
+              aria-hidden="true"
+              className="rounded-full bg-primary px-[10px] py-1 text-xs font-semibold text-white"
+            >
+              🌱 {HIGHLIGHT_LABELS.greenest}
+            </span>
+          )}
+          {highlight?.fastest && (
+            <span
+              aria-hidden="true"
+              className="rounded-full border border-action bg-tint-blue px-[10px] py-1 text-xs font-semibold text-action-dark"
+            >
+              ⚡ {HIGHLIGHT_LABELS.fastest}
             </span>
           )}
         </span>

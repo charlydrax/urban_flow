@@ -33,6 +33,7 @@ label seul donne un `400` explicite — pas une liste vide inexplicable.
 | 16-17. Détail carbone **par segment**           | UF-501 | ✅   |
 | 16-17. Valorisation de la liste + reclassement  | UF-502 | ✅   |
 | 9. Tri selon la priorité du profil              | UF-401 | ✅   |
+| 20. Tri par empreinte croissante par défaut     | UF-503 | ✅   |
 | 7 et 18. Sauvegarde `search_history`            | UF-402 | ✅   |
 
 **Plus aucun itinéraire n'est simulé.** Une liste vide signifie désormais
@@ -440,6 +441,57 @@ exposer le déplacement de l'usager (C11).
 il ne mesure pas la machine de CI, il fait échouer la construction le jour où
 quelqu'un glisserait une I/O dans le Service Carbone.
 
+## Tri par empreinte croissante (UF-503)
+
+**Le tri est côté back ; le retri est côté front.** Le ticket demandait de
+trancher entre les deux et de documenter le choix — c'est un partage, et chaque
+moitié tient pour une raison différente.
+
+| Question                                   | Où      | Pourquoi là                                                                    |
+| ------------------------------------------ | ------- | ------------------------------------------------------------------------------ |
+| Dans quel ordre la liste **part-elle** ?   | serveur | il est l'autorité sur le barème, et `sortedBy` est une promesse tenue par lui  |
+| L'usager peut-il la **relire** autrement ? | client  | c'est un changement de vue sur des données déjà reçues, pas une autre question |
+
+### Pourquoi l'ordre publié reste au serveur
+
+Il l'était déjà (UF-401, puis UF-502 qui reclasse sur les valeurs du Service
+Carbone). Le déplacer côté client aurait obligé le front à réimplémenter le
+départage des ex æquo, donc à entretenir une seconde définition de « moins
+émetteur » — celle-là même que le reclassement d'UF-502 venait de supprimer.
+
+Le défaut lui-même ne tient pas à un `if` dans le planificateur mais au **profil
+de mobilité** : `DEFAULT_PREFERENCES.priority` vaut `GREENEST`, donc un compte
+qui n'a jamais touché à ses préférences reçoit `carbonAsc`. C'est ce qui rend le
+choix produit réversible par l'usager plutôt qu'imposé, et un test
+(`routes.service.spec.ts`, « publishes the carbon order by default ») verrouille
+le lien — sans lui, passer ce défaut à `FASTEST` ferait tomber le parti pris du
+ticket sans que rien n'échoue.
+
+### Pourquoi le retri par durée reste au client
+
+Le repasser par l'API coûterait une nouvelle collecte des trois sources —
+plusieurs secondes (voir `docs/source-orchestration.md`) — pour une information
+que le client a déjà intégralement en main : au plus cinq itinéraires, durées et
+empreintes comprises. Pire, la collecte pourrait rendre des itinéraires
+**différents** (horaires GTFS avancés, borne Vélo'v vidée entre-temps) : un
+retri doit réordonner ce qu'on a sous les yeux, jamais en changer le contenu.
+
+Zéro requête pour un changement de vue, c'est aussi la lecture éco-conception du
+geste (C5).
+
+> Le front duplique donc les deux comparateurs (`lib/itinerary-cards.ts`,
+> `VIEW_COMPARATORS`). La duplication est assumée et bornée : elle ne s'applique
+> qu'au tri **demandé par l'usager**, qui n'existe pas côté serveur et n'a donc
+> rien à contredire. L'ordre publié, lui, n'a toujours qu'une définition.
+
+### Ce que le serveur ne fait pas
+
+Il ne désigne pas « l'option la plus écologique » dans la réponse. Ce serait un
+champ à tenir en phase avec `carbonGrams` pour dire ce qu'un minimum sur les
+valeurs publiées donne déjà — le client le calcule sans risque de divergence,
+puisqu'il ne recalcule aucune empreinte (voir
+`apps/web/features/planner/README.md`).
+
 ## Géométrie publiée (C9)
 
 La réponse porte **deux niveaux** de tracé, et les deux sont nécessaires :
@@ -466,4 +518,4 @@ pas un choix qui n'a pas eu lieu), C9 (GeoJSON
 LineString, contrats partagés), C10 (appels parallèles, budget borné,
 dégradation gracieuse, durées mesurées), C11 (logs sans donnée de déplacement,
 cause publiée générique hors diagnostic), C12 (préférence PMR propagée au moteur
-de routage).
+de routage), C5 (le retri d'affichage ne relance aucune collecte — UF-503).

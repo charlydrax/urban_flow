@@ -159,6 +159,19 @@ export interface SourceAvailability {
  * doit pouvoir annoncer « classés par empreinte » ou « classés par durée » sans
  * avoir à relire les préférences de l'usager, et sans déduire l'ordre en
  * comparant lui-même les valeurs.
+ *
+ * ## Ce que le client a le droit d'en faire (UF-503)
+ *
+ * C'est **l'ordre par défaut**, pas un ordre imposé. Le panneau de résultats
+ * s'ouvre dessus, puis laisse l'usager relire la même liste par durée sans
+ * repasser par l'API : réordonner cinq itinéraires déjà reçus ne justifie pas
+ * de relancer la collecte des trois sources, qui pourrait d'ailleurs rendre des
+ * itinéraires *différents* (C5/C10).
+ *
+ * La frontière est donc : le serveur décide de l'ordre **publié**, le client
+ * peut changer l'ordre **affiché** — et jamais les valeurs, ni le contenu de la
+ * liste. C'est ce qui garde `sortedBy` honnête tout en rendant le tri
+ * secondaire gratuit.
  */
 export type ItinerarySortKey =
   /** Empreinte carbone croissante — priorité « écolo », choix par défaut du produit. */

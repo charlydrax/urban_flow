@@ -154,18 +154,158 @@ export function itineraryClock(itinerary: Itinerary): ItineraryClock | null {
 }
 
 /**
- * Raison pour laquelle le premier itinéraire de la liste est en tête, formulée
- * à partir de la clé de tri **publiée par le serveur** (`sortedBy`).
+ * Mise en avant portée par un itinéraire — indépendante de sa **position**.
  *
- * On ne redéduit rien en comparant les valeurs entre elles : le serveur a trié
- * selon la priorité du profil (F1), il dit laquelle, et l'écran se contente de
- * la traduire. Le jour où une troisième priorité apparaît, ce `Record` cesse de
- * compiler — c'est exactement ce qu'on veut.
+ * UF-404 badgeait la première carte de la liste, et se contentait de traduire
+ * `sortedBy` pour dire pourquoi elle était première. UF-503 rend l'ordre
+ * d'affichage modifiable par l'usager : la position ne prouve donc plus rien,
+ * et un badge posé sur « la première » désignerait l'option la plus rapide
+ * comme la plus écologique sitôt le tri par durée choisi.
+ *
+ * La mise en avant est désormais **une propriété de l'itinéraire**, calculée
+ * sur ses propres valeurs. Elle suit sa carte où que le tri l'emmène.
  */
-export const BEST_OPTION_REASON: Record<ItinerarySortKey, string> = {
-  carbonAsc: 'Meilleur choix · empreinte la plus faible',
-  durationAsc: 'Meilleur choix · le plus rapide',
+export interface ItineraryHighlight {
+  /** Empreinte la plus faible de la liste — la mise en avant que le produit assume. */
+  greenest: boolean;
+  /** Durée la plus courte de la liste. */
+  fastest: boolean;
+}
+
+/** Libellés des deux mises en avant, repris tels quels par la carte et par l'`aria-label`. */
+export const HIGHLIGHT_LABELS = {
+  greenest: 'Choix vert · empreinte la plus faible',
+  fastest: 'Le plus rapide',
+} as const;
+
+/**
+ * Désigne l'option la plus écologique et la plus rapide d'une liste
+ * (recette 2 d'UF-503 : « l'option la plus écologique est visuellement mise
+ * en avant »).
+ *
+ * ## Pourquoi le client a le droit de calculer ça
+ *
+ * Le hook `use-route-plan` s'interdit de rejouer les décisions du serveur, et
+ * ce n'en est pas une : c'est un **minimum sur les valeurs publiées**, pas un
+ * second barème carbone. Le serveur reste seul à dire combien pèse un trajet ;
+ * l'écran se contente de repérer lequel pèse le moins parmi ceux qu'il a reçus.
+ * Aucune divergence possible — il n'y a rien à garder en phase.
+ *
+ * ## Ex æquo
+ *
+ * Le badge va au **premier** de l'ordre publié par le serveur, jamais aux deux :
+ * deux « choix vert » côte à côte ne mettent plus rien en avant. Le départage
+ * est donc celui du serveur (empreinte, puis durée), qui a déjà tranché.
+ *
+ * Un même itinéraire peut porter les deux badges : c'est le cas heureux, et le
+ * cacher priverait l'usager de l'argument le plus fort qu'on ait à lui donner.
+ *
+ * @param itineraries Itinéraires reçus, dans l'ordre publié par le serveur
+ * @returns Mise en avant par identifiant d'itinéraire ; vide si la liste l'est
+ */
+export function itineraryHighlights(
+  itineraries: readonly Itinerary[],
+): Record<string, ItineraryHighlight> {
+  if (itineraries.length === 0) return {};
+
+  const greenest = pickBy(itineraries, (itinerary) => itinerary.carbonGrams);
+  const fastest = pickBy(itineraries, (itinerary) => itinerary.durationMinutes);
+
+  const highlights: Record<string, ItineraryHighlight> = {};
+  for (const itinerary of itineraries) {
+    const marks = {
+      greenest: itinerary.id === greenest,
+      fastest: itinerary.id === fastest,
+    };
+    if (marks.greenest || marks.fastest) highlights[itinerary.id] = marks;
+  }
+
+  return highlights;
+}
+
+/** Identifiant de l'itinéraire minimisant `value` — le premier rencontré en cas d'ex æquo. */
+function pickBy(
+  itineraries: readonly Itinerary[],
+  value: (itinerary: Itinerary) => number,
+): string | null {
+  let best: Itinerary | null = null;
+  for (const itinerary of itineraries) {
+    if (!best || value(itinerary) < value(best)) best = itinerary;
+  }
+  return best?.id ?? null;
+}
+
+/**
+ * Phrase annonçant les mises en avant d'un itinéraire aux technologies
+ * d'assistance, ou `null` s'il n'en porte aucune.
+ *
+ * Les badges sont peints en couleur et en gras ; sans cette reprise écrite,
+ * l'information « c'est celui-là le plus écologique » n'existerait que
+ * visuellement (C7 — WCAG 1.4.1).
+ */
+export function describeHighlight(highlight: ItineraryHighlight | undefined): string | null {
+  if (!highlight) return null;
+
+  const marks: string[] = [];
+  if (highlight.greenest) marks.push(HIGHLIGHT_LABELS.greenest);
+  if (highlight.fastest) marks.push(HIGHLIGHT_LABELS.fastest);
+
+  return marks.length > 0 ? marks.join('. ') : null;
+}
+
+/**
+ * Comparateurs de **vue** du panneau de résultats (UF-503).
+ *
+ * Ce sont les mêmes règles que celles du serveur (`comparatorFor` dans
+ * `modules/routes/merge/itinerary-merger.ts`), départage compris : à empreinte
+ * égale on classe sur la durée, et réciproquement. Sans ce second critère,
+ * l'ordre d'un ex æquo dépendrait de la stabilité du `sort` du moteur.
+ *
+ * **Cette duplication est assumée**, et elle est bornée : le serveur reste
+ * l'autorité sur l'ordre *publié* — celui qu'annonce `sortedBy` et sur lequel
+ * l'écran s'ouvre. Le front ne recalcule que le retri **demandé par l'usager**,
+ * qui n'existe pas côté serveur et n'a donc rien à contredire. L'alternative —
+ * redemander la liste à l'API à chaque bascule — relancerait la collecte des
+ * trois sources et pourrait renvoyer des itinéraires *différents* : un retri
+ * doit réordonner ce qu'on a sous les yeux, pas en changer le contenu.
+ */
+const VIEW_COMPARATORS: Record<ItinerarySortKey, (a: Itinerary, b: Itinerary) => number> = {
+  carbonAsc: (a, b) => a.carbonGrams - b.carbonGrams || a.durationMinutes - b.durationMinutes,
+  durationAsc: (a, b) => a.durationMinutes - b.durationMinutes || a.carbonGrams - b.carbonGrams,
 };
+
+/**
+ * Réordonne la liste affichée selon la clé demandée, sans la modifier.
+ *
+ * @param itineraries Itinéraires reçus du serveur
+ * @param sortKey Clé de vue choisie par l'usager (ou celle publiée par le serveur au départ)
+ * @returns Une **nouvelle** liste : muter le tableau d'état de React ne
+ * déclencherait aucun rendu, et ferait diverger la liste de ce que la carte trace
+ */
+export function sortItineraries(
+  itineraries: readonly Itinerary[],
+  sortKey: ItinerarySortKey,
+): Itinerary[] {
+  return [...itineraries].sort(VIEW_COMPARATORS[sortKey]);
+}
+
+/** Libellé du tri appliqué, annoncé sous le décompte des itinéraires. */
+export const SORT_LABELS: Record<ItinerarySortKey, string> = {
+  carbonAsc: 'classés par empreinte carbone croissante',
+  durationAsc: 'classés par durée croissante',
+};
+
+/**
+ * Intitulé du bouton de chaque tri dans le sélecteur de vue.
+ *
+ * `carbonAsc` vient en premier partout — dans ce `Record` comme à l'écran :
+ * c'est le tri par défaut du produit, et l'ordre de lecture est le premier
+ * signal de ce qui est proposé et de ce qui est une alternative.
+ */
+export const SORT_OPTIONS: ReadonlyArray<{ key: ItinerarySortKey; label: string; icon: string }> = [
+  { key: 'carbonAsc', label: 'Écologique', icon: '🌱' },
+  { key: 'durationAsc', label: 'Rapide', icon: '⚡' },
+];
 
 /**
  * Description d'un itinéraire en une phrase, pour les technologies d'assistance
@@ -177,12 +317,23 @@ export const BEST_OPTION_REASON: Record<ItinerarySortKey, string> = {
  * et c'est elle qui doit rester exacte : elle nomme les modes en toutes lettres
  * là où l'affichage se repose sur des pictogrammes et des couleurs.
  *
+ * Depuis UF-503 elle porte aussi la **mise en avant** : les badges « Choix
+ * vert » et « Le plus rapide » sont peints dans la carte, mais l'`aria-label`
+ * du bouton radio remplace l'énoncé de son contenu — sans les y reprendre, ils
+ * ne seraient jamais lus (C7 — WCAG 1.4.1).
+ *
  * @param itinerary Itinéraire décrit
  * @param position Rang dans la liste, à partir de 1
  * @param total Nombre d'itinéraires proposés
+ * @param highlight Mises en avant portées par cet itinéraire, s'il en porte
  * @returns Phrase complète, prête pour un `aria-label`
  */
-export function describeItinerary(itinerary: Itinerary, position: number, total: number): string {
+export function describeItinerary(
+  itinerary: Itinerary,
+  position: number,
+  total: number,
+  highlight?: ItineraryHighlight,
+): string {
   const legs = modeSequence(itinerary).map((leg) => {
     const named = leg.line ? `${leg.label} ${leg.line}` : leg.label;
     return `${named} ${leg.durationMinutes} min`;
@@ -193,6 +344,11 @@ export function describeItinerary(itinerary: Itinerary, position: number, total:
     `${itinerary.durationMinutes} minutes`,
     legs.join(', puis '),
   ];
+
+  // Annoncée juste après le rang : « Option 2 sur 4. Choix vert… » dit
+  // immédiatement pourquoi cette option compte, sans attendre la fin de la phrase.
+  const marks = describeHighlight(highlight);
+  if (marks) parts.splice(1, 0, marks);
 
   const clock = itineraryClock(itinerary);
   if (clock) parts.push(`départ ${clock.departure}, arrivée ${clock.arrival}`);
