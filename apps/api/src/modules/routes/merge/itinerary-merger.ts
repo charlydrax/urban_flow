@@ -784,8 +784,15 @@ function sortKeyFor(priority: RoutePriority): ItinerarySortKey {
  * Le second critère n'est pas décoratif : deux itinéraires à empreinte égale
  * (deux lignes de métro, par exemple) doivent se départager sur la durée, sinon
  * l'ordre dépendrait de celui d'arrivée des sources — donc du hasard réseau.
+ *
+ * **Exporté depuis UF-502** parce que la fusion n'est plus le dernier à toucher
+ * à l'ordre : le Service Itinéraire revalorise ensuite chaque proposition au
+ * barème du Service Carbone, puis reclasse. Les deux tris doivent appliquer
+ * exactement la même règle — départage compris — sans quoi la liste changerait
+ * d'ordre pour une raison qui n'a rien à voir avec le carbone. Une seule
+ * définition, deux appelants.
  */
-function comparatorFor(sortedBy: ItinerarySortKey): (a: Itinerary, b: Itinerary) => number {
+export function comparatorFor(sortedBy: ItinerarySortKey): (a: Itinerary, b: Itinerary) => number {
   if (sortedBy === 'durationAsc') {
     return (a, b) => a.durationMinutes - b.durationMinutes || a.carbonGrams - b.carbonGrams;
   }

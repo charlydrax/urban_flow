@@ -31,6 +31,7 @@ label seul donne un `400` explicite — pas une liste vide inexplicable.
 | 5. Fusion en itinéraires multimodaux            | UF-401 | ✅   |
 | 6. `computeFootprint` par itinéraire            | UF-401 | ✅   |
 | 16-17. Détail carbone **par segment**           | UF-501 | ✅   |
+| 16-17. Valorisation de la liste + reclassement  | UF-502 | ✅   |
 | 9. Tri selon la priorité du profil              | UF-401 | ✅   |
 | 7 et 18. Sauvegarde `search_history`            | UF-402 | ✅   |
 
@@ -380,6 +381,64 @@ La réponse porte aussi `carbon.carEquivalentGrams` — ce que la même distance
 aurait coûté seul en voiture. La voiture solo n'est pas un mode que le
 planificateur propose ; c'est l'étalon qui rend un gramme lisible. Barème,
 méthodologie et source : [`modules/carbon/README.md`](../carbon/README.md).
+
+## Intégration dans `/routes/plan` (UF-502)
+
+Le Service Carbone est branché **après** la fusion, une fois pour toutes, dans
+`RoutesService.priceItineraries`. La séquence complète de l'endpoint est donc :
+
+```
+préférences → collecte parallèle → fusion → valorisation carbone → reclassement → réponse
+   étape 3        étapes 13-18     étape 5      étapes 16-17          étape 9      étape 19
+```
+
+### Le tri porte sur les valeurs publiées
+
+La fusion classait déjà ses propositions, mais sur **son** estimation carbone —
+celle qui lui sert à choisir les candidats. Les nombres finalement affichés, eux,
+viennent du Service Carbone, qui reste l'autorité sur le barème.
+
+Les deux coïncident aujourd'hui : même fonction (`segmentCarbonGrams`), même
+table de facteurs. Mais c'est précisément ce qu'on s'est réservé le droit de
+changer — le barème est annoncé comme provisoire, à affiner (taux d'occupation
+réels, mix électrique, VAE). Le jour où il s'affinera du côté du service
+seulement, la liste resterait étiquetée `carbonAsc` en étant visiblement mal
+triée, et le défaut se verrait d'abord à l'écran de l'usager.
+
+Le service **reclasse** donc après valorisation, avec le comparateur de la fusion
+— importé, jamais réécrit : deux règles de départage divergentes feraient changer
+l'ordre pour une raison étrangère au carbone. `sortedBy` redevient ainsi une
+promesse tenue par construction, et non par coïncidence.
+
+Sur un profil « rapide » (`durationAsc`), le reclassement ne bouge rien à l'ordre
+des durées : l'empreinte n'y est qu'un départage à durée égale.
+
+### Ce que ça coûte
+
+| Étape                | Nature                   | Ordre de grandeur        |
+| -------------------- | ------------------------ | ------------------------ |
+| Collecte des sources | trois appels réseau/base | centaines de ms          |
+| Valorisation carbone | arithmétique en mémoire  | fraction de milliseconde |
+
+La valorisation est bornée par le plafond de la fusion : **au plus 5
+itinéraires**, d'une poignée de segments chacun. Un seul `computeFootprint` par
+itinéraire, aucune I/O, aucun recalcul au moment du tri.
+
+Elle est **mesurée** plutôt qu'affirmée : `plan()` chronomètre l'étape et la
+journalise à côté de la durée de collecte, pour que les deux se comparent au même
+endroit (C10).
+
+```
+Fusion : 4 itinéraire(s) retenu(s), triés par carbonAsc (3/3 source(s) disponible(s))
+— carbone 0.3 ms sur 1840 ms de collecte.
+```
+
+Le journal ne porte ni libellé ni coordonnées : l'étape se diagnostique sans
+exposer le déplacement de l'usager (C11).
+
+`routes.service.spec.ts` en garde un test de budget. Il est délibérément lâche —
+il ne mesure pas la machine de CI, il fait échouer la construction le jour où
+quelqu'un glisserait une I/O dans le Service Carbone.
 
 ## Géométrie publiée (C9)
 
