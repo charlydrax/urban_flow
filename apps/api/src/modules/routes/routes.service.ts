@@ -1,11 +1,12 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import type { ItinerarySortKey } from '@urbanflow/shared';
 
 import { CarbonService } from '../carbon/carbon.service';
 import { SearchHistoryService } from '../search-history/search-history.service';
 import { UsersService } from '../users/users.service';
 import { ItineraryDto, PlanRoutesResponseDto } from './dto/itinerary.dto';
 import { PlaceDto, PlanRouteDto } from './dto/plan-route.dto';
-import { mergeIntoItineraries, type MergeEndpoint } from './merge/itinerary-merger';
+import { comparatorFor, mergeIntoItineraries, type MergeEndpoint } from './merge/itinerary-merger';
 import { SourceCollectorService } from './sources/source-collector.service';
 
 /**
@@ -16,7 +17,8 @@ import { SourceCollectorService } from './sources/source-collector.service';
  * 2. ✅ Appels PARALLÈLES aux trois sources GTFS / GBFS / PostGIS via
  *    `Promise.allSettled`, avec dégradation gracieuse — étapes 13-18, UF-305, C10.
  * 3. ✅ Fusion en itinéraires multimodaux réels — étape 5, UF-401.
- * 4. ✅ `computeFootprint(segments)` du Service Carbone par itinéraire — étape 6.
+ * 4. ✅ `computeFootprint(segments)` du Service Carbone par itinéraire, puis
+ *    reclassement sur l'empreinte publiée — étapes 6 et 16-17, UF-502.
  * 5. ✅ Sauvegarde `search_history` — étapes 7 et 18, UF-402.
  *
  * Depuis UF-401, **plus aucun itinéraire n'est simulé** : chaque proposition est
@@ -105,17 +107,74 @@ export class RoutesService {
     // ce que la collecte a rapporté, et ne peut donc rien inventer.
     const { itineraries, sortedBy } = mergeIntoItineraries(collected, from, to, preferences);
 
-    // Étape 6 : l'empreinte publiée est celle du Service Carbone, qui reste
-    // l'autorité sur le barème. La fusion a estimé la même valeur pour classer
-    // ses candidats ; on la lui fait confirmer plutôt que de la croire sur
-    // parole — le jour où le barème s'affinera (facteurs ADEME détaillés), ce
-    // seul appel suffira à propager le changement.
-    //
-    // Depuis UF-501, ce même appel rend le **détail** par segment. Les
-    // `carbonGrams` des segments sont réécrits avec ses lignes plutôt que
-    // laissés tels que la fusion les a posés : deux chiffres pour la même chose
-    // à l'écran, l'un du service et l'autre de la fusion, finiraient un jour par
-    // ne plus coïncider — et c'est le service qui a raison, par construction.
+    // Étapes 16-17 du flux (UF-502) : la valorisation carbone de la liste
+    // fusionnée. Mesurée, parce que le ticket exige que le calcul « ne rallonge
+    // pas notablement la réponse » — une exigence qu'on ne tient pas en
+    // l'affirmant. La durée est journalisée à côté de celle de la collecte,
+    // pour que les deux se comparent au même endroit (C10).
+    const carbonStartedAt = performance.now();
+    const priced = this.priceItineraries(itineraries, sortedBy);
+    const carbonElapsedMs = performance.now() - carbonStartedAt;
+
+    this.logger.log(
+      `Fusion : ${priced.length} itinéraire(s) retenu(s), triés par ${sortedBy} ` +
+        `(${3 - collected.failures.length}/3 source(s) disponible(s)) — ` +
+        `carbone ${carbonElapsedMs.toFixed(1)} ms sur ${collected.elapsedMs} ms de collecte.`,
+    );
+
+    return {
+      itineraries: priced,
+      sortedBy,
+      sources: this.collector.toAvailability(collected),
+      searchHistoryId: await recording,
+    };
+  }
+
+  /**
+   * Étape 6 puis 16-17 du flux : valorise chaque itinéraire au barème du
+   * Service Carbone, puis **reclasse** la liste sur les valeurs ainsi publiées
+   * (UF-502).
+   *
+   * ## Pourquoi le service, et pas la fusion
+   *
+   * La fusion a déjà estimé une empreinte pour classer ses candidats. On la
+   * fait confirmer plutôt que de la croire sur parole : le Service Carbone est
+   * l'autorité sur le barème, et le jour où celui-ci s'affinera (taux
+   * d'occupation réels, mix électrique, VAE), ce seul appel suffira à propager
+   * le changement jusqu'à la réponse.
+   *
+   * Depuis UF-501 il rend aussi le **détail** par segment. Les `carbonGrams`
+   * des segments sont donc réécrits avec ses lignes plutôt que laissés tels que
+   * la fusion les a posés : deux chiffres pour la même chose à l'écran, l'un du
+   * service et l'autre de la fusion, finiraient un jour par ne plus coïncider.
+   *
+   * ## Pourquoi reclasser
+   *
+   * `sortedBy` est une **promesse faite au client** : il annonce « classés par
+   * empreinte » sans revérifier. Or l'ordre venait jusqu'ici de l'estimation de
+   * la fusion, tandis que les nombres affichés viennent du service. Les deux
+   * coïncident aujourd'hui — même barème, même fonction — mais c'est
+   * précisément ce qu'on vient de se réserver le droit de changer. Le jour où
+   * le barème s'affinera d'un côté seulement, la liste resterait étiquetée
+   * `carbonAsc` en étant visiblement mal triée, et le défaut se verrait
+   * d'abord à l'écran de l'usager.
+   *
+   * Reclasser ici referme l'écart par construction : l'ordre publié est trié
+   * sur les valeurs publiées, quelles qu'elles deviennent. Le coût est nul à
+   * l'échelle en jeu — au plus cinq itinéraires (`MAX_ITINERARIES`).
+   *
+   * Le comparateur est celui de la fusion, importé et non réécrit : deux règles
+   * de départage divergentes feraient changer l'ordre pour une raison
+   * étrangère au carbone.
+   *
+   * @param itineraries Propositions issues de la fusion, dans son propre ordre
+   * @param sortedBy Clé de tri déduite du profil, celle que la réponse annonce
+   * @returns Les mêmes propositions, valorisées et classées sur ces valeurs
+   */
+  private priceItineraries(
+    itineraries: readonly ItineraryDto[],
+    sortedBy: ItinerarySortKey,
+  ): ItineraryDto[] {
     const priced: ItineraryDto[] = itineraries.map((itinerary) => {
       const footprint = this.carbon.computeFootprint(itinerary.segments);
 
@@ -130,17 +189,7 @@ export class RoutesService {
       };
     });
 
-    this.logger.log(
-      `Fusion : ${priced.length} itinéraire(s) retenu(s), triés par ${sortedBy} ` +
-        `(${3 - collected.failures.length}/3 source(s) disponible(s)).`,
-    );
-
-    return {
-      itineraries: priced,
-      sortedBy,
-      sources: this.collector.toAvailability(collected),
-      searchHistoryId: await recording,
-    };
+    return priced.sort(comparatorFor(sortedBy));
   }
 
   /**
