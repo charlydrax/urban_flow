@@ -45,6 +45,18 @@ export class RouteSegmentDto implements RouteSegment {
   line?: string;
 
   /**
+   * Départ effectif du segment (UF-404), présent seulement quand la source le
+   * connaît : un horaire de bus est une donnée GTFS, pas un calcul. Les
+   * tronçons vélo et les marches synthétisés n'en ont pas.
+   */
+  @ApiPropertyOptional({ format: 'date-time', example: '2026-08-28T09:47:00+02:00' })
+  departureAt?: string;
+
+  /** Arrivée effective du segment — mêmes règles que `departureAt`. */
+  @ApiPropertyOptional({ format: 'date-time', example: '2026-08-28T09:55:00+02:00' })
+  arrivalAt?: string;
+
+  /**
    * Tracé GeoJSON du **segment seul**, en `[lng, lat]` (UF-403).
    *
    * C'est lui qui permet à la carte de dessiner une couleur et un style de
@@ -93,6 +105,21 @@ export class ItineraryDto implements Itinerary {
   /** Segments ordonnés composant l'itinéraire. */
   @ApiProperty({ type: [RouteSegmentDto] })
   segments!: RouteSegmentDto[];
+
+  /**
+   * Heure de départ porte-à-porte (UF-404) — affichée par le panneau de
+   * résultats, où deux options de même durée doivent rester distinguables.
+   *
+   * Absente quand aucun segment n'est horodaté (itinéraire tout-vélo) : il n'y
+   * a alors qu'une durée à annoncer. La fenêtre est ancrée sur les segments que
+   * la source date, les autres étant décalés de leur propre durée.
+   */
+  @ApiPropertyOptional({ format: 'date-time', example: '2026-08-28T09:45:00+02:00' })
+  departureAt?: string;
+
+  /** Heure d'arrivée porte-à-porte — mêmes règles que `departureAt`. */
+  @ApiPropertyOptional({ format: 'date-time', example: '2026-08-28T10:03:00+02:00' })
+  arrivalAt?: string;
 
   /**
    * Tracé GeoJSON LineString [lng, lat] pour l'affichage MapLibre (format standard — C9).

@@ -1,8 +1,10 @@
 # Module `planner` — Planificateur d'itinéraires (F2)
 
 Écran d'accueil de la PWA : saisie du trajet, géolocalisation consentie, calcul
-des itinéraires et tracé sur la carte. Depuis UF-403, le module couvre le flux de
-référence de bout en bout — de la saisie (étape 1) à l'affichage carte (étape 9).
+des itinéraires, tracé sur la carte et panneau de résultats. Depuis UF-403 le
+module couvre le flux de référence de bout en bout — de la saisie (étape 1) à
+l'affichage carte (étape 9) ; UF-404 y ajoute la liste qui permet de **comparer**
+les options avant d'en choisir une.
 
 Maquettes : Figma « 02 · Maquettes mobile → 1. ACCUEIL » et « 4. PLANIFICATEUR
 F2 », « 03 · Maquettes desktop → DESKTOP 2 : PLANIFICATEUR ».
@@ -14,7 +16,8 @@ F2 », « 03 · Maquettes desktop → DESKTOP 2 : PLANIFICATEUR ».
 | `planner-screen.tsx`              | Frontière client : partage position, itinéraires et historique           |
 | `planner-form.tsx`                | État du trajet, géolocalisation → départ, inversion, soumission          |
 | `use-route-plan.ts`               | Appel `POST /routes/plan`, état de la recherche, sélection (UF-403)      |
-| `itinerary-switcher.tsx`          | Choix de l'itinéraire tracé — groupe radio minimal (UF-403)              |
+| `itinerary-list.tsx`              | Panneau de résultats — groupe radio de cartes comparables (UF-404)       |
+| `itinerary-card.tsx`              | Carte d'un itinéraire : durée, séquence de modes, CO₂, horaires (UF-404) |
 | `trip-fields.tsx`                 | Carte départ/arrivée de la maquette + bouton d'inversion                 |
 | `address-autocomplete.tsx`        | Champ d'adresse au motif ARIA « combobox » + liste de suggestions        |
 | `use-address-search.ts`           | Débounce 300 ms, annulation de la requête précédente, états de recherche |
@@ -22,6 +25,7 @@ F2 », « 03 · Maquettes desktop → DESKTOP 2 : PLANIFICATEUR ».
 | `use-user-location.ts`            | Machine à états du parcours (consentement → permission → position)       |
 | `recent-searches.tsx`             | Trajets récents recliquables affichés sous les champs (UF-204)           |
 | `use-search-history.ts`           | Lecture unique de l'historique, entretenue localement ensuite (UF-204)   |
+| `../../lib/itinerary-cards.ts`    | Itinéraire → séquence de modes, horaires, phrase lue (pur, testé)        |
 | `../../lib/route-map-layers.ts`   | Itinéraires → GeoJSON, emprise, repères, légende (pur, testé)            |
 | `../../lib/geocoding.ts`          | Appels BAN normalisés : recherche, géocodage inverse (pur, testé)        |
 | `../../lib/geolocation.ts`        | Appel `navigator.geolocation` normalisé + formats (pur, testé)           |
@@ -327,6 +331,13 @@ veille vu à 00h30, c'est « hier »), ainsi que le repli d'un horodatage futur.
 `route-map-layers.test.ts` (UF-403) couvre la traduction des itinéraires en
 données de carte : voir `components/map/README.md`.
 
+`itinerary-cards.test.ts` (UF-404) fige la séquence de modes (fusion des segments
+consécutifs de même ligne, deux lignes distinctes qui restent distinctes), les
+horaires (heure de quai quel que soit le fuseau du poste, `null` plutôt qu'«
+Invalid Date ») et la phrase lue aux technologies d'assistance. Il vérifie aussi
+que les sept modes de l'énumération partagée ont un pictogramme : en ajouter un
+sans icône afficherait `undefined` dans la séquence.
+
 Les tests de composants (jsdom + Testing Library) restent à ajouter. La logique
 d'UF-403 a été poussée dans un module **pur** (`lib/route-map-layers.ts`)
 précisément pour être couverte sans eux ; ce qui reste dans les composants et les
@@ -406,15 +417,14 @@ Rejouer ces décisions côté client garantirait qu'un jour les deux divergent. 
 sélecteur se contente donc d'**annoncer** le classement appliqué (« classés par
 empreinte carbone croissante »), sans le déduire en comparant les valeurs.
 
-### Périmètre : ce qui reste à UF-404 et UF-405
+### Périmètre : ce qui restait à UF-404 et UF-405
 
-`itinerary-switcher.tsx` n'est **pas** le panneau de résultats de la maquette
-(cartes détaillées, pastilles de modes, prix, points gagnés, badge
-« Recommandé IA »). C'est l'objet d'UF-404. Ce ticket livre le strict nécessaire
-pour que le tracé soit _pilotable_ : un groupe de boutons radio portant durée,
-CO₂ et résumé des modes — la recette 4 exige de pouvoir changer d'itinéraire.
+`itinerary-switcher.tsx` n'était **pas** le panneau de résultats de la maquette :
+UF-403 n'en livrait que le strict nécessaire pour rendre le tracé _pilotable_.
+Il a été **remplacé** par `itinerary-list.tsx` + `itinerary-card.tsx` (UF-404,
+section suivante).
 
-De même, le bandeau « mode dégradé » alimenté par `sources[]` relève d'UF-405 :
+Le bandeau « mode dégradé » alimenté par `sources[]` relève toujours d'UF-405 :
 `useRoutePlan` expose déjà la donnée, personne ne l'affiche encore.
 
 ### Accessibilité (C7)
@@ -433,3 +443,107 @@ De même, le bandeau « mode dégradé » alimenté par `sources[]` relève d'UF
 - **L'échec réseau est en `role="alert"`**, avec un message générique : le statut
   HTTP et le détail renvoyé par l'API restent côté serveur (C11).
 - Le tracé lui-même : voir `components/map/README.md`.
+
+## Panneau de résultats (UF-404) — C2 / C7 / C9
+
+Une carte par itinéraire, pour **comparer** avant de choisir. C'est la maquette
+« 5. RÉSULTATS F2+F3 ».
+
+```
+┌──────────────────────────────────────────────┐
+│ ● [Meilleur choix · le plus rapide]   22 min │  ← la durée d'abord : c'est
+│                                              │    ce qu'on compare
+│ 🚶 3 › 🚲 11 › 🚌 C3 6 › 🚶 2                │  ← la séquence de modes
+│                                              │
+│ 🌱 240 g CO₂   ♿ Accessible   09:41 → 10:03 │  ← les infos secondaires
+└──────────────────────────────────────────────┘
+```
+
+### Le lien avec la carte (recette 2)
+
+Sélectionner une carte remonte l'identifiant à `PlannerScreen`, qui le passe à
+`LazyMap` : `use-route-overlay` repousse alors **la même** source GeoJSON avec un
+`selected` différent, met le tracé retenu en avant, estompe les autres et recadre
+dessus. La liste ne touche jamais MapLibre — le lien passe par l'état partagé, pas
+par un couplage au moteur de rendu.
+
+Le lien est aussi **visuel** : chaque pastille de mode porte la couleur de son
+tracé (`MODE_TRACK_STYLES`, UF-403). C'est ce qui fait reconnaître, dans le trait
+bleu tireté dessiné à droite, le « 🚌 » lu à gauche. Deux nuances différentes pour
+un même bus rompraient le lien que la recette demande d'établir.
+
+### Ce que la carte affiche, et pourquoi dans cet ordre
+
+| Élément                  | Pourquoi il est là                                                             |
+| ------------------------ | ------------------------------------------------------------------------------ |
+| Durée, en gras à droite  | c'est le critère que l'œil balaye verticalement d'une carte à l'autre          |
+| Séquence de modes        | « Marche + Bus » de 22 min peut cacher 18 min de marche : les durées le disent |
+| Badge « Meilleur choix » | dit **pourquoi** le premier est premier, d'après `sortedBy` du serveur         |
+| Badge CO₂                | l'emplacement de la maquette, rempli (cf. plus bas)                            |
+| Mention PMR              | `Itinerary.accessible` — une contrainte, pas un agrément (C12)                 |
+| Créneau horaire          | deux options de même durée ne partent pas à la même heure                      |
+
+Les segments **consécutifs de même mode et même ligne** sont fusionnés : un métro
+B repris après un changement de quai afficherait sinon deux pastilles identiques
+côte à côte, et le lecteur y verrait deux trajets là où il n'y en a qu'un. Deux
+lignes de bus différentes restent, elles, deux pastilles — c'est bien un
+changement de véhicule.
+
+### Le badge CO₂ est rempli, pas réservé
+
+Le ticket demandait de « réserver visuellement l'emplacement du badge CO₂ (rempli
+au Sprint 5) ». La donnée existe **depuis UF-401** : `carbonGrams` est calculé par
+le Service Carbone et publié dans la réponse. Une pastille vide n'aurait rien
+appris à personne, et sa place dans la mise en page étant celle de la maquette,
+la remplir plus tard n'aurait rien déplacé. L'emplacement est donc là **et** il
+porte sa valeur.
+
+### Écarts assumés à la maquette
+
+Trois éléments de la maquette sont **absents** plutôt qu'inventés :
+
+| Élément maquette    | Pourquoi il n'est pas là                                                                                                 |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| « ★ Recommandé IA » | aucun modèle ne classe les options : c'est le tri du profil (F1). Le badge dit donc la vraie raison, tirée de `sortedBy` |
+| « · 1,90 € »        | aucune source ne publie de tarif à ce stade (F3)                                                                         |
+| « ⭐ +45 pts »      | la gamification est hors périmètre du prototype (CLAUDE.md §3)                                                           |
+
+Le tri, lui, suit `sortedBy` **publié par le serveur** et non « par durée par
+défaut » comme l'énonçait le ticket : depuis UF-401 c'est la priorité du profil
+qui décide, et le client se contente d'annoncer laquelle a été appliquée. Rejouer
+la décision côté client garantirait qu'un jour les deux divergent.
+
+### Les horaires viennent de la source, jamais d'un calcul (C9)
+
+`Itinerary.departureAt` / `arrivalAt` ont été **ajoutés au contrat** par ce ticket
+(voir `apps/api/src/modules/routes/README.md`, « Horaires publiés »). Trois cas :
+
+- **trajet TC** — les horaires du moteur GTFS, republiés tels quels ;
+- **rabattement à vélo + TC** — la fenêtre est ancrée sur les segments datés, les
+  voisins étant décalés de leur propre durée ;
+- **tout-vélo** — aucun horaire : cet itinéraire part quand l'usager décide. La
+  carte n'affiche alors que sa durée.
+
+L'heure est rendue dans le fuseau du **réseau** (Europe/Paris), pas dans celui du
+navigateur : un horaire GTFS est une heure de quai, et un poste resté à l'heure
+de Londres afficherait sinon 08:41 pour un bus qui passe à 09:41.
+
+### Accessibilité du panneau (C7)
+
+- **Le groupe radio est conservé** depuis UF-403, et il compte davantage
+  maintenant : avec quatre cartes de six lignes chacune, entrer et sortir du
+  groupe au `Tab` plutôt que de le traverser option par option n'est plus une
+  subtilité (WCAG 4.1.2).
+- **Toute la carte est cliquable** — c'est un `<label>`, donc la cible fait la
+  taille du bloc et non celle d'un disque de 16 px (WCAG 2.5.5).
+- **Une phrase, pas des fragments** : `describeItinerary` pose sur le radio un
+  `aria-label` complet (« Option 1 sur 3. 22 minutes. Marche 3 min, puis Bus C3
+  6 min… »). Sans lui, un lecteur d'écran énoncerait « 22 min, 3, 11, 6 » — les
+  pictogrammes et les couleurs ne portent aucune information pour lui (WCAG
+  1.1.1). Le reste de la carte est donc en `aria-hidden` : le redire pastille par
+  pastille rallongerait l'écoute sans rien apprendre.
+- **L'état retenu se voit à la bordure épaissie et au fond teinté**, pas
+  seulement à la couleur (WCAG 1.4.1).
+- **Mobile-first (C2)** : les cartes s'empilent sur toute la largeur, sans
+  dépendre d'un point de rupture ; la séquence de modes passe à la ligne au lieu
+  de déborder. À partir de `md`, seule la largeur du conteneur change.

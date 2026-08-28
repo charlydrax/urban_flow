@@ -4,7 +4,7 @@ import { LazyMap } from '../../components/map/lazy-map';
 import { toLngLat } from '../../lib/geolocation';
 import { DEFAULT_ZOOM, LYON_CENTER } from '../../lib/map-style';
 import { useSession } from '../auth/session-provider';
-import { ItinerarySwitcher } from './itinerary-switcher';
+import { ItineraryList } from './itinerary-list';
 import { PlannerForm } from './planner-form';
 import { useRoutePlan } from './use-route-plan';
 import { useSearchHistory } from './use-search-history';
@@ -23,7 +23,7 @@ const LOCATED_ZOOM = 15;
  * | Donnée                  | Producteur         | Consommateurs                                 |
  * | ----------------------- | ------------------ | --------------------------------------------- |
  * | Position (UF-202)       | `useUserLocation`  | formulaire (départ), carte (marqueur, centre) |
- * | Itinéraires (UF-403)    | `useRoutePlan`     | carte (tracés), sélecteur (choix)             |
+ * | Itinéraires (UF-403)    | `useRoutePlan`     | carte (tracés), panneau de résultats (choix)  |
  * | Trajets récents (UF-204)| `useSearchHistory` | formulaire (rappels), résultat de la recherche |
  *
  * Elles vivent donc au plus petit ancêtre commun — pas de contexte global pour
@@ -48,8 +48,8 @@ const LOCATED_ZOOM = 15;
  *                         │
  *          ┌──────────────┼───────────────────────┐
  *          ▼              ▼                       ▼
- *    tracés + repères  sélecteur          trajet récent remonté
- *    + cadrage carte   (recette 4)        en tête, sans requête
+ *    tracés + repères  panneau de         trajet récent remonté
+ *    + cadrage carte   résultats (UF-404) en tête, sans requête
  * ```
  *
  * ## Repli sur Lyon
@@ -102,7 +102,7 @@ export function PlannerScreen() {
           </p>
         )}
 
-        <ItinerarySwitcher
+        <ItineraryList
           itineraries={routePlan.itineraries}
           selectedId={routePlan.selectedId}
           sortedBy={routePlan.sortedBy}
