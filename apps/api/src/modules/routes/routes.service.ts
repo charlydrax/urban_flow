@@ -110,10 +110,25 @@ export class RoutesService {
     // ses candidats ; on la lui fait confirmer plutôt que de la croire sur
     // parole — le jour où le barème s'affinera (facteurs ADEME détaillés), ce
     // seul appel suffira à propager le changement.
-    const priced: ItineraryDto[] = itineraries.map((itinerary) => ({
-      ...itinerary,
-      carbonGrams: this.carbon.computeFootprint(itinerary.segments),
-    }));
+    //
+    // Depuis UF-501, ce même appel rend le **détail** par segment. Les
+    // `carbonGrams` des segments sont réécrits avec ses lignes plutôt que
+    // laissés tels que la fusion les a posés : deux chiffres pour la même chose
+    // à l'écran, l'un du service et l'autre de la fusion, finiraient un jour par
+    // ne plus coïncider — et c'est le service qui a raison, par construction.
+    const priced: ItineraryDto[] = itineraries.map((itinerary) => {
+      const footprint = this.carbon.computeFootprint(itinerary.segments);
+
+      return {
+        ...itinerary,
+        carbonGrams: footprint.totalGrams,
+        carbon: footprint,
+        segments: itinerary.segments.map((segment, index) => ({
+          ...segment,
+          carbonGrams: footprint.segments[index]?.grams ?? segment.carbonGrams,
+        })),
+      };
+    });
 
     this.logger.log(
       `Fusion : ${priced.length} itinéraire(s) retenu(s), triés par ${sortedBy} ` +

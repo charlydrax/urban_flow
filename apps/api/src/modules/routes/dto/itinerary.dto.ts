@@ -1,5 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import type {
+  CarbonFootprint,
+  CarbonSegmentFootprint,
   Itinerary,
   ItinerarySortKey,
   PlanRoutesResponse,
@@ -76,6 +78,62 @@ export class RouteSegmentDto implements RouteSegment {
   geometry?: { type: 'LineString'; coordinates: [number, number][] };
 }
 
+/**
+ * Une ligne du détail carbone : ce qu'un segment a coûté, et pourquoi (UF-501).
+ *
+ * Le facteur voyage avec le résultat : c'est lui qui rend le gramme
+ * vérifiable — `grams = factorGramsPerKm × distanceMeters / 1000` — au lieu
+ * d'un chiffre que le client devrait croire sur parole.
+ */
+export class CarbonSegmentFootprintDto implements CarbonSegmentFootprint {
+  /** Mode du segment, qui détermine à lui seul le facteur appliqué. */
+  @ApiProperty({ enum: TransportMode, example: TransportMode.BUS })
+  mode!: TransportMode;
+
+  /** Distance facturée sur ce segment, en mètres. */
+  @ApiProperty({ example: 4000 })
+  distanceMeters!: number;
+
+  /** Facteur du barème ADEME appliqué, en g CO₂e par passager et par kilomètre. */
+  @ApiProperty({ example: 95 })
+  factorGramsPerKm!: number;
+
+  /** Empreinte du segment, en grammes de CO₂e (arrondie au gramme). */
+  @ApiProperty({ example: 380 })
+  grams!: number;
+}
+
+/**
+ * Empreinte carbone détaillée d'un itinéraire (UF-501, étapes 16-17 du flux).
+ *
+ * Calculée par le Service Carbone, seule autorité sur le barème : les valeurs
+ * sont **recalculées** à partir du mode et de la distance de chaque segment, et
+ * jamais reprises de ce que le segment annonce.
+ */
+export class CarbonFootprintDto implements CarbonFootprint {
+  /** Total en grammes de CO₂e — somme exacte des lignes de `segments`. */
+  @ApiProperty({ example: 392 })
+  totalGrams!: number;
+
+  /** Une ligne par segment, dans l'ordre de `ItineraryDto.segments`. */
+  @ApiProperty({ type: [CarbonSegmentFootprintDto] })
+  segments!: CarbonSegmentFootprintDto[];
+
+  /**
+   * Ce que la même distance aurait coûté en voiture particulière, seul à bord.
+   * Étalon de comparaison, pas un mode que le planificateur propose.
+   */
+  @ApiProperty({
+    example: 1177,
+    description: 'Référence « voiture solo » (≈218 g CO₂e/km, Base Empreinte ADEME).',
+  })
+  carEquivalentGrams!: number;
+
+  /** CO₂ évité par rapport à cette référence, en grammes — jamais négatif. */
+  @ApiProperty({ example: 785 })
+  avoidedGrams!: number;
+}
+
 /** Itinéraire multimodal complet, prêt à être affiché et trié par le client. */
 export class ItineraryDto implements Itinerary {
   /** Identifiant de l'itinéraire dans la réponse (référence pour l'historique). */
@@ -97,6 +155,18 @@ export class ItineraryDto implements Itinerary {
   /** Empreinte carbone totale en grammes de CO₂ — clé du tri côté client (étape 9 du flux). */
   @ApiProperty({ example: 14 })
   carbonGrams!: number;
+
+  /**
+   * Détail du calcul carbone (UF-501) : ligne par segment et comparaison
+   * voiture. Toujours présent dans les réponses du planificateur — l'optionnel
+   * du contrat partagé couvre les itinéraires servis depuis un cache antérieur
+   * à ce ticket, pas ce que cet endpoint produit.
+   *
+   * `carbonGrams === carbon.totalGrams` : les deux sortent du même appel, l'un
+   * pour trier, l'autre pour justifier.
+   */
+  @ApiPropertyOptional({ type: CarbonFootprintDto })
+  carbon?: CarbonFootprintDto;
 
   /** Itinéraire accessible PMR (norme transport — C12). */
   @ApiProperty({ example: true })

@@ -9,13 +9,32 @@ import { TransportMode } from '../../common/enums/transport-mode.enum';
  * planificateur ait à injecter un service pour une multiplication, et permet de
  * tester le barème sans conteneur d'injection.
  *
- * ## Unité et périmètre
+ * ## Source
  *
- * Grammes de CO₂ équivalent **par passager et par kilomètre** (g CO₂e/p.km),
- * ordre de grandeur de la Base Empreinte de l'ADEME pour un réseau urbain
- * français. Périmètre « usage + amont énergie » : la fabrication du véhicule et
- * l'infrastructure ne sont pas comptées, sauf pour les mobilités partagées où
- * elles dominent le bilan (voir `SCOOTER`).
+ * **Base Empreinte® de l'ADEME** (anciennement Base Carbone®), poste
+ * « Transport de personnes », ordres de grandeur pour un réseau urbain français
+ * — https://base-empreinte.ademe.fr. Les valeurs ci-dessous sont des arrondis
+ * de ces ordres de grandeur, pas des extractions ligne à ligne de la base :
+ * elles sont ici pour **classer** les modes, pas pour produire un bilan
+ * réglementaire (voir « Ce que le barème n'est pas », plus bas).
+ *
+ * ## Méthodologie
+ *
+ * - **Unité** : grammes de CO₂ équivalent **par passager et par kilomètre**
+ *   (g CO₂e/p.km). Le passager, et non le véhicule : c'est la seule unité qui
+ *   permette de comparer un bus rempli à une voiture avec un conducteur seul.
+ * - **Périmètre** : « usage + amont énergie » (combustion ou production
+ *   d'électricité, plus l'extraction et le raffinage du carburant). La
+ *   fabrication du véhicule et l'infrastructure sont **hors périmètre**, sauf
+ *   pour les mobilités partagées où elles dominent le bilan (voir `SCOOTER`).
+ * - **Taux d'occupation** : moyennes de réseau pour les transports en commun,
+ *   2,5 personnes pour le covoiturage, 1 pour la référence voiture.
+ * - **Mix électrique** : mix français moyen, très décarboné — c'est lui qui
+ *   place tram et métro juste au-dessus du vélo.
+ * - **Calcul** : `grammes = facteur × distance_km`, arrondi au gramme
+ *   ({@link segmentCarbonGrams}). Aucune pondération de durée, de dénivelé ni
+ *   de charge instantanée : la distance est la seule variable dont le
+ *   planificateur dispose pour tous les modes.
  *
  * ⚠️ **Barème provisoire, assumé comme tel.** Il donne le bon classement entre
  * modes — c'est ce dont le tri par empreinte croissante a besoin — mais pas une
@@ -57,12 +76,29 @@ export const GRAMS_PER_PASSENGER_KM: Readonly<Record<TransportMode, number>> = {
    */
   [TransportMode.METRO]: 4,
   /**
-   * Covoiturage : voiture particulière moyenne rapportée à un remplissage de
-   * deux personnes et demie. Reste hors périmètre du MVP, valorisé ici pour que
-   * le barème soit complet si le mode est activé.
+   * Covoiturage : la référence {@link CAR_REFERENCE_GRAMS_PER_KM} rapportée à
+   * un remplissage de deux personnes et demie (218 / 2,5 ≈ 88). Le mode reste
+   * hors périmètre du MVP ; il est valorisé ici pour que le barème soit complet
+   * si le planificateur l'active.
    */
   [TransportMode.CARPOOL]: 88,
 };
+
+/**
+ * Voiture particulière moyenne, **seul à bord** — étalon de comparaison, pas un
+ * mode proposé (UF-501).
+ *
+ * Volontairement **hors** de {@link GRAMS_PER_PASSENGER_KM} : ce tableau est
+ * indexé par `TransportMode`, et y ajouter la voiture solo obligerait à créer un
+ * mode que ni la fusion, ni la carte, ni le formulaire ne savent produire. Le
+ * planificateur d'UrbanFlow ne propose pas de conduire seul ; il montre ce que
+ * cela aurait coûté.
+ *
+ * ≈ 218 g CO₂e/km pour le parc français moyen (Base Empreinte ADEME, périmètre
+ * usage + amont énergie). Un seul occupant, donc autant par passager que par
+ * véhicule — et c'est bien le trajet que l'usager a évité en ouvrant l'app.
+ */
+export const CAR_REFERENCE_GRAMS_PER_KM = 218;
 
 /**
  * Empreinte d'un segment, à partir de son mode et de sa distance.
@@ -77,4 +113,19 @@ export const GRAMS_PER_PASSENGER_KM: Readonly<Record<TransportMode, number>> = {
 export function segmentCarbonGrams(mode: TransportMode, distanceMeters: number): number {
   if (!Number.isFinite(distanceMeters) || distanceMeters <= 0) return 0;
   return Math.round((GRAMS_PER_PASSENGER_KM[mode] * distanceMeters) / 1000);
+}
+
+/**
+ * Ce que `distanceMeters` auraient coûté en voiture particulière, seul à bord.
+ *
+ * Même garde et même arrondi que {@link segmentCarbonGrams} : la référence et
+ * l'itinéraire réel doivent être calculés de la même façon, sinon la
+ * comparaison publiée compare deux méthodes autant que deux trajets.
+ *
+ * @param distanceMeters Distance totale du trajet, en mètres
+ * @returns Empreinte de référence en grammes de CO₂e (jamais négative)
+ */
+export function carReferenceGrams(distanceMeters: number): number {
+  if (!Number.isFinite(distanceMeters) || distanceMeters <= 0) return 0;
+  return Math.round((CAR_REFERENCE_GRAMS_PER_KM * distanceMeters) / 1000);
 }

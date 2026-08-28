@@ -18,6 +18,7 @@ F2 », « 03 · Maquettes desktop → DESKTOP 2 : PLANIFICATEUR ».
 | `use-route-plan.ts`               | Appel `POST /routes/plan`, état de la recherche, sélection (UF-403)      |
 | `itinerary-list.tsx`              | Panneau de résultats — groupe radio de cartes comparables (UF-404)       |
 | `itinerary-card.tsx`              | Carte d'un itinéraire : durée, séquence de modes, CO₂, horaires (UF-404) |
+| `carbon-breakdown.tsx`            | Détail CO₂ de l'option retenue : segment, facteur, comparaison (UF-501)  |
 | `itinerary-skeleton.tsx`          | Esquisse du panneau pendant le calcul — réserve la place (UF-405)        |
 | `plan-notice.tsx`                 | Message d'état : vide, panne, session expirée, mode dégradé (UF-405)     |
 | `trip-fields.tsx`                 | Carte départ/arrivée de la maquette + bouton d'inversion                 |
@@ -28,6 +29,7 @@ F2 », « 03 · Maquettes desktop → DESKTOP 2 : PLANIFICATEUR ».
 | `recent-searches.tsx`             | Trajets récents recliquables affichés sous les champs (UF-204)           |
 | `use-search-history.ts`           | Lecture unique de l'historique, entretenue localement ensuite (UF-204)   |
 | `../../lib/itinerary-cards.ts`    | Itinéraire → séquence de modes, horaires, phrase lue (pur, testé)        |
+| `../../lib/carbon-breakdown.ts`   | Détail carbone publié → lignes, barres, phrase lue (pur, testé)          |
 | `../../lib/plan-feedback.ts`      | Erreur ou état des sources → message et rôle ARIA (pur, testé)           |
 | `../../lib/route-map-layers.ts`   | Itinéraires → GeoJSON, emprise, repères, légende (pur, testé)            |
 | `../../lib/geocoding.ts`          | Appels BAN normalisés : recherche, géocodage inverse (pur, testé)        |
@@ -341,6 +343,13 @@ Invalid Date ») et la phrase lue aux technologies d'assistance. Il vérifie aus
 que les sept modes de l'énumération partagée ont un pictogramme : en ajouter un
 sans icône afficherait `undefined` dans la séquence.
 
+`carbon-breakdown.test.ts` (UF-501) vérifie surtout ce que le module **ne fait
+pas** : aucun gramme n'y est recalculé. Un barème modifié côté serveur s'affiche
+tel quel, sans redéploiement du front. Il couvre aussi l'appariement positionnel
+avec les segments (c'est de là que viennent « Part-Dieu → Saxe » et « Bus C3 »),
+la division par un total nul d'un itinéraire tout-marche, et le silence complet
+quand l'itinéraire ne porte pas de détail.
+
 Les tests de composants (jsdom + Testing Library) restent à ajouter. La logique
 d'UF-403 a été poussée dans un module **pur** (`lib/route-map-layers.ts`)
 précisément pour être couverte sans eux ; ce qui reste dans les composants et les
@@ -651,3 +660,63 @@ service. Le bandeau de mode dégradé nomme les sources absentes en français
 (« vélos et trottinettes en libre-service »), pas leur protocole : il s'adresse à
 un usager, pas à un intégrateur. Deux tests de `plan-feedback.test.ts` verrouillent
 cette règle.
+
+## Détail de l'empreinte carbone (UF-501) — C2 / C5 / C7
+
+Le panneau de résultats affichait « 🌱 240 g CO₂ » sans dire d'où venait le
+chiffre. Depuis UF-501, l'API publie le détail (`Itinerary.carbon`) et l'écran
+l'ouvre sous l'option retenue :
+
+```
+▸ D'où vient cette empreinte ?                       392 g CO₂
+  🚶 Marche                                              0 g CO₂
+  ▏
+  Part-Dieu → Saxe                              400 m · 0 g/km
+
+  🚌 Bus C3                                            380 g CO₂
+  ██████████████████████████████████████████████
+  Saxe → Bellecour                              4 km · 95 g/km
+
+  🚗 Seul en voiture : 1,0 kg CO₂ — vous en évitez 632 g (62 %).
+  Facteurs : ordres de grandeur de la Base Empreinte de l'ADEME.
+```
+
+### Le facteur est affiché
+
+« 95 g/km » à côté de « 380 g CO₂ » : sur quatre kilomètres, le chiffre se refait
+de tête. Sans lui, l'empreinte est à croire sur parole — et c'est la promesse
+d'un calcul carbone transparent qui tombe. La source du barème est citée sous le
+tableau, parce qu'un barème carbone non sourcé n'engage personne, et que c'est
+sur lui que l'app demande à l'usager de changer ses habitudes.
+
+### Sous la liste, pas dans la carte
+
+Une carte de résultat est un `<label>` de bouton radio : y imbriquer un
+`<summary>` cliquable ferait basculer la sélection à chaque ouverture du détail.
+Le panneau vit donc **sous** la liste et suit la sélection — ce qui a un second
+mérite, un seul détail ouvert à la fois, celui qui intéresse.
+
+Il est **replié par défaut** : le panneau sert à comparer des options, le détail
+d'une seule ne doit pas repousser les autres hors de l'écran (C2). Un `<details>`
+natif porte cet état sans une ligne de JavaScript et donne gratuitement
+l'ouverture au clavier et l'annonce « développé / réduit ».
+
+### Rien n'est recalculé côté client (C5)
+
+Tous les grammes viennent de la réponse. Le seul calcul local est le
+**pourcentage de largeur** des barres, qui ne sort jamais de l'écran. Refaire une
+multiplication que l'API vient de faire garantirait qu'un jour les deux
+divergeront, et ferait payer au navigateur un travail déjà fait.
+
+### Accessibilité (C7)
+
+Le tableau visuel est intégralement en `aria-hidden` et doublé d'une phrase en
+`sr-only` : « Détail de l'empreinte : 392 g CO₂ au total. Marche, 400 m à 0 g/km,
+0 g CO₂ ; Bus C3, 4 km à 95 g/km, 380 g CO₂. Le même trajet seul en voiture
+aurait émis 1,0 kg CO₂, soit 632 g évités. » Énoncé cellule par cellule, le
+tableau donnerait une suite de nombres sans verbe (WCAG 1.1.1).
+
+Les couleurs de modes sont portées par des **pastilles** et par les barres, pas
+par du texte : elles sont validées au seuil des objets graphiques (3:1), pas à
+celui du texte courant — la même règle que la carte de résultat. Elles restent
+redondantes : le pictogramme et le libellé écrit disent déjà le mode.

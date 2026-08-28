@@ -10,6 +10,7 @@ import {
   describeEmptyResult,
 } from '../../lib/plan-feedback';
 import { useSession } from '../auth/session-provider';
+import { CarbonBreakdown } from './carbon-breakdown';
 import { ItineraryList } from './itinerary-list';
 import { ItinerarySkeleton } from './itinerary-skeleton';
 import { PlanNotice } from './plan-notice';
@@ -90,6 +91,12 @@ export function PlannerScreen() {
   const emptyNotice = isEmptyResult ? describeEmptyResult(routePlan.sources) : null;
   const degraded = routePlan.status === 'ready' ? describeDegradedSources(routePlan.sources) : null;
 
+  // Le détail carbone (UF-501) porte sur l'option retenue, et sur elle seule :
+  // déplier les quatre en même temps repousserait la comparaison hors de
+  // l'écran, alors que c'est elle que le panneau sert (C2).
+  const selectedItinerary =
+    routePlan.itineraries.find((itinerary) => itinerary.id === routePlan.selectedId) ?? null;
+
   return (
     <div className="grid gap-6 md:grid-cols-[minmax(0,360px)_1fr]">
       <div className="flex flex-col gap-4">
@@ -143,12 +150,21 @@ export function PlannerScreen() {
         {isSearching ? (
           <ItinerarySkeleton />
         ) : (
-          <ItineraryList
-            itineraries={routePlan.itineraries}
-            selectedId={routePlan.selectedId}
-            sortedBy={routePlan.sortedBy}
-            onSelect={routePlan.select}
-          />
+          <>
+            <ItineraryList
+              itineraries={routePlan.itineraries}
+              selectedId={routePlan.selectedId}
+              sortedBy={routePlan.sortedBy}
+              onSelect={routePlan.select}
+            />
+
+            {/*
+              Sous la liste et non dans la carte : une carte de résultat est un
+              `<label>` de bouton radio, et y imbriquer un `<summary>` cliquable
+              ferait changer la sélection à chaque ouverture du détail.
+            */}
+            {selectedItinerary && <CarbonBreakdown itinerary={selectedItinerary} />}
+          </>
         )}
       </div>
 
