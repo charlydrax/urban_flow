@@ -1,3 +1,4 @@
+import { CarbonFootprint } from './carbon';
 import { TransportMode } from './transport-mode';
 
 /**
@@ -82,6 +83,21 @@ export interface Itinerary {
   durationMinutes: number;
   distanceMeters: number;
   carbonGrams: number;
+  /**
+   * Détail du calcul carbone de cet itinéraire (UF-501) — total, ligne par
+   * segment, et ce que le même trajet aurait coûté en voiture.
+   *
+   * Redondant avec {@link carbonGrams} ? Non : `carbonGrams` est la **clé de
+   * tri**, que le client compare d'une carte à l'autre sans rien déplier ;
+   * `carbon` est la **justification**, que l'usager ouvre quand il veut savoir
+   * d'où sort le chiffre. Les deux valeurs sont produites par le même appel et
+   * ne peuvent donc pas diverger : `carbonGrams === carbon.totalGrams`.
+   *
+   * Optionnel dans le contrat parce qu'un itinéraire venu d'un cache antérieur
+   * à ce ticket n'en porte pas — l'affichage doit savoir s'en passer plutôt que
+   * de planter sur un `undefined` (C10).
+   */
+  carbon?: CarbonFootprint;
   accessible: boolean;
   segments: RouteSegment[];
   /**
