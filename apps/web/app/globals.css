@@ -176,3 +176,53 @@
     opacity: 0.35;
   }
 }
+
+/*
+ * Repères d'itinéraire (UF-403) — pastilles « A » / « B » et correspondances,
+ * reprises de la maquette « DESKTOP 2 : PLANIFICATEUR ».
+ *
+ * Elles sont créées en DOM par MapLibre (`Marker`), hors du canvas WebGL : leur
+ * couleur arrive de la donnée (`--uf-marker-color`, mode du segment), leur forme
+ * de ces règles.
+ *
+ * Le cercle blanc épais n'est pas décoratif : c'est lui qui garantit le contraste
+ * du repère quel que soit ce qu'il recouvre — bâti gris, parc vert ou fleuve
+ * bleu (C7 — WCAG 1.4.11).
+ */
+.uf-route-marker {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  box-shadow: var(--shadow-raised);
+  font-family: var(--font-sans);
+  font-weight: 700;
+  line-height: 1;
+  user-select: none;
+}
+
+/* Extrémités : pastille pleine, lettre blanche — « A » au départ, « B » à l'arrivée. */
+.uf-route-marker--start,
+.uf-route-marker--end {
+  width: 26px;
+  height: 26px;
+  background: var(--uf-marker-color);
+  border: 2.5px solid #fff;
+  color: #fff;
+  font-size: 13px;
+}
+
+/*
+ * Correspondance : pastille creuse cerclée de la couleur du mode que l'on
+ * **prend**. Le contraire — la couleur du mode que l'on quitte — se lirait comme
+ * la fin d'un tronçon, alors que ce repère annonce une montée à bord.
+ *
+ * Volontairement plus petite et sans lettre : c'est un jalon dans le trajet, pas
+ * une de ses deux extrémités, et la hiérarchie visuelle doit le dire.
+ */
+.uf-route-marker--transfer {
+  width: 15px;
+  height: 15px;
+  background: #fff;
+  border: 4px solid var(--uf-marker-color);
+}

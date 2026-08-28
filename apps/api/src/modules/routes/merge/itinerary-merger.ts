@@ -806,6 +806,8 @@ function toItinerary(candidate: Candidate): Itinerary {
 
 /** Projette un pas sur un segment publié, empreinte comprise (barème du Service Carbone). */
 function toRouteSegment(step: Step): RouteSegment {
+  const geometry = stepGeometry(step);
+
   return {
     mode: step.mode,
     from: step.fromLabel,
@@ -814,7 +816,28 @@ function toRouteSegment(step: Step): RouteSegment {
     distanceMeters: step.distanceMeters,
     carbonGrams: segmentCarbonGrams(step.mode, step.distanceMeters),
     ...(step.line ? { line: step.line } : {}),
+    ...(geometry ? { geometry } : {}),
   };
+}
+
+/**
+ * Tracé d'un pas seul, publié pour que la carte puisse colorer par mode (UF-403).
+ *
+ * Même nettoyage et même exigence de validité que {@link assembleGeometry} : les
+ * doublons consécutifs (une jonction absorbée par `compactSteps`) sont écartés,
+ * et sous deux points on ne publie rien plutôt qu'une `LineString` invalide
+ * (RFC 7946 — C9).
+ */
+function stepGeometry(step: Step): LineStringGeometry | undefined {
+  const coordinates: [number, number][] = [];
+
+  for (const point of step.geometry) {
+    const last = coordinates[coordinates.length - 1];
+    if (last && last[0] === point[0] && last[1] === point[1]) continue;
+    coordinates.push(point);
+  }
+
+  return coordinates.length >= 2 ? { type: 'LineString', coordinates } : undefined;
 }
 
 /**

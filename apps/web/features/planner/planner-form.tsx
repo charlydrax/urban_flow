@@ -5,14 +5,13 @@ import { useEffect, useState, type FormEvent } from 'react';
 import type { Place, SearchHistoryEntry, SearchHistoryPlace } from '@urbanflow/shared';
 
 import { Button } from '../../components/ui/button';
-import { useSession } from '../auth/session-provider';
 import { reverseGeocode, type GeocodedPlace } from '../../lib/geocoding';
 import { formatPositionLabel } from '../../lib/geolocation';
 import { EMPTY_TRIP_POINT, type TripPoint } from './address-autocomplete';
 import { LocateMe } from './locate-me';
 import { RecentSearches } from './recent-searches';
 import { TripFields } from './trip-fields';
-import { useSearchHistory } from './use-search-history';
+import type { SearchHistoryState } from './use-search-history';
 import type { UserLocationState } from './use-user-location';
 
 /** Rappelé à la soumission tant que les deux extrémités ne sont pas géocodées. */
@@ -25,16 +24,6 @@ const MISSING_COORDINATES =
  * ce sont des détails d'affichage, pas des données du domaine (C9).
  */
 function toPlace({ label, lat, lng }: GeocodedPlace): Place {
-  return { label, lat, lng };
-}
-
-/**
- * Même projection pour l'historique (UF-204), où les coordonnées sont
- * **obligatoires** : une ligne stockée en géométrie PostGIS ne peut pas être
- * amputée d'un de ses points. Le type distinct rend cette exigence visible dès
- * la compilation, plutôt qu'au 400 renvoyé par l'API.
- */
-function toHistoryPlace({ label, lat, lng }: GeocodedPlace): SearchHistoryPlace {
   return { label, lat, lng };
 }
 
@@ -79,25 +68,46 @@ function toTripPoint(place: SearchHistoryPlace, id: string): TripPoint {
  *
  * ## Historique (UF-204)
  *
- * Chaque soumission valide est **enregistrée** pour le compte connecté, et les
- * derniers trajets reviennent sous les champs en rappels recliquables. L'écriture
- * part en arrière-plan : un historique indisponible ne doit jamais empêcher une
- * recherche d'aboutir (C10). Sans session vivante, rien n'est ni lu ni écrit —
- * il n'y a pas d'historique anonyme (C8).
+ * Les derniers trajets reviennent sous les champs en rappels recliquables. Sans
+ * session vivante, rien n'est ni lu ni écrit — il n'y a pas d'historique
+ * anonyme (C8).
+ *
+ * **L'écriture n'est plus faite ici** (UF-403) : depuis UF-402, `POST
+ * /routes/plan` enregistre lui-même la recherche et renvoie la ligne créée dans
+ * `searchHistoryId`. Le formulaire qui appelait en plus `POST /search-history`
+ * créerait désormais un doublon à chaque recherche — une requête de trop (C5) et
+ * deux lignes pour un seul trajet.
+ *
+ * ## Soumission (UF-403)
+ *
+ * Le formulaire ne calcule rien : il valide, puis remonte les deux `Place`
+ * résolus à l'écran hôte, qui appelle l'API et distribue le résultat entre la
+ * carte et le sélecteur. Le tenir hors du formulaire évite qu'un composant de
+ * saisie ne devienne aussi le propriétaire des résultats.
  *
  * Accessibilité (C7) : libellés explicites, aide reliée par `aria-describedby`,
  * erreur de soumission en `role="alert"`, retours de géolocalisation annoncés
  * par `LocateMe`, autocomplétion au motif ARIA « combobox ».
+ *
+ * @param location État de la géolocalisation, partagé avec la carte (UF-202)
+ * @param history Trajets récents, produits par l'écran hôte depuis UF-403
+ * @param onSubmitTrip Rappelé avec les deux extrémités résolues à chaque soumission valide
+ * @param isSearching `true` pendant que l'API calcule — désactive le bouton et l'annonce
  */
-export function PlannerForm({ location }: { location: UserLocationState }) {
+export function PlannerForm({
+  location,
+  history,
+  onSubmitTrip,
+  isSearching = false,
+}: {
+  location: UserLocationState;
+  history: SearchHistoryState;
+  onSubmitTrip: (from: Place, to: Place) => void;
+  isSearching?: boolean;
+}) {
   const [from, setFrom] = useState<TripPoint>(EMPTY_TRIP_POINT);
   const [to, setTo] = useState<TripPoint>(EMPTY_TRIP_POINT);
   const [formError, setFormError] = useState<string | null>(null);
-  /** Dernier trajet validé — les deux `Place` qui partiront vers l'API. */
-  const [trip, setTrip] = useState<{ from: Place; to: Place } | null>(null);
-
-  const { status: sessionStatus } = useSession();
-  const history = useSearchHistory(sessionStatus === 'authenticated');
 
   const { position } = location;
 
@@ -141,7 +151,6 @@ export function PlannerForm({ location }: { location: UserLocationState }) {
   /** Toute modification du trajet périme le message de la soumission précédente. */
   const resetOutcome = () => {
     setFormError(null);
-    setTrip(null);
   };
 
   /**
@@ -175,19 +184,10 @@ export function PlannerForm({ location }: { location: UserLocationState }) {
     }
     setFormError(null);
 
-    // Étape 18 du flux : la recherche est mémorisée dès sa soumission, donc
-    // avant tout choix d'itinéraire (`selectedSummary` et le CO₂ suivront quand
-    // le calcul existera). Appel non attendu : voir `useSearchHistory`.
-    history.remember(toHistoryPlace(from.place), toHistoryPlace(to.place));
-
-    // Le contrat de `POST /api/routes/plan` est déjà tenu ici : deux `Place`
-    // complets, coordonnées comprises. Le ticket UF-203 s'arrête à leur
-    // constitution ; le rendu des résultats arrive avec UF-404.
-    // TODO(UF-404) : apiClient.planRoutes({ from, to }) + rendu des résultats.
-    // ⚠️ En le branchant, SUPPRIMER le `history.remember` ci-dessus : depuis
-    // UF-402 l'API enregistre elle-même la recherche et renvoie la ligne créée
-    // dans `searchHistoryId` — garder les deux créerait un doublon.
-    setTrip({ from: toPlace(from.place), to: toPlace(to.place) });
+    // Étape 1 du flux : les deux extrémités résolues partent vers l'écran hôte,
+    // qui appellera `POST /routes/plan`. L'étape 18 (écriture de l'historique)
+    // est faite par l'API depuis UF-402 — le formulaire n'y touche plus.
+    onSubmitTrip(toPlace(from.place), toPlace(to.place));
   };
 
   return (
@@ -227,16 +227,19 @@ export function PlannerForm({ location }: { location: UserLocationState }) {
         </p>
       )}
 
-      {trip && (
-        <p role="status" className="rounded-md bg-tint-green px-3 py-2 text-xs text-ink-700">
-          Trajet prêt&nbsp;: <strong>{trip.from.label}</strong> → <strong>{trip.to.label}</strong>.
-          Le calcul des itinéraires et de leur empreinte carbone arrive dans le ticket suivant.
+      {/*
+        L'attente est annoncée et non seulement dessinée : sans `role="status"`,
+        un lecteur d'écran resterait sur le formulaire sans savoir qu'un calcul
+        est en cours (C7 — WCAG 4.1.3).
+      */}
+      <Button type="submit" size="lg" className="w-full" disabled={isSearching}>
+        {isSearching ? 'Calcul en cours…' : 'Comparer les itinéraires'}
+      </Button>
+      {isSearching && (
+        <p role="status" className="sr-only">
+          Calcul des itinéraires en cours.
         </p>
       )}
-
-      <Button type="submit" size="lg" className="w-full">
-        Comparer les itinéraires
-      </Button>
     </form>
   );
 }

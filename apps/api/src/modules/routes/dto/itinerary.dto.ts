@@ -43,6 +43,25 @@ export class RouteSegmentDto implements RouteSegment {
   /** Ligne empruntée le cas échéant (donnée GTFS — C9). */
   @ApiPropertyOptional({ example: 'Métro B' })
   line?: string;
+
+  /**
+   * Tracé GeoJSON du **segment seul**, en `[lng, lat]` (UF-403).
+   *
+   * C'est lui qui permet à la carte de dessiner une couleur et un style de
+   * trait par mode : la géométrie d'ensemble de l'itinéraire ne dit pas où la
+   * marche s'arrête et où le métro commence. Absent si le pas n'a pas deux
+   * points distincts (pas de `LineString` invalide — RFC 7946, C9).
+   */
+  @ApiPropertyOptional({
+    example: {
+      type: 'LineString',
+      coordinates: [
+        [4.8596, 45.7605],
+        [4.8571, 45.7592],
+      ],
+    },
+  })
+  geometry?: { type: 'LineString'; coordinates: [number, number][] };
 }
 
 /** Itinéraire multimodal complet, prêt à être affiché et trié par le client. */

@@ -1,5 +1,6 @@
 'use client';
 
+import type { Itinerary } from '@urbanflow/shared';
 import {
   GeolocateControl,
   Map as MapLibreMap,
@@ -12,6 +13,9 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 
 import { formatAccuracy, toLngLat, type UserPosition } from '../../lib/geolocation';
 import { DEFAULT_ZOOM, LYON_CENTER, getMapStyle } from '../../lib/map-style';
+import { describeRoute } from '../../lib/route-map-layers';
+import { RouteLegend } from './route-legend';
+import { useRouteOverlay } from './use-route-overlay';
 
 /**
  * Libellés MapLibre en français (C7 — WCAG 3.1.1 « Langue de la page »).
@@ -20,6 +24,15 @@ import { DEFAULT_ZOOM, LYON_CENTER, getMapStyle } from '../../lib/map-style';
  * un lecteur d'écran francophone annoncerait « Zoom in » au milieu d'une
  * interface française. `Map.Title` est ajouté à la volée depuis `ariaLabel`.
  */
+/**
+ * Défaut **partagé** de `itineraries`, et non un `[]` écrit dans la signature.
+ *
+ * Un littéral par défaut crée un tableau neuf à chaque rendu : les effets de
+ * `useRouteOverlay`, qui en dépendent, se relanceraient à chaque fois — repoussée
+ * de source et marqueurs détruits/reposés pour rien (C5).
+ */
+const NO_ITINERARIES: readonly Itinerary[] = [];
+
 const MAPLIBRE_LOCALE_FR: Record<string, string> = {
   'NavigationControl.ZoomIn': 'Zoomer',
   'NavigationControl.ZoomOut': 'Dézoomer',
@@ -60,6 +73,13 @@ export interface MapViewProps {
    */
   showGeolocateControl?: boolean;
   /**
+   * Itinéraires à tracer (UF-403). Tous sont dessinés : celui qui est
+   * sélectionné en couleurs pleines, les autres estompés derrière lui.
+   */
+  itineraries?: readonly Itinerary[];
+  /** Itinéraire mis en avant, cadré par la caméra. `null` : aucun tracé au premier plan. */
+  selectedItineraryId?: string | null;
+  /**
    * Appelé une fois la carte prête (`load`). Point d'extension prévu pour F2 :
    * ajout des sources/couches GeoJSON des itinéraires.
    * @param map Instance MapLibre — ne pas conserver après le démontage
@@ -88,6 +108,11 @@ export interface MapViewProps {
  * Géolocalisation (UF-202) : la carte se contente d'**afficher** ce qu'on lui
  * donne (`userPosition`, `center`). Elle ne demande jamais la position d'elle-même
  * — le consentement et la demande de permission sont l'affaire de l'écran hôte.
+ *
+ * Itinéraires (UF-403) : même principe. La carte reçoit une liste et un
+ * identifiant sélectionné, elle trace, cadre et légende — elle ne décide ni du
+ * calcul ni du choix. Le dessin lui-même est délégué à `useRouteOverlay`, la
+ * traduction en GeoJSON à `lib/route-map-layers` (module pur, testé).
  */
 export function MapView({
   center = LYON_CENTER,
@@ -97,12 +122,23 @@ export function MapView({
   textAlternative = 'Les itinéraires sont également présentés sous forme de liste textuelle.',
   userPosition = null,
   showGeolocateControl = false,
+  itineraries = NO_ITINERARIES,
+  selectedItineraryId = null,
   onReady,
   children,
 }: MapViewProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
   const [hasStyleError, setHasStyleError] = useState(false);
+  /**
+   * Instance publiée en **état** (et non seulement en ref) une fois `load` émis.
+   *
+   * `useRouteOverlay` a besoin d'un déclencheur de rendu : une ref changerait en
+   * silence, et le premier itinéraire arrivé avant la fin du chargement du style
+   * ne serait jamais dessiné. Ajouter une couche à une carte non chargée lève
+   * côté MapLibre — cet état est donc aussi le garde-fou.
+   */
+  const [loadedMap, setLoadedMap] = useState<MapLibreMap | null>(null);
 
   // `onReady` passe par une ref : une fonction recréée à chaque rendu par
   // l'appelant ne doit pas provoquer la reconstruction de la carte.
@@ -152,6 +188,7 @@ export function MapView({
     const handleLoad = () => {
       hasLoaded = true;
       setHasStyleError(false);
+      setLoadedMap(map);
       onReadyRef.current?.(map);
     };
 
@@ -178,6 +215,10 @@ export function MapView({
       // indispensable en StrictMode, où l'effet est monté deux fois en dev.
       map.remove();
       mapRef.current = null;
+      // Une instance détruite ne doit plus être adressée par les couches de
+      // tracé : sans cela, `useRouteOverlay` appellerait `addLayer` sur une
+      // carte morte au remontage de StrictMode.
+      setLoadedMap(null);
     };
     // `showGeolocateControl` est une option de configuration, fixée par l'écran
     // hôte : la basculer reconstruit la carte, ce qui est acceptable puisque
@@ -227,12 +268,28 @@ export function MapView({
     };
   }, [userPosition]);
 
+  // Tracés, repères et cadrage de l'itinéraire retenu (UF-403).
+  useRouteOverlay(loadedMap, itineraries, selectedItineraryId);
+
+  const selectedItinerary =
+    itineraries.find((itinerary) => itinerary.id === selectedItineraryId) ?? null;
+
   return (
     <div className={`relative overflow-hidden rounded-lg border border-ink-200 ${className}`}>
       <div ref={containerRef} className="h-full w-full bg-surface-muted" />
 
-      {/* Alternative non visuelle (C7 — WCAG 1.1.1) : lue par les lecteurs d'écran, invisible à l'écran. */}
-      <p className="sr-only">{textAlternative}</p>
+      {/*
+        Alternative non visuelle (C7 — WCAG 1.1.1) : lue par les lecteurs d'écran,
+        invisible à l'écran. Dès qu'un itinéraire est tracé, elle le **décrit** —
+        annoncer « les itinéraires y seront tracés » alors qu'ils le sont déjà
+        n'apprendrait plus rien. `aria-live` : le changement de sélection est un
+        événement à annoncer, pas un texte qu'on relit par hasard.
+      */}
+      <p className="sr-only" aria-live="polite">
+        {selectedItinerary ? describeRoute(selectedItinerary) : textAlternative}
+      </p>
+
+      {selectedItinerary && <RouteLegend itinerary={selectedItinerary} />}
 
       {hasStyleError && (
         <p

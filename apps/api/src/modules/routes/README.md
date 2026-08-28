@@ -307,7 +307,28 @@ temps.
 
 `merge/itinerary-merger.spec.ts` couvre la recette d'UF-401 point par point sur
 le scénario nominal Part-Dieu → Bellecour : propositions distinctes, chaîne
-continue, préférences (deux profils), plafond.
+continue, préférences (deux profils), plafond. Il vérifie aussi (UF-403) que les
+tracés de segments recollés redonnent **exactement** la géométrie d'ensemble de
+l'itinéraire : deux sources de vérité géométriques qui divergeraient
+afficheraient un trait coloré à côté du trajet réel.
+
+## Géométrie publiée (C9)
+
+La réponse porte **deux niveaux** de tracé, et les deux sont nécessaires :
+
+| Champ                            | Portée              | À quoi il sert                                |
+| -------------------------------- | ------------------- | --------------------------------------------- |
+| `Itinerary.geometry`             | l'itinéraire entier | cadrage, mise en cache, export                |
+| `RouteSegment.geometry` (UF-403) | un segment          | colorer par mode et changer de motif de trait |
+
+Le second n'est pas une redondance : la `LineString` d'ensemble ne dit pas où la
+marche s'arrête et où le métro commence. Le client aurait pu tenter de la
+redécouper en s'appuyant sur les distances, mais ce serait reconstruire par
+approximation une information que le serveur possède exactement.
+
+Les deux appliquent la même règle : les points en double aux jonctions sont
+écartés, et sous deux points **rien** n'est publié plutôt qu'une `LineString`
+invalide au sens de la RFC 7946.
 
 ## Contraintes couvertes
 

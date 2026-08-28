@@ -43,6 +43,23 @@ export interface RouteSegment {
   distanceMeters: number;
   carbonGrams: number;
   line?: string;
+  /**
+   * Tracé du **segment seul**, en `[lng, lat]` (UF-403).
+   *
+   * Publié en plus de la géométrie d'ensemble de l'itinéraire parce que la
+   * carte doit distinguer les modes : une couleur par mode et un style de trait
+   * par famille (marche pointillée, vélo plein, TC tireté) ne se dessinent pas
+   * depuis une `LineString` unique, où plus rien n'indique où la marche
+   * s'arrête et où le métro commence. Le client aurait pu tenter de redécouper
+   * la géométrie globale en s'appuyant sur les distances, mais ce serait
+   * reconstruire par approximation une information que le serveur possède
+   * exactement.
+   *
+   * Absent quand le pas n'a pas produit deux points distincts — la même règle
+   * que {@link Itinerary.geometry} : pas de `LineString` invalide au sens de la
+   * RFC 7946 (C9).
+   */
+  geometry?: LineStringGeometry;
 }
 
 /** Itinéraire multimodal complet (tracé GeoJSON pour MapLibre — C9, accessibilité PMR — C12). */
