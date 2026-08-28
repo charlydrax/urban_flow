@@ -10,6 +10,13 @@ import type {
 import { useCallback, useRef, useState } from 'react';
 
 import { apiClient } from '../../lib/api-client';
+import { classifyPlanFailure, type PlanFailureKind } from '../../lib/plan-feedback';
+
+/**
+ * Les échecs qui font vraiment échouer l'écran — tout sauf `no-route`, qui est
+ * un résultat vide et sort donc en `ready`.
+ */
+type PlanFailure = Exclude<PlanFailureKind, 'no-route'>;
 
 /**
  * Cycle de vie d'une recherche d'itinéraires.
@@ -31,17 +38,23 @@ export interface RoutePlanState {
   sources: SourceAvailability[];
   /** Itinéraire mis en avant sur la carte. */
   selectedId: string | null;
-  /** Message d'erreur prêt à afficher, ou `null`. */
-  error: string | null;
+  /**
+   * Nature de l'échec quand `status` vaut `error`, `null` sinon (UF-405).
+   *
+   * Le hook publie la **nature**, pas le texte : c'est l'écran qui affiche, et
+   * `lib/plan-feedback.ts` qui décide de ce qui se dit et sur quel ton. Un hook
+   * qui rendrait une phrase toute faite rendrait ce choix intestable sans React.
+   *
+   * `no-route` en est **exclu par le type** : un « aucun trajet » sort en
+   * `ready` avec une liste vide, jamais en `error`. Le dire au compilateur
+   * dispense l'écran de traiter un cas qui ne peut pas se produire.
+   */
+  failure: PlanFailure | null;
   /** Lance une recherche ; annule silencieusement celle qui serait encore en vol. */
   plan: (from: Place, to: Place) => void;
   /** Change l'itinéraire mis en avant (recette 4 du ticket). */
   select: (itineraryId: string) => void;
 }
-
-/** Message affiché quand l'appel échoue — générique côté client, le détail reste dans les logs (C11). */
-const PLAN_FAILED =
-  'Le calcul d’itinéraires n’a pas abouti. Vérifiez votre connexion, puis relancez la recherche.';
 
 /**
  * Prévenu quand l'API a enregistré la recherche (étape 18 du flux).
@@ -92,6 +105,28 @@ function toHistoryPlace(place: Place): SearchHistoryPlace | null {
  * l'`AbortController` n'ajouterait qu'une annulation réseau — utile, mais le
  * corps est déjà en route quand le cas se produit.
  *
+ * ## Cas non nominaux (UF-405)
+ *
+ * ```
+ * 200 + liste pleine  → ready   (+ bandeau « mode dégradé » si une source manque)
+ * 200 + liste vide    → ready   (« aucun trajet », ou « aucune source n'a répondu »)
+ * 404                 → ready   avec une liste vide — voir plus bas
+ * 401                 → error   `session-expired` ; SessionProvider redirige (UF-106)
+ * 400 / 5xx / réseau  → error
+ * ```
+ *
+ * Un **404 est traité comme un résultat vide**, pas comme une panne. Notre API
+ * ne le renvoie pas (elle répond `200` + liste vide + état des sources, plus
+ * riche), mais le diagramme de séquence prévoit cette branche et un
+ * intermédiaire réseau peut la produire : la faire tomber dans le cas d'erreur
+ * afficherait « vérifiez votre connexion » à quelqu'un dont la recherche a
+ * simplement abouti à rien.
+ *
+ * Sur **401**, le hook n'affiche pas moins qu'ailleurs mais autre chose : le
+ * message dit la redirection en cours au lieu d'accuser le réseau. La purge de
+ * session et la navigation restent l'affaire de `SessionProvider`, prévenu par
+ * l'intercepteur du client API — ce hook ne connaît pas le routeur.
+ *
  * @param onSearchRecorded Prévenu quand l'API a écrit la recherche dans
  * l'historique. Non appelé si `searchHistoryId` est `null` : l'écriture a
  * échoué côté serveur, et c'est un désagrément, pas une panne de la recherche (C10).
@@ -102,7 +137,7 @@ export function useRoutePlan(onSearchRecorded?: SearchRecordedHandler): RoutePla
   const [sortedBy, setSortedBy] = useState<ItinerarySortKey | null>(null);
   const [sources, setSources] = useState<SourceAvailability[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [failure, setFailure] = useState<PlanFailure | null>(null);
 
   /** Numéro de la dernière recherche lancée — seule sa réponse a le droit d'écrire. */
   const requestIdRef = useRef(0);
@@ -118,7 +153,17 @@ export function useRoutePlan(onSearchRecorded?: SearchRecordedHandler): RoutePla
     requestIdRef.current = requestId;
 
     setStatus('loading');
-    setError(null);
+    setFailure(null);
+
+    // La réponse précédente est écartée **dès le départ** de la nouvelle
+    // recherche, et pas seulement à l'arrivée de la suivante : laisser les
+    // anciens itinéraires à l'écran pendant le calcul afficherait un squelette
+    // dans le panneau et d'anciens tracés sur la carte au même instant, et
+    // rendrait cliquable une option qui ne répond plus à la question posée.
+    setItineraries([]);
+    setSortedBy(null);
+    setSources([]);
+    setSelectedId(null);
 
     void apiClient
       .planRoutes({ from, to })
@@ -137,15 +182,31 @@ export function useRoutePlan(onSearchRecorded?: SearchRecordedHandler): RoutePla
           onSearchRecordedRef.current?.(response.searchHistoryId, historyFrom, historyTo);
         }
       })
-      .catch(() => {
+      .catch((error: unknown) => {
         if (requestIdRef.current !== requestId) return;
 
-        // Le 401 « session morte » est déjà pris en charge globalement par
-        // `SessionProvider` (UF-106) : ici on se contente d'un message unique,
-        // sans exposer le statut ni le détail renvoyé par l'API (C11).
+        // Les résultats de la recherche précédente n'ont plus cours : les
+        // laisser à l'écran ferait passer un trajet périmé pour la réponse à
+        // la question qu'on vient de poser.
         setItineraries([]);
         setSelectedId(null);
-        setError(PLAN_FAILED);
+        setSortedBy(null);
+
+        const kind = classifyPlanFailure(error);
+        if (kind === 'no-route') {
+          // « Aucun trajet » n'est pas une panne. Sans corps de réponse, on ne
+          // sait pas quelles sources ont parlé : `sources` reste vide, et le
+          // message se rabat sur sa formulation neutre.
+          setSources([]);
+          setStatus('ready');
+          return;
+        }
+
+        // Le 401 « session morte » est déjà pris en charge globalement par
+        // `SessionProvider` (UF-106) : le hook se contente d'en publier la
+        // nature, sans exposer le statut ni le détail renvoyé par l'API (C11).
+        setSources([]);
+        setFailure(kind);
         setStatus('error');
       });
   }, []);
@@ -154,5 +215,5 @@ export function useRoutePlan(onSearchRecorded?: SearchRecordedHandler): RoutePla
     setSelectedId(itineraryId);
   }, []);
 
-  return { status, itineraries, sortedBy, sources, selectedId, error, plan, select };
+  return { status, itineraries, sortedBy, sources, selectedId, failure, plan, select };
 }

@@ -49,9 +49,10 @@ export interface ItineraryListProps {
  * colonne du planificateur les contient telles quelles, à côté de la carte —
  * rien à réorganiser, seule la largeur du conteneur change.
  *
- * Le vide est géré par `PlannerScreen` (« aucun itinéraire ne relie ces deux
- * points ») : cette liste rend `null` plutôt que d'afficher un cadre creux. Le
- * détail « quelles sources ont répondu » relève d'UF-405.
+ * Le vide, l'attente et le mode dégradé sont gérés par `PlannerScreen`
+ * (UF-405) : cette liste rend `null` plutôt qu'un cadre creux, et n'a pas à
+ * savoir *pourquoi* elle est vide — « aucun trajet » et « aucune source n'a
+ * répondu » ne se disent pas pareil, mais cela se décide au-dessus d'elle.
  */
 export function ItineraryList({ itineraries, selectedId, sortedBy, onSelect }: ItineraryListProps) {
   if (itineraries.length === 0) return null;

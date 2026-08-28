@@ -3,8 +3,16 @@
 import { LazyMap } from '../../components/map/lazy-map';
 import { toLngLat } from '../../lib/geolocation';
 import { DEFAULT_ZOOM, LYON_CENTER } from '../../lib/map-style';
+import {
+  PLAN_FAILURE_NOTICES,
+  SOURCE_LABELS,
+  describeDegradedSources,
+  describeEmptyResult,
+} from '../../lib/plan-feedback';
 import { useSession } from '../auth/session-provider';
 import { ItineraryList } from './itinerary-list';
+import { ItinerarySkeleton } from './itinerary-skeleton';
+import { PlanNotice } from './plan-notice';
 import { PlannerForm } from './planner-form';
 import { useRoutePlan } from './use-route-plan';
 import { useSearchHistory } from './use-search-history';
@@ -72,7 +80,15 @@ export function PlannerScreen() {
   // la liste des rappels remonte le trajet en tête sans un seul appel de plus.
   const routePlan = useRoutePlan(history.noteRecorded);
 
+  const isSearching = routePlan.status === 'loading';
   const isEmptyResult = routePlan.status === 'ready' && routePlan.itineraries.length === 0;
+
+  // Trois messages possibles, jamais deux à la fois (UF-405) : l'échec exclut
+  // le résultat, et la panne totale des sources est déjà dite par le message de
+  // liste vide — `describeDegradedSources` rend `null` dans ce cas.
+  const failureNotice = routePlan.failure ? PLAN_FAILURE_NOTICES[routePlan.failure] : null;
+  const emptyNotice = isEmptyResult ? describeEmptyResult(routePlan.sources) : null;
+  const degraded = routePlan.status === 'ready' ? describeDegradedSources(routePlan.sources) : null;
 
   return (
     <div className="grid gap-6 md:grid-cols-[minmax(0,360px)_1fr]">
@@ -81,33 +97,59 @@ export function PlannerScreen() {
           location={location}
           history={history}
           onSubmitTrip={routePlan.plan}
-          isSearching={routePlan.status === 'loading'}
+          isSearching={isSearching}
         />
 
-        {routePlan.error && (
-          <p role="alert" className="rounded-md bg-tint-red px-3 py-2 text-sm text-error">
-            {routePlan.error}
-          </p>
+        {/*
+          La session expirée n'est pas peinte comme une panne : la redirection
+          vers /login est déjà lancée (UF-106), le message l'explique.
+        */}
+        {failureNotice && (
+          <PlanNotice
+            tone={routePlan.failure === 'session-expired' ? 'info' : 'error'}
+            role={failureNotice.role}
+            message={failureNotice.message}
+          />
         )}
 
         {/*
           Une liste vide est un **résultat**, pas une panne : le dire autrement
-          enverrait l'usager vérifier sa connexion pour rien (C10). Le détail
-          « quelles sources ont répondu » est l'objet d'UF-405.
+          enverrait l'usager vérifier sa connexion pour rien (C10). Sauf quand
+          les trois sources se sont tues — et c'est `sources[]` qui le dit.
         */}
-        {isEmptyResult && (
-          <p role="status" className="rounded-md bg-tint-gold px-3 py-2 text-sm text-ink-700">
-            Aucun itinéraire ne relie ces deux points pour l’instant. Essayez une adresse plus
-            proche d’un axe desservi.
-          </p>
+        {emptyNotice && (
+          <PlanNotice
+            tone={emptyNotice.role === 'alert' ? 'error' : 'info'}
+            role={emptyNotice.role}
+            message={emptyNotice.message}
+          />
         )}
 
-        <ItineraryList
-          itineraries={routePlan.itineraries}
-          selectedId={routePlan.selectedId}
-          sortedBy={routePlan.sortedBy}
-          onSelect={routePlan.select}
-        />
+        {/*
+          Mode dégradé (C10) : une source absente sur trois n'empêche pas de se
+          déplacer avec les autres. La note est discrète et ne bloque rien —
+          elle est posée **au-dessus** de la liste, parce qu'elle qualifie ce
+          qu'on va lire dessous.
+        */}
+        {degraded && (
+          <PlanNotice tone="warning" role="status" message={degraded.message}>
+            <p className="text-xs">
+              Sources indisponibles&nbsp;:{' '}
+              {degraded.missing.map((source) => SOURCE_LABELS[source]).join(', ')}.
+            </p>
+          </PlanNotice>
+        )}
+
+        {isSearching ? (
+          <ItinerarySkeleton />
+        ) : (
+          <ItineraryList
+            itineraries={routePlan.itineraries}
+            selectedId={routePlan.selectedId}
+            sortedBy={routePlan.sortedBy}
+            onSelect={routePlan.select}
+          />
+        )}
       </div>
 
       {/*

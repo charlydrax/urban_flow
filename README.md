@@ -138,8 +138,10 @@ Le détail de l'algorithme de fusion multimodale est documenté dans
 des itinéraires (code couleur par mode, repères, cadrage) dans
 [`apps/web/components/map/README.md`](apps/web/components/map/README.md).
 
-> Le **panneau de résultats détaillé** (cartes d'itinéraires de la maquette) et
-> le bandeau « mode dégradé » restent à faire — UF-404 et UF-405.
+Le **panneau de résultats** (UF-404) et le traitement des **cas non nominaux**
+— aucun trajet, session expirée, mode dégradé, état de chargement (UF-405) —
+sont documentés dans
+[`apps/web/features/planner/README.md`](apps/web/features/planner/README.md).
 
 ## Qualité de code & contribution
 
