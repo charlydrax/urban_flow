@@ -23,8 +23,14 @@ export interface SearchHistoryState {
   status: SearchHistoryStatus;
   /** Trajets récents, du plus récent au plus ancien. */
   entries: SearchHistoryEntry[];
-  /** Enregistre une recherche et remonte la liste sans la relire (C5). */
-  remember: (from: SearchHistoryPlace, to: SearchHistoryPlace) => void;
+  /**
+   * Fait remonter en tête un trajet **déjà écrit par l'API** (UF-403).
+   *
+   * @param id Ligne créée, telle que renvoyée dans `searchHistoryId` par `POST /routes/plan`
+   * @param from Départ de la recherche
+   * @param to Arrivée de la recherche
+   */
+  noteRecorded: (id: string, from: SearchHistoryPlace, to: SearchHistoryPlace) => void;
 }
 
 /** Deux entrées désignent le même trajet quand les deux libellés coïncident. */
@@ -38,16 +44,26 @@ function isSameTrip(a: SearchHistoryEntry, b: SearchHistoryEntry): boolean {
  * ## Une seule lecture, puis plus rien
  *
  * La liste est chargée une fois, à l'ouverture de l'écran, et ensuite entretenue
- * **localement** : `POST /search-history` renvoie l'entrée créée, qu'on place en
- * tête sans relire toute la collection. Aucune requête périodique, aucun
- * rechargement après écriture (C5, C10).
+ * **localement**. Aucune requête périodique, aucun rechargement après écriture
+ * (C5, C10).
+ *
+ * ## Qui écrit dans l'historique
+ *
+ * Plus ce hook, depuis UF-403 : c'est `POST /routes/plan` qui enregistre la
+ * recherche (étape 18 du flux) et rend la ligne créée dans `searchHistoryId`.
+ * Le hook se contente d'en prendre acte via `noteRecorded`, sans appel réseau.
+ *
+ * Le motif précédent — un `POST /search-history` émis par le formulaire — ferait
+ * aujourd'hui **deux** lignes pour un seul trajet. `apiClient.createSearchHistory`
+ * reste en place : l'endpoint existe toujours au contrat, il n'a simplement plus
+ * d'appelant dans ce parcours.
  *
  * ## L'historique ne doit jamais casser une recherche
  *
- * `remember` n'est pas attendu par le formulaire : l'enregistrement part en
- * arrière-plan et un échec reste silencieux. Ne pas mémoriser un trajet est un
- * désagrément ; bloquer le calcul d'itinéraire pour cette raison serait une
- * régression fonctionnelle (dégradation gracieuse — C10).
+ * Un `searchHistoryId` à `null` (écriture échouée côté serveur) n'est pas
+ * traité comme une erreur : la liste n'est pas mise à jour, et c'est tout. Ne
+ * pas mémoriser un trajet est un désagrément ; le signaler comme une panne de la
+ * recherche serait une régression (dégradation gracieuse — C10).
  *
  * ## Sans session, rien
  *
@@ -93,28 +109,40 @@ export function useSearchHistory(enabled: boolean): SearchHistoryState {
     return () => controller.abort();
   }, [enabled]);
 
-  const remember = useCallback(
-    (from: SearchHistoryPlace, to: SearchHistoryPlace) => {
+  const noteRecorded = useCallback(
+    (id: string, from: SearchHistoryPlace, to: SearchHistoryPlace) => {
       if (!enabled) return;
 
-      void apiClient
-        .createSearchHistory({ from, to })
-        .then((created) => {
-          // Le trajet remonte en tête ; sa précédente occurrence disparaît, sinon
-          // relancer une recherche fréquente saturerait la liste de doublons —
-          // même repli que celui appliqué côté API à la lecture.
-          setEntries((current) =>
-            [created, ...current.filter((entry) => !isSameTrip(entry, created))].slice(
-              0,
-              DEFAULT_SEARCH_HISTORY_LIMIT,
-            ),
-          );
-          setStatus('ready');
-        })
-        .catch(() => undefined);
+      // Entrée reconstituée localement, **sans requête** : l'API vient de
+      // l'écrire et nous en a rendu l'identifiant, nous connaissons les deux
+      // extrémités. Relire la collection pour retrouver ce qu'on sait déjà
+      // coûterait un aller-retour à chaque recherche (C5).
+      //
+      // `selectedSummary` et `carbonGrams` restent nuls tant qu'aucune option
+      // n'a été retenue — c'est exactement ce que contient la ligne en base à
+      // cet instant, et la liste n'affiche de toute façon que le trajet.
+      const created: SearchHistoryEntry = {
+        id,
+        from,
+        to,
+        selectedSummary: null,
+        carbonGrams: null,
+        createdAt: new Date().toISOString(),
+      };
+
+      // Le trajet remonte en tête ; sa précédente occurrence disparaît, sinon
+      // relancer une recherche fréquente saturerait la liste de doublons —
+      // même repli que celui appliqué côté API à la lecture.
+      setEntries((current) =>
+        [created, ...current.filter((entry) => !isSameTrip(entry, created))].slice(
+          0,
+          DEFAULT_SEARCH_HISTORY_LIMIT,
+        ),
+      );
+      setStatus('ready');
     },
     [enabled],
   );
 
-  return { status, entries, remember };
+  return { status, entries, noteRecorded };
 }

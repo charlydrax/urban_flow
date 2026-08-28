@@ -1,8 +1,8 @@
 # Module `planner` — Planificateur d'itinéraires (F2)
 
-Écran d'accueil de la PWA : saisie du trajet, géolocalisation consentie, carte.
-Le calcul d'itinéraires lui-même (`POST /routes/plan`) arrive dans un ticket
-ultérieur ; ce module en pose le formulaire et l'étape 1 du flux de référence.
+Écran d'accueil de la PWA : saisie du trajet, géolocalisation consentie, calcul
+des itinéraires et tracé sur la carte. Depuis UF-403, le module couvre le flux de
+référence de bout en bout — de la saisie (étape 1) à l'affichage carte (étape 9).
 
 Maquettes : Figma « 02 · Maquettes mobile → 1. ACCUEIL » et « 4. PLANIFICATEUR
 F2 », « 03 · Maquettes desktop → DESKTOP 2 : PLANIFICATEUR ».
@@ -11,15 +11,18 @@ F2 », « 03 · Maquettes desktop → DESKTOP 2 : PLANIFICATEUR ».
 
 | Fichier                           | Rôle                                                                     |
 | --------------------------------- | ------------------------------------------------------------------------ |
-| `planner-screen.tsx`              | Frontière client : partage la position entre le formulaire et la carte   |
+| `planner-screen.tsx`              | Frontière client : partage position, itinéraires et historique           |
 | `planner-form.tsx`                | État du trajet, géolocalisation → départ, inversion, soumission          |
+| `use-route-plan.ts`               | Appel `POST /routes/plan`, état de la recherche, sélection (UF-403)      |
+| `itinerary-switcher.tsx`          | Choix de l'itinéraire tracé — groupe radio minimal (UF-403)              |
 | `trip-fields.tsx`                 | Carte départ/arrivée de la maquette + bouton d'inversion                 |
 | `address-autocomplete.tsx`        | Champ d'adresse au motif ARIA « combobox » + liste de suggestions        |
 | `use-address-search.ts`           | Débounce 300 ms, annulation de la requête précédente, états de recherche |
 | `locate-me.tsx`                   | Bouton « Me localiser », panneau de consentement, comptes rendus         |
 | `use-user-location.ts`            | Machine à états du parcours (consentement → permission → position)       |
 | `recent-searches.tsx`             | Trajets récents recliquables affichés sous les champs (UF-204)           |
-| `use-search-history.ts`           | Lecture unique de l'historique + enregistrement en arrière-plan (UF-204) |
+| `use-search-history.ts`           | Lecture unique de l'historique, entretenue localement ensuite (UF-204)   |
+| `../../lib/route-map-layers.ts`   | Itinéraires → GeoJSON, emprise, repères, légende (pur, testé)            |
 | `../../lib/geocoding.ts`          | Appels BAN normalisés : recherche, géocodage inverse (pur, testé)        |
 | `../../lib/geolocation.ts`        | Appel `navigator.geolocation` normalisé + formats (pur, testé)           |
 | `../../lib/format-search-date.ts` | Libellés « aujourd'hui, 09:12 » / « hier » / date courte (pur, testé)    |
@@ -211,23 +214,28 @@ juger si le départ pré-rempli est crédible.
 
 ## Trajets récents (UF-204) — C5 / C8 / C10
 
-Chaque soumission valide est enregistrée (`POST /search-history`, étape 18 du
-flux) et les derniers trajets reviennent sous les champs, recliquables.
+Chaque soumission valide est enregistrée (étape 18 du flux) et les derniers
+trajets reviennent sous les champs, recliquables.
+
+> ⚠️ **Le producteur a changé avec UF-403.** L'écriture était faite ici par un
+> `POST /search-history` ; c'est désormais `POST /routes/plan` qui l'effectue et
+> qui rend la ligne créée. Voir la section UF-403 plus bas.
 
 ```
 soumission valide
       │
-      ├─► setTrip(...)                         (le formulaire rend la main tout de suite)
-      └─► history.remember(from, to)           (appel NON attendu)
+      └─► POST /routes/plan  ──► { …, searchHistoryId }
                 │
-                ├─ succès ─► l'entrée créée passe en tête de liste, son doublon disparaît
-                └─ échec  ─► silence : ne pas mémoriser un trajet ne doit pas
-                             empêcher la recherche d'aboutir (C10)
+                ├─ id non nul ─► noteRecorded() : l'entrée passe en tête de liste
+                │                (insertion LOCALE, aucun appel réseau), son
+                │                doublon disparaît
+                └─ id nul     ─► silence : ne pas mémoriser un trajet ne doit pas
+                                 se lire comme une panne de la recherche (C10)
 ```
 
 **Une seule lecture, puis plus rien** : la liste est chargée à l'ouverture de
-l'écran, puis entretenue localement à partir de l'entrée renvoyée par le `POST`.
-Aucune relecture après écriture, aucune requête périodique (C5).
+l'écran, puis entretenue localement. Aucune relecture après écriture, aucune
+requête périodique (C5).
 
 **Rejouer coûte zéro appel** : une entrée d'historique porte déjà ses
 coordonnées, donc un clic remplit les deux champs **déjà résolus** — le géocodeur
@@ -316,5 +324,112 @@ disponibilité de la BAN**.
 qu'on compte des **journées de calendrier** et non des heures écoulées (23h05 la
 veille vu à 00h30, c'est « hier »), ainsi que le repli d'un horodatage futur.
 
-Les tests de composants (jsdom + Testing Library) restent à ajouter avec le
-calcul d'itinéraires.
+`route-map-layers.test.ts` (UF-403) couvre la traduction des itinéraires en
+données de carte : voir `components/map/README.md`.
+
+Les tests de composants (jsdom + Testing Library) restent à ajouter. La logique
+d'UF-403 a été poussée dans un module **pur** (`lib/route-map-layers.ts`)
+précisément pour être couverte sans eux ; ce qui reste dans les composants et les
+hooks est de l'orchestration React et des appels MapLibre.
+
+## Calcul et affichage des itinéraires (UF-403) — C7 / C9 / C10
+
+C'est le ticket qui **branche enfin le front sur l'API** : jusqu'ici le
+formulaire s'arrêtait à la constitution du `{from, to}`.
+
+### Le parcours
+
+```
+soumission valide (deux adresses géocodées)
+      │
+      ▼
+PlannerScreen → useRoutePlan.plan(from, to)
+      │
+      ▼
+POST /api/routes/plan  { from, to }        (aucun userId — C4, cf. UF-402)
+      │
+      │  l'API lit le profil, interroge les 3 sources en parallèle,
+      │  fusionne, calcule le CO₂ et enregistre la recherche
+      ▼
+{ itineraries[], sortedBy, sources[], searchHistoryId }
+      │
+      ├─► carte      : tracés par mode, repères A/B + correspondances, fitBounds
+      ├─► sélecteur  : le premier est retenu d'office (le serveur l'a classé premier)
+      └─► historique : la ligne créée remonte en tête, sans requête supplémentaire
+```
+
+### Qui possède quoi
+
+`PlannerScreen` est le plus petit ancêtre commun des trois enfants qui partagent
+des données, et rien de plus :
+
+| Donnée          | Producteur         | Consommateurs                                  |
+| --------------- | ------------------ | ---------------------------------------------- |
+| Position        | `useUserLocation`  | formulaire (départ), carte (marqueur, centre)  |
+| Itinéraires     | `useRoutePlan`     | carte (tracés), sélecteur (choix)              |
+| Trajets récents | `useSearchHistory` | formulaire (rappels), résultat de la recherche |
+
+`useSearchHistory` a été **remonté du formulaire vers l'écran** par ce ticket :
+il y vivait tant que c'était le formulaire qui écrivait l'historique. Ce n'est
+plus le cas.
+
+### L'historique n'est plus écrit par le front
+
+Depuis UF-402, `POST /routes/plan` enregistre lui-même la recherche (étape 18 du
+flux) et renvoie la ligne créée dans `searchHistoryId`. Le `POST /search-history`
+que le formulaire émettait ferait désormais **deux lignes pour un seul trajet**.
+
+Il est donc remplacé par `noteRecorded(id, from, to)` : une insertion **locale**,
+sans appel réseau — l'API vient d'écrire, nous avons l'identifiant et les deux
+extrémités, relire la collection pour retrouver ce qu'on sait déjà coûterait un
+aller-retour par recherche (C5).
+
+`apiClient.createSearchHistory` reste en place : l'endpoint existe toujours au
+contrat, il n'a simplement plus d'appelant dans ce parcours.
+
+Un `searchHistoryId` à `null` (écriture échouée côté serveur) n'est pas signalé :
+la liste n'est pas mise à jour, et c'est tout. Ne pas mémoriser un trajet est un
+désagrément, pas une panne de la recherche (C10).
+
+### Concurrence des recherches
+
+Une recherche relancée avant la fin de la précédente **écarte** la réponse
+périmée (compteur de requête dans `useRoutePlan`). Sans ce garde-fou, une
+première réponse lente écraserait une seconde plus rapide, et l'écran afficherait
+le trajet précédent — le bug classique de toute liste asynchrone.
+
+### Ce que le client ne recalcule pas
+
+Le tri, l'empreinte et l'écriture de l'historique sont faits par le serveur, qui
+**publie** ce qu'il a fait (`sortedBy`, `carbonGrams`, `searchHistoryId`).
+Rejouer ces décisions côté client garantirait qu'un jour les deux divergent. Le
+sélecteur se contente donc d'**annoncer** le classement appliqué (« classés par
+empreinte carbone croissante »), sans le déduire en comparant les valeurs.
+
+### Périmètre : ce qui reste à UF-404 et UF-405
+
+`itinerary-switcher.tsx` n'est **pas** le panneau de résultats de la maquette
+(cartes détaillées, pastilles de modes, prix, points gagnés, badge
+« Recommandé IA »). C'est l'objet d'UF-404. Ce ticket livre le strict nécessaire
+pour que le tracé soit _pilotable_ : un groupe de boutons radio portant durée,
+CO₂ et résumé des modes — la recette 4 exige de pouvoir changer d'itinéraire.
+
+De même, le bandeau « mode dégradé » alimenté par `sources[]` relève d'UF-405 :
+`useRoutePlan` expose déjà la donnée, personne ne l'affiche encore.
+
+### Accessibilité (C7)
+
+- **Le choix d'itinéraire est un groupe de boutons radio**, pas une série de
+  boutons : c'est ce qui dit aux technologies d'assistance qu'on désigne **un**
+  élément parmi plusieurs, et cela apporte la navigation aux flèches — au `Tab`
+  on entre dans le groupe et on en sort, sans le traverser option par option
+  (WCAG 4.1.2). L'état retenu se voit à la bordure et au texte autant qu'au fond
+  (WCAG 1.4.1). Chaque ligne fait au moins 44 px de haut (WCAG 2.5.5).
+- **L'attente est annoncée** : le bouton devient « Calcul en cours… » et est
+  désactivé, doublé d'un `role="status"` masqué (WCAG 4.1.3).
+- **Une liste vide est un résultat, pas une erreur** : elle est rendue en
+  `role="status"` et non en `role="alert"`. L'inverse enverrait l'usager vérifier
+  sa connexion pour rien.
+- **L'échec réseau est en `role="alert"`**, avec un message générique : le statut
+  HTTP et le détail renvoyé par l'API restent côté serveur (C11).
+- Le tracé lui-même : voir `components/map/README.md`.
