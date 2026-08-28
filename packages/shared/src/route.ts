@@ -44,6 +44,19 @@ export interface RouteSegment {
   carbonGrams: number;
   line?: string;
   /**
+   * Départ effectif du segment (ISO 8601 avec fuseau) — UF-404.
+   *
+   * Renseigné uniquement quand la **source** le connaît, c'est-à-dire pour les
+   * segments issus d'un trajet planifié par le moteur GTFS : un horaire de bus
+   * est une donnée de la source, pas un calcul. Un tronçon vélo ou une marche
+   * synthétisés à partir d'une distance et d'une vitesse n'ont, eux, aucun
+   * horaire propre — leur en inventer un ferait passer une estimation pour une
+   * information de réseau (C9).
+   */
+  departureAt?: string;
+  /** Arrivée effective du segment (ISO 8601 avec fuseau) — mêmes règles que {@link departureAt}. */
+  arrivalAt?: string;
+  /**
    * Tracé du **segment seul**, en `[lng, lat]` (UF-403).
    *
    * Publié en plus de la géométrie d'ensemble de l'itinéraire parce que la
@@ -71,6 +84,22 @@ export interface Itinerary {
   carbonGrams: number;
   accessible: boolean;
   segments: RouteSegment[];
+  /**
+   * Heure de départ porte-à-porte (ISO 8601 avec fuseau) — UF-404.
+   *
+   * Publiée pour que le panneau de résultats affiche « Départ 09:47 · Arrivée
+   * 10:03 » : sans horaires, deux options de même durée sont indiscernables
+   * alors que l'une part dans deux minutes et l'autre dans un quart d'heure.
+   *
+   * **Absente dès qu'aucun segment n'est horodaté** (itinéraire tout-vélo, par
+   * exemple) : il n'y a alors pas d'heure à annoncer, seulement une durée. La
+   * fenêtre est **ancrée** sur les segments que la source horodate, et les
+   * segments voisins sont décalés de leur propre durée — la même arithmétique
+   * que {@link durationMinutes}, qui les additionne déjà.
+   */
+  departureAt?: string;
+  /** Heure d'arrivée porte-à-porte (ISO 8601) — mêmes règles que {@link departureAt}. */
+  arrivalAt?: string;
   geometry?: LineStringGeometry;
 }
 

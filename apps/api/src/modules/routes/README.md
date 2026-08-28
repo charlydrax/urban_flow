@@ -312,6 +312,36 @@ tracés de segments recollés redonnent **exactement** la géométrie d'ensemble
 l'itinéraire : deux sources de vérité géométriques qui divergeraient
 afficheraient un trait coloré à côté du trajet réel.
 
+Trois cas y ont été ajoutés par UF-404, autour de la seule règle qui compte pour
+les horaires : **on n'en invente pas**. Un trajet TC republie ceux du moteur, un
+tout-vélo n'en a aucun, un rabattement à vélo ancre les siens sur le métro qu'il
+précède.
+
+## Horaires publiés (UF-404)
+
+Le panneau de résultats affiche « Départ 09:41 · Arrivée 10:03 ». Sans horaires,
+deux options de même durée sont indiscernables alors que l'une part dans deux
+minutes et l'autre dans un quart d'heure.
+
+| Champ                      | Portée              | Origine                                         |
+| -------------------------- | ------------------- | ----------------------------------------------- |
+| `RouteSegment.departureAt` | un segment          | l'horaire GTFS du moteur, quand il existe       |
+| `Itinerary.departureAt`    | l'itinéraire entier | ancré sur les segments datés, décalé des autres |
+
+**Un horaire est une donnée de source, pas un calcul.** Un pas TC en porte un
+parce que le réseau l'a publié ; un tronçon vélo synthétisé à partir d'une
+distance et d'une vitesse n'en a aucun, et lui en fabriquer un ferait passer une
+estimation pour une information de réseau.
+
+D'où la règle d'ancrage au niveau de l'itinéraire : la fenêtre part des segments
+que la source date, et les segments voisins sont décalés de **leur propre
+durée** — la même arithmétique que `durationMinutes`, qui les additionne déjà.
+Prendre le métro de 08:15 après onze minutes de vélo, c'est partir à 08:04.
+
+Quand **aucun** segment n'est daté (itinéraire tout-vélo), les deux champs sont
+absents : cet itinéraire ne part à aucune heure particulière, il part quand
+l'usager décide. Le client affiche alors sa seule durée.
+
 ## Géométrie publiée (C9)
 
 La réponse porte **deux niveaux** de tracé, et les deux sont nécessaires :

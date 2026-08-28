@@ -167,6 +167,17 @@ interface Step {
   durationMinutes: number;
   distanceMeters: number;
   line?: string;
+  /**
+   * Horaires réels du pas (ISO 8601), quand la **source** les connaît — UF-404.
+   *
+   * Seuls les pas issus d'un trajet planifié par le moteur GTFS en portent : un
+   * horaire de bus est une donnée du réseau. Un pas vélo ou une marche
+   * synthétisés à partir d'une distance et d'une vitesse n'ont pas d'horaire
+   * propre, et leur en fabriquer un ici ferait passer une estimation pour une
+   * donnée de source.
+   */
+  departureAt?: string;
+  arrivalAt?: string;
   /** Tracé du pas, en `[lng, lat]` (GeoJSON — C9). */
   geometry: [number, number][];
 }
@@ -312,6 +323,8 @@ function journeyToSteps(journey: TransitJourney, from: MergeEndpoint, to: MergeE
     durationMinutes: leg.durationMinutes,
     distanceMeters: leg.distanceMeters,
     ...(leg.line ? { line: leg.line } : {}),
+    departureAt: leg.departureAt,
+    arrivalAt: leg.arrivalAt,
     geometry: legGeometry(leg),
   }));
 }
@@ -661,6 +674,9 @@ function compactSteps(steps: readonly Step[]): Step[] {
       previous.toLabel = step.toLabel;
       previous.toPoint = step.toPoint;
       previous.geometry = [...previous.geometry, ...step.geometry];
+      // L'horaire suit la même règle que le libellé : le pas absorbé disparaît,
+      // mais le temps qu'il occupait, lui, est bien passé (UF-404).
+      if (step.arrivalAt) previous.arrivalAt = step.arrivalAt;
     }
   }
 
@@ -671,6 +687,7 @@ function compactSteps(steps: readonly Step[]): Step[] {
   if (firstKept && firstStep && firstStep.distanceMeters < MIN_LEG_METERS) {
     firstKept.fromLabel = firstStep.fromLabel;
     firstKept.fromPoint = firstStep.fromPoint;
+    if (firstStep.departureAt) firstKept.departureAt = firstStep.departureAt;
   }
 
   return kept;
@@ -791,6 +808,7 @@ function dedupe(candidates: readonly Candidate[]): Candidate[] {
 function toItinerary(candidate: Candidate): Itinerary {
   const segments = candidate.steps.map(toRouteSegment);
   const geometry = assembleGeometry(candidate.steps);
+  const window = itineraryWindow(candidate.steps);
 
   return {
     id: candidate.id,
@@ -800,8 +818,71 @@ function toItinerary(candidate: Candidate): Itinerary {
     carbonGrams: segments.reduce((total, segment) => total + segment.carbonGrams, 0),
     accessible: candidate.accessible,
     segments,
+    ...(window ?? {}),
     ...(geometry ? { geometry } : {}),
   };
+}
+
+/** Une minute en millisecondes — les horaires sont manipulés en epoch. */
+const MS_PER_MINUTE = 60_000;
+
+/**
+ * Fenêtre horaire porte-à-porte de l'itinéraire (UF-404).
+ *
+ * ## Ancrage plutôt que déduction
+ *
+ * Un itinéraire mixte n'est horodaté qu'en partie : le moteur GTFS date ses
+ * segments, un rabattement à vélo n'a pour lui qu'une durée. On **ancre** donc
+ * la fenêtre sur les segments datés, et on décale les autres de leur propre
+ * durée — exactement l'arithmétique que `totalDuration` applique déjà pour
+ * annoncer la durée totale. Prendre le bus de 09:47 après onze minutes de vélo,
+ * c'est partir à 09:36 ; ce n'est pas une supposition, c'est la définition de
+ * la durée qu'on affiche par ailleurs.
+ *
+ * Ce que ce calcul ne fait **pas** : inventer une heure là où il n'y a aucun
+ * ancrage. Un itinéraire entièrement vélo ne part à aucune heure particulière —
+ * il part quand l'usager décide, et sa carte n'affichera qu'une durée.
+ *
+ * @param steps Pas de la proposition, dans l'ordre du trajet
+ * @returns `departureAt`/`arrivalAt` ISO 8601, ou `null` si aucun pas n'est daté
+ */
+function itineraryWindow(
+  steps: readonly Step[],
+): { departureAt: string; arrivalAt: string } | null {
+  const firstDated = steps.findIndex((step) => step.departureAt !== undefined);
+  const lastDated = findLastIndex(steps, (step) => step.arrivalAt !== undefined);
+  if (firstDated === -1 || lastDated === -1) return null;
+
+  const anchorStart = steps[firstDated]?.departureAt;
+  const anchorEnd = steps[lastDated]?.arrivalAt;
+  if (!anchorStart || !anchorEnd) return null;
+
+  // Un horaire illisible n'est pas une panne : on n'affiche simplement pas
+  // d'heure, plutôt que de publier « Invalid Date » (C10).
+  const departure = Date.parse(anchorStart);
+  const arrival = Date.parse(anchorEnd);
+  if (Number.isNaN(departure) || Number.isNaN(arrival)) return null;
+
+  const leadMinutes = minutesOf(steps.slice(0, firstDated));
+  const trailMinutes = minutesOf(steps.slice(lastDated + 1));
+
+  return {
+    departureAt: new Date(departure - leadMinutes * MS_PER_MINUTE).toISOString(),
+    arrivalAt: new Date(arrival + trailMinutes * MS_PER_MINUTE).toISOString(),
+  };
+}
+
+/** `Array.prototype.findLastIndex` n'est pas disponible sur la cible ES du projet. */
+function findLastIndex(steps: readonly Step[], matches: (step: Step) => boolean): number {
+  for (let index = steps.length - 1; index >= 0; index -= 1) {
+    const step = steps[index];
+    if (step && matches(step)) return index;
+  }
+  return -1;
+}
+
+function minutesOf(steps: readonly Step[]): number {
+  return steps.reduce((total, step) => total + step.durationMinutes, 0);
 }
 
 /** Projette un pas sur un segment publié, empreinte comprise (barème du Service Carbone). */
@@ -816,6 +897,8 @@ function toRouteSegment(step: Step): RouteSegment {
     distanceMeters: step.distanceMeters,
     carbonGrams: segmentCarbonGrams(step.mode, step.distanceMeters),
     ...(step.line ? { line: step.line } : {}),
+    ...(step.departureAt ? { departureAt: step.departureAt } : {}),
+    ...(step.arrivalAt ? { arrivalAt: step.arrivalAt } : {}),
     ...(geometry ? { geometry } : {}),
   };
 }

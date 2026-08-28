@@ -599,6 +599,102 @@ describe('mergeIntoItineraries', () => {
     // moins de distance annoncée à qualité de service égale.
     expect(withFacility?.distanceMeters ?? 0).toBeLessThan(withoutFacility?.distanceMeters ?? 0);
   });
+
+  // ------------------------------------------------------- horaires (UF-404)
+
+  /**
+   * Le panneau de résultats affiche « Départ 08:00 · Arrivée 08:23 » : sans ces
+   * horaires, deux options de même durée sont indiscernables alors que l'une
+   * part dans deux minutes et l'autre dans un quart d'heure.
+   *
+   * La règle vérifiée ici est celle qui compte : on **n'invente pas** d'heure.
+   * Elle vient de la source quand elle existe, elle est ancrée dessus quand
+   * l'itinéraire n'est daté qu'en partie, et elle est absente sinon.
+   */
+  const TIMED_JOURNEY = journey({
+    legs: [
+      leg({
+        mode: TransportMode.WALK,
+        from: place('Origin', PART_DIEU.lat, PART_DIEU.lng),
+        to: place('Saxe-Gambetta', 45.7565, 4.848, 'TCL:1234'),
+        durationMinutes: 15,
+        distanceMeters: 1200,
+        departureAt: '2026-08-26T08:00:00+02:00',
+        arrivalAt: '2026-08-26T08:15:00+02:00',
+      }),
+      leg({
+        mode: TransportMode.METRO,
+        from: place('Saxe-Gambetta', 45.7565, 4.848, 'TCL:1234'),
+        to: place('Bellecour', 45.7578, 4.8325, 'TCL:5678'),
+        durationMinutes: 6,
+        distanceMeters: 2000,
+        line: 'B',
+        departureAt: '2026-08-26T08:15:00+02:00',
+        arrivalAt: '2026-08-26T08:21:00+02:00',
+      }),
+      leg({
+        mode: TransportMode.WALK,
+        from: place('Bellecour', 45.7578, 4.8325, 'TCL:5678'),
+        to: place('Destination', BELLECOUR.lat, BELLECOUR.lng),
+        durationMinutes: 2,
+        distanceMeters: 100,
+        departureAt: '2026-08-26T08:21:00+02:00',
+        arrivalAt: '2026-08-26T08:23:00+02:00',
+      }),
+    ],
+  });
+
+  const findItinerary = (result: ReturnType<typeof mergeIntoItineraries>, id: string) =>
+    result.itineraries.find((itinerary) => itinerary.id === id);
+
+  /** Le résultat de la fusion sur la collecte nominale, trajet TC horodaté compris. */
+  const timedResult = () =>
+    mergeIntoItineraries(sources({ journeys: [TIMED_JOURNEY] }), PART_DIEU, BELLECOUR, prefs());
+
+  it('publishes the GTFS schedule on transit segments and on the itinerary (UF-404)', () => {
+    const transit = findItinerary(timedResult(), 'transit-1');
+    expect(transit).toBeDefined();
+
+    // Bornes du trajet, reprises telles que le moteur les a publiées.
+    expect(Date.parse(transit?.departureAt ?? '')).toBe(Date.parse('2026-08-26T08:00:00+02:00'));
+    expect(Date.parse(transit?.arrivalAt ?? '')).toBe(Date.parse('2026-08-26T08:23:00+02:00'));
+
+    const metro = transit?.segments.find((segment) => segment.mode === TransportMode.METRO);
+    expect(Date.parse(metro?.departureAt ?? '')).toBe(Date.parse('2026-08-26T08:15:00+02:00'));
+    expect(Date.parse(metro?.arrivalAt ?? '')).toBe(Date.parse('2026-08-26T08:21:00+02:00'));
+  });
+
+  it('leaves an all-bike itinerary undated — it leaves whenever the rider does', () => {
+    const bike = findItinerary(timedResult(), 'bike');
+    expect(bike).toBeDefined();
+    expect(bike?.departureAt).toBeUndefined();
+    expect(bike?.arrivalAt).toBeUndefined();
+
+    // Aucun de ses segments n'est daté non plus : une vitesse moyenne n'est pas
+    // un horaire de réseau.
+    expect(bike?.segments.every((segment) => segment.departureAt === undefined)).toBe(true);
+  });
+
+  it('anchors a partly dated itinerary on its transit legs (bike feeder — UF-404)', () => {
+    const feeder = findItinerary(timedResult(), 'bike-transit');
+    expect(feeder).toBeDefined();
+
+    const segments = feeder?.segments ?? [];
+    const firstDatedIndex = segments.findIndex((segment) => segment.departureAt !== undefined);
+
+    // Le rabattement à vélo remplace la marche d'accès : il n'a pas d'horaire
+    // propre, mais il précède un métro qui, lui, en a un.
+    expect(firstDatedIndex).toBeGreaterThan(0);
+
+    const leadMinutes = segments
+      .slice(0, firstDatedIndex)
+      .reduce((total, segment) => total + segment.durationMinutes, 0);
+    const boarding = Date.parse(segments[firstDatedIndex]?.departureAt ?? '');
+
+    // L'heure de départ est celle du métro moins la durée du rabattement — la
+    // même arithmétique que la durée totale annoncée par ailleurs.
+    expect(Date.parse(feeder?.departureAt ?? '')).toBe(boarding - leadMinutes * 60_000);
+  });
 });
 
 /** Échantillonne une droite entre deux points, pour simuler un tracé cyclable. */
