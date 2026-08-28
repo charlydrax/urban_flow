@@ -106,7 +106,21 @@ describe('RoutesService', () => {
       { source: 'sharedMobility', available: true },
       { source: 'cyclePaths', available: true },
     ]);
-    computeFootprint = jest.fn().mockReturnValue(42);
+    // Depuis UF-501 le Service Carbone rend un objet : total, détail par
+    // segment et référence voiture. Le faux en reproduit la forme — ce que
+    // l'orchestrateur en fait (publier le total, réécrire les segments) ne se
+    // teste pas sur un nombre nu.
+    computeFootprint = jest.fn().mockImplementation((segments: { mode: TransportMode }[]) => ({
+      totalGrams: 42,
+      segments: segments.map((segment) => ({
+        mode: segment.mode,
+        distanceMeters: 1000,
+        factorGramsPerKm: 42,
+        grams: 42,
+      })),
+      carEquivalentGrams: 218,
+      avoidedGrams: 176,
+    }));
     createSearchHistory = jest.fn().mockResolvedValue({ id: 'history-1' });
 
     const moduleRef = await Test.createTestingModule({
@@ -177,10 +191,34 @@ describe('RoutesService', () => {
     const result = await service.plan(dto(), userId);
 
     expect(computeFootprint).toHaveBeenCalledTimes(result.itineraries.length);
-    expect(computeFootprint).toHaveBeenCalledWith(result.itineraries[0]?.segments);
+    // Les segments *publiés* ne sont plus ceux qui ont été passés au service :
+    // depuis UF-501 leur `carbonGrams` est réécrit avec la réponse. La
+    // comparaison porte donc sur ce qui identifie un segment — son mode et sa
+    // distance — et non sur l'objet entier.
+    expect(computeFootprint).toHaveBeenCalledWith(
+      result.itineraries[0]?.segments.map((segment) =>
+        expect.objectContaining({ mode: segment.mode, distanceMeters: segment.distanceMeters }),
+      ),
+    );
     // Le barème appartient au Service Carbone : la fusion ne fait qu'estimer
     // pour classer ses candidats, c'est cette valeur-ci qui est publiée.
     expect(result.itineraries.every((itinerary) => itinerary.carbonGrams === 42)).toBe(true);
+  });
+
+  it('publishes the per-segment breakdown, and lets it overwrite what the merge guessed (UF-501)', async () => {
+    const result = await service.plan(dto(), userId);
+    const [itinerary] = result.itineraries;
+
+    // Le détail accompagne le total : c'est lui qui rend le chiffre
+    // vérifiable à l'écran, ligne par ligne.
+    expect(itinerary?.carbon?.totalGrams).toBe(itinerary?.carbonGrams);
+    expect(itinerary?.carbon?.segments).toHaveLength(itinerary?.segments.length ?? 0);
+    expect(itinerary?.carbon?.carEquivalentGrams).toBe(218);
+
+    // Et les segments publiés portent la valeur du service, pas celle que la
+    // fusion avait estimée : deux chiffres pour la même chose finiraient par
+    // diverger, et c'est le service qui fait foi.
+    expect(itinerary?.segments.every((segment) => segment.carbonGrams === 42)).toBe(true);
   });
 
   it('publishes the sort key derived from the profile priority', async () => {
