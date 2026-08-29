@@ -33,7 +33,15 @@ export const metadata: Metadata = {
  */
 export default function ProfilePage() {
   return (
-    <div className="flex flex-col gap-6">
+    /*
+      Plafond de largeur propre à cette page (UF-606, C2/C7) : le conteneur
+      général monte à 1280 px pour le planificateur et le tableau de bord, mais
+      un formulaire de préférences ne gagne rien à s'étirer. Les descriptions
+      sous chaque case — « Seuls les itinéraires praticables en fauteuil… » —
+      s'y étalaient sur une seule ligne de près de 1000 px, largeur à laquelle
+      l'œil perd la ligne suivante (WCAG 1.4.8 : ~80 caractères).
+    */
+    <div className="flex max-w-3xl flex-col gap-6">
       <section aria-labelledby="profile-title">
         <h1 id="profile-title" className="mb-2 font-display text-2xl font-bold text-primary-dark">
           Mon profil

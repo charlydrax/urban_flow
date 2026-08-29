@@ -72,7 +72,14 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       lang="fr"
       className={`${plusJakarta.variable} ${bricolage.variable} ${jetbrains.variable}`}
     >
-      <body className="min-h-dvh bg-surface font-sans text-ink antialiased">
+      {/*
+        Colonne flex, et pas seulement `min-h-dvh` (UF-606, C2) : le `flex-1`
+        que porte `<main>` était inopérant sur un `<body>` en flux normal. Sur
+        une page courte — bilan carbone vide, écran de chargement — le pied de
+        page remontait donc au milieu de la fenêtre, sous une bande de fond
+        vide. Il est désormais poussé en bas.
+      */}
+      <body className="flex min-h-dvh flex-col bg-surface font-sans text-ink antialiased">
         <SessionProvider initialUser={user}>
           <a href="#contenu" className="skip-link">
             Aller au contenu principal
@@ -87,12 +94,25 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           */}
           <OfflineBanner />
 
-          <main id="contenu" className="mx-auto w-full max-w-5xl flex-1 px-4 py-6">
+          {/*
+            `max-w-7xl` (1280 px) et non plus `max-w-5xl` (1024 px) — UF-606, C2.
+
+            Les maquettes « 03 · MAQUETTES DESKTOP » sont dessinées à 1440 px et
+            posent le planificateur en vue scindée, carte large à droite. Bridée
+            à 1024 px, la carte tombait à ~470 px sur un écran de 1440 : plus
+            étroite que sur la maquette, alors que c'est l'écran de démonstration.
+
+            Ce plafond est celui des **pages larges** (planificateur, tableau de
+            bord carbone). Les pages de lecture et de formulaire — politique de
+            confidentialité, profil — reposent leur propre plafond, plus étroit :
+            une ligne de texte de 1280 px de long ne se lit pas (C7).
+          */}
+          <main id="contenu" className="mx-auto w-full max-w-7xl flex-1 px-4 py-6">
             {children}
           </main>
 
           <footer className="border-t border-ink-200 bg-white">
-            <div className="mx-auto max-w-5xl px-4 py-4 text-sm">
+            <div className="mx-auto max-w-7xl px-4 py-4 text-sm">
               <p>UrbanFlow Mobility — prototype T6 CDSD. </p>
               {/* UF-603 : la politique de confidentialité est joignable depuis
                   n'importe quelle page, connecté ou non — c'est la condition

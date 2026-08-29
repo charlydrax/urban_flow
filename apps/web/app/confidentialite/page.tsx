@@ -125,7 +125,14 @@ const SAFEGUARDS: SafeguardRow[] = [
  */
 export default function PrivacyPolicyPage() {
   return (
-    <div className="flex flex-col gap-8">
+    /*
+      Page de lecture : plafond propre à 768 px (UF-606, C2/C7). Le conteneur
+      général monte à 1280 px pour les écrans larges du produit ; un texte
+      juridique lu de bout en bout n'en veut pas. Les paragraphes portaient déjà
+      `max-w-prose`, mais pas les tableaux ni les encadrés de droits, qui
+      s'étiraient seuls sur toute la largeur.
+    */
+    <div className="flex max-w-3xl flex-col gap-8">
       <section aria-labelledby="privacy-title">
         <h1 id="privacy-title" className="mb-2 font-display text-2xl font-bold text-primary-dark">
           Politique de confidentialité

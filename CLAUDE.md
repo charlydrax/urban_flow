@@ -215,3 +215,51 @@ CREATE EXTENSION IF NOT EXISTS postgis;
 - Respecter le **flux de référence** (section 4) et l'architecture (section 6).
 - **Ne pas rédiger le dossier à ma place** : assister, expliquer, relire — l'usage de l'IA doit rester limité et justifiable.
 - Rester dans le périmètre : aucune fonctionnalité hors brief sans validation explicite.
+
+---
+
+## 10. Défauts connus, identifiés mais non corrigés
+
+> Registre des problèmes **repérés et diagnostiqués** au fil des tickets, dont la
+> correction a été volontairement remise à une passe dédiée. À traiter lors d'une
+> session « correction de bugs ». Retirer l'entrée une fois le défaut corrigé.
+>
+> Chaque entrée est doublée d'une **issue GitHub portant le label `bug`** — c'est
+> le suivi que met en place UF-607 (#80). Ce registre en est le rappel local :
+> il est lu à chaque session, l'issue ne l'est pas. L'issue reste la référence
+> pour le détail, les options écartées et la recette.
+
+### 10.1 `npm run format:check` échoue sur ~45 fichiers non modifiés (CRLF)
+
+**Ticket :** [BUG-001 — #87](https://github.com/charlydrax/urban_flow/issues/87)
+· **Identifié le** 29/08/2026, pendant UF-606 (#79) · **Priorité** basse.
+
+**Symptôme.** `npm run format:check` (racine) signale « Code style issues » sur
+une quarantaine de fichiers que personne n'a touchés — `packages/shared/src/index.ts`,
+`apps/web/vitest.config.ts`, `apps/web/test/axe.ts`, etc. `git status` les donne
+pourtant pour non modifiés. Le rouge est donc **permanent** et sans rapport avec
+le ticket en cours.
+
+**Cause.** `core.autocrlf=true` (configuration Git habituelle sous Windows) écrit
+du **CRLF** dans la copie de travail, alors que `.prettierrc` impose
+`"endOfLine": "lf"`. `.gitattributes` ne force `eol=lf` que sur `*.sh`,
+`Dockerfile` et `*.dockerfile` — l'exception posée en UF-301 pour Docker.
+
+**Portée.** Le défaut est **local à Windows**. La CI tourne sur `ubuntu-latest`,
+où l'extraction se fait en LF : elle n'est pas affectée, et le dépôt ne contient
+que du LF. C'est donc une gêne de poste de travail, pas un défaut livré — d'où
+la priorité basse, mais elle coûte un faux positif à chaque ticket.
+
+**Ce qu'il ne faut pas faire.** Reformater ces fichiers depuis une branche de
+fonctionnalité : le diff de bruit noierait la revue. La renormalisation se fait
+dans un commit `chore:` isolé, sur une branche dédiée, **avant** tout autre
+travail. La marche à suivre complète, la vérification qu'aucun contenu ne change
+et les options écartées sont dans l'issue #87 — pas recopiées ici, pour qu'il
+n'y ait qu'une version à tenir à jour.
+
+**En attendant.** Vérifier le formatage sur les seuls fichiers de la branche —
+`npx prettier --check <fichiers>` — plutôt que via `npm run format:check`. Le
+hook `lint-staged` n'est pas affecté : il ne traite que les fichiers indexés.
+
+⚠️ Un fichier **créé** pendant une session peut repasser en CRLF après un
+aller-retour `git stash`. Le remettre en LF avant de commiter.

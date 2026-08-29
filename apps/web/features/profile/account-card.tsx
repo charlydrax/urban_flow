@@ -49,8 +49,21 @@ export function AccountCard() {
         {initialsFromEmail(user.email)}
       </span>
 
-      <div className="min-w-0 flex-1">
-        <p className="text-sm font-bold break-all text-ink">{user.email}</p>
+      {/*
+        `basis-48` : c'est lui qui déclenche le repli du bouton (UF-606, C2).
+
+        En `flex-1` seul, la base valait 0 — la ligne « tenait » donc toujours,
+        `flex-wrap` ne se déclenchait jamais, et sur un écran de 375 px l'e-mail
+        se retrouvait comprimé à ~120 px entre la pastille et le bouton :
+        « marie@u / rbanflo / w.dev » sur trois lignes. Avec une base de 12 rem,
+        la somme des éléments dépasse la ligne sous ~470 px et le bouton passe
+        dessous, à sa taille normale.
+
+        `break-words` et non `break-all` : on ne coupe un mot que s'il ne rentre
+        vraiment pas, au lieu de le hacher dès qu'il touche le bord.
+      */}
+      <div className="min-w-0 flex-1 basis-48">
+        <p className="text-sm font-bold break-words text-ink">{user.email}</p>
         <p className="text-xs text-ink-700">Compte UrbanFlow Mobility</p>
       </div>
 

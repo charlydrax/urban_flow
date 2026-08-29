@@ -39,6 +39,20 @@ jobs:
       - name: Lint (shared + api + web)
         run: npm run lint
 
+      # `apps/api` et `apps/web` importent `@urbanflow/shared` depuis son `dist` :
+      # sans cette compilation, `tsc --noEmit` échouerait sur un module absent.
+      # Le job de test fait déjà la même chose, pour la même raison.
+      - name: Build shared package
+        run: npm run build:shared
+
+      # `next build` ne type-vérifie que le graphe de l'application : les
+      # fichiers de test en sont exclus. Un `RoutePriority.ECO` inexistant a
+      # ainsi vécu sur `main` sans faire rougir la CI, en valant `undefined` au
+      # montage d'un composant testé (trouvé et corrigé en UF-606). Cette étape
+      # passe `tsc --noEmit` sur les trois workspaces, tests compris — C3.
+      - name: Typecheck (shared + api + web, tests inclus)
+        run: npm run typecheck
+
       - name: Build (shared + api + web)
         run: npm run build
         env:
