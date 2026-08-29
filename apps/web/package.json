@@ -8,6 +8,7 @@
     "build": "npm run build:sw && next build",
     "start": "next start",
     "lint": "eslint .",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:a11y": "vitest run --project a11y",
     "test:watch": "vitest",

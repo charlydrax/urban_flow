@@ -215,3 +215,59 @@ CREATE EXTENSION IF NOT EXISTS postgis;
 - Respecter le **flux de référence** (section 4) et l'architecture (section 6).
 - **Ne pas rédiger le dossier à ma place** : assister, expliquer, relire — l'usage de l'IA doit rester limité et justifiable.
 - Rester dans le périmètre : aucune fonctionnalité hors brief sans validation explicite.
+
+---
+
+## 10. Défauts connus, identifiés mais non corrigés
+
+> Registre des problèmes **repérés et diagnostiqués** au fil des tickets, dont la
+> correction a été volontairement remise à une passe dédiée. À traiter lors d'une
+> session « correction de bugs ». Retirer l'entrée une fois le défaut corrigé.
+
+### 10.1 `npm run format:check` échoue sur ~45 fichiers non modifiés (CRLF)
+
+**Identifié le** 29/08/2026, pendant UF-606.
+
+**Symptôme.** `npm run format:check` (racine) signale « Code style issues » sur
+une quarantaine de fichiers que personne n'a touchés — `packages/shared/src/index.ts`,
+`apps/web/vitest.config.ts`, `apps/web/test/axe.ts`, etc. `git status` les donne
+pourtant pour non modifiés. Le rouge est donc **permanent** et sans rapport avec
+le ticket en cours.
+
+**Cause.** `core.autocrlf=true` (configuration Git habituelle sous Windows) écrit
+du **CRLF** dans la copie de travail, alors que `.prettierrc` impose
+`"endOfLine": "lf"`. `.gitattributes` ne force `eol=lf` que sur `*.sh`,
+`Dockerfile` et `*.dockerfile` — l'exception posée en UF-301 pour Docker.
+
+**Portée.** Le défaut est **local à Windows**. La CI tourne sur `ubuntu-latest`,
+où l'extraction se fait en LF : elle n'est pas affectée, et le dépôt ne contient
+que du LF. C'est donc une gêne de poste de travail, pas un défaut livré — d'où
+la priorité basse, mais elle coûte un faux positif à chaque ticket.
+
+**Ce qu'il ne faut pas faire.** Reformater les 45 fichiers depuis une branche de
+fonctionnalité : cela produit un diff de bruit massif, sans rapport avec le
+ticket, qui noie la revue.
+
+**Correction proposée**, à faire dans un commit `chore:` **isolé**, sur une
+branche dédiée, et en premier (avant tout autre travail, pour ne pas mélanger
+renormalisation et modifications réelles) :
+
+```bash
+# 1. Étendre .gitattributes à tout le dépôt
+echo '* text=auto eol=lf' >> .gitattributes
+
+# 2. Renormaliser l'index et la copie de travail
+git add --renormalize .
+git status            # vérifier que SEULES des fins de ligne changent
+git commit -m "chore: normalize line endings to LF across the repo"
+
+# 3. Vérifier
+npm run format:check  # doit être vert
+```
+
+**En attendant.** Vérifier le formatage sur les seuls fichiers de la branche —
+`npx prettier --check <fichiers>` — plutôt que via `npm run format:check`. Le
+hook `lint-staged` n'est pas affecté : il ne traite que les fichiers indexés.
+
+⚠️ Un fichier **créé** pendant une session peut repasser en CRLF après un
+aller-retour `git stash`. Le remettre en LF avant de commiter.
