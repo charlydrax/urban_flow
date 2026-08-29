@@ -1,0 +1,11 @@
+# Revisions a ignorer dans `git blame` — BUG-001 (#87).
+#
+# Ces commits ne changent aucun contenu : ils ne font que reecrire des fins de
+# ligne ou reformater. Sans ce fichier, la renormalisation LF ferait remonter
+# tout le depot a un unique commit `chore:` et rendrait `git blame` inutile.
+#
+# GitHub le lit automatiquement. En local, une fois par clone :
+#     git config blame.ignoreRevsFile .git-blame-ignore-revs
+
+# chore: normalize line endings to LF across the repo (BUG-001, #87)
+d00a796fab9a9507adbae66d38a6e856d5c3f850
