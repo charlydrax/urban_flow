@@ -223,10 +223,16 @@ CREATE EXTENSION IF NOT EXISTS postgis;
 > Registre des problèmes **repérés et diagnostiqués** au fil des tickets, dont la
 > correction a été volontairement remise à une passe dédiée. À traiter lors d'une
 > session « correction de bugs ». Retirer l'entrée une fois le défaut corrigé.
+>
+> Chaque entrée est doublée d'une **issue GitHub portant le label `bug`** — c'est
+> le suivi que met en place UF-607 (#80). Ce registre en est le rappel local :
+> il est lu à chaque session, l'issue ne l'est pas. L'issue reste la référence
+> pour le détail, les options écartées et la recette.
 
 ### 10.1 `npm run format:check` échoue sur ~45 fichiers non modifiés (CRLF)
 
-**Identifié le** 29/08/2026, pendant UF-606.
+**Ticket :** [BUG-001 — #87](https://github.com/charlydrax/urban_flow/issues/87)
+· **Identifié le** 29/08/2026, pendant UF-606 (#79) · **Priorité** basse.
 
 **Symptôme.** `npm run format:check` (racine) signale « Code style issues » sur
 une quarantaine de fichiers que personne n'a touchés — `packages/shared/src/index.ts`,
@@ -244,26 +250,12 @@ où l'extraction se fait en LF : elle n'est pas affectée, et le dépôt ne cont
 que du LF. C'est donc une gêne de poste de travail, pas un défaut livré — d'où
 la priorité basse, mais elle coûte un faux positif à chaque ticket.
 
-**Ce qu'il ne faut pas faire.** Reformater les 45 fichiers depuis une branche de
-fonctionnalité : cela produit un diff de bruit massif, sans rapport avec le
-ticket, qui noie la revue.
-
-**Correction proposée**, à faire dans un commit `chore:` **isolé**, sur une
-branche dédiée, et en premier (avant tout autre travail, pour ne pas mélanger
-renormalisation et modifications réelles) :
-
-```bash
-# 1. Étendre .gitattributes à tout le dépôt
-echo '* text=auto eol=lf' >> .gitattributes
-
-# 2. Renormaliser l'index et la copie de travail
-git add --renormalize .
-git status            # vérifier que SEULES des fins de ligne changent
-git commit -m "chore: normalize line endings to LF across the repo"
-
-# 3. Vérifier
-npm run format:check  # doit être vert
-```
+**Ce qu'il ne faut pas faire.** Reformater ces fichiers depuis une branche de
+fonctionnalité : le diff de bruit noierait la revue. La renormalisation se fait
+dans un commit `chore:` isolé, sur une branche dédiée, **avant** tout autre
+travail. La marche à suivre complète, la vérification qu'aucun contenu ne change
+et les options écartées sont dans l'issue #87 — pas recopiées ici, pour qu'il
+n'y ait qu'une version à tenir à jour.
 
 **En attendant.** Vérifier le formatage sur les seuls fichiers de la branche —
 `npx prettier --check <fichiers>` — plutôt que via `npm run format:check`. Le
