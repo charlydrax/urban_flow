@@ -27,7 +27,11 @@ const PROFILE: UserProfile = {
   geolocationConsentAt: '2026-01-12T09:01:00+01:00',
   preferences: {
     preferredModes: [TransportMode.WALK, TransportMode.BIKE, TransportMode.BUS],
-    priority: RoutePriority.ECO,
+    // `RoutePriority.ECO` n'existe pas — l'énumération publie `GREENEST`
+    // (UF-606, C3). Le membre absent valait `undefined` : le formulaire était
+    // donc monté sans priorité sélectionnée, et l'audit d'accessibilité jugeait
+    // un groupe de boutons radio vide plutôt que le groupe réel.
+    priority: RoutePriority.GREENEST,
     maxWalkMinutes: 15,
     reducedMobility: false,
   },

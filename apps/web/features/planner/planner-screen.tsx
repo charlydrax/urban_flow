@@ -121,9 +121,24 @@ export function PlannerScreen() {
   const selectedItinerary =
     routePlan.itineraries.find((itinerary) => itinerary.id === routePlan.selectedId) ?? null;
 
+  /*
+    `min-w-0` sur les DEUX colonnes, et pas seulement sur la grille (UF-606, C2).
+
+    Un élément de grille a un `min-width: auto` implicite : sa piste ne descend
+    jamais sous la **taille min-content** de son contenu. Or cette colonne
+    contient des libellés d'adresses en `truncate` (`white-space: nowrap`, donc
+    min-content = largeur du texte entier) et l'autre un `<canvas>` MapLibre, qui
+    porte une largeur intrinsèque. Sans ce plancher à zéro, la piste unique du
+    mode mobile s'élargissait à la plus longue adresse de l'historique — 489 px
+    mesurés sur un écran de 375 px, soit toute la page qui défilait
+    horizontalement, en-tête et pied de page compris.
+
+    Ce n'est pas un détail cosmétique : c'est ce qui rend le `truncate` effectif.
+    Tant que la piste s'élargissait, l'ellipse ne se déclenchait jamais.
+  */
   return (
-    <div className="grid gap-6 md:grid-cols-[minmax(0,360px)_1fr]">
-      <div className="flex flex-col gap-4">
+    <div className="grid gap-6 md:grid-cols-[minmax(0,360px)_minmax(0,1fr)]">
+      <div className="flex min-w-0 flex-col gap-4">
         <PlannerForm
           location={location}
           history={history}
