@@ -8,6 +8,8 @@ import {
 } from '@nestjs/common';
 import { Request, Response } from 'express';
 
+import { getRequestId } from '../logging/request-context';
+
 /**
  * Filtre d'exceptions global : normalise toutes les réponses d'erreur de l'API.
  *
@@ -17,6 +19,11 @@ import { Request, Response } from 'express';
  * - La journalisation ne contient AUCUNE donnée personnelle : uniquement
  *   méthode, chemin et statut — jamais le corps de la requête ni les
  *   coordonnées de déplacement (C11).
+ * - Chaque réponse d'erreur porte le `requestId` de la requête (UF-607) : c'est
+ *   la seule information que l'usager peut recopier dans un signalement de
+ *   bogue pour qu'on retrouve la trace serveur correspondante. Elle est
+ *   volontairement opaque — un identifiant tiré au sort ne dit rien de notre
+ *   topologie ni de l'incident (C11), il sert seulement de clé de jointure.
  */
 @Catch()
 export class GlobalExceptionFilter implements ExceptionFilter {
@@ -35,7 +42,12 @@ export class GlobalExceptionFilter implements ExceptionFilter {
         ? exception.getResponse()
         : { statusCode: status, message: 'Internal server error' };
 
-    // C11 : log technique sans données personnelles (pas de body, pas de coordonnées)
+    const requestId = getRequestId();
+
+    // C11 : log technique sans données personnelles (pas de body, pas de coordonnées).
+    // Le `requestId` n'est pas répété dans le message : le journal structuré le
+    // porte déjà comme champ propre (UF-607), et un champ se filtre, pas une
+    // sous-chaîne de phrase.
     if (status >= HttpStatus.INTERNAL_SERVER_ERROR) {
       this.logger.error(
         `${request.method} ${request.path} -> ${status}`,
@@ -45,12 +57,12 @@ export class GlobalExceptionFilter implements ExceptionFilter {
       this.logger.warn(`${request.method} ${request.path} -> ${status}`);
     }
 
-    response
-      .status(status)
-      .json(
-        typeof body === 'string'
-          ? { statusCode: status, message: body, timestamp: new Date().toISOString() }
-          : { ...body, timestamp: new Date().toISOString() },
-      );
+    const envelope = typeof body === 'string' ? { statusCode: status, message: body } : { ...body };
+
+    response.status(status).json({
+      ...envelope,
+      timestamp: new Date().toISOString(),
+      ...(requestId === undefined ? {} : { requestId }),
+    });
   }
 }

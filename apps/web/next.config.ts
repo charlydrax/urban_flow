@@ -34,6 +34,17 @@ const nextConfig: NextConfig = {
    * serveur en cours. Aucun effet sur les builds ordinaires ni sur la CI.
    */
   distDir: process.env.NEXT_DIST_DIR ?? '.next',
+  /*
+   * Sortie autonome, activée uniquement par `NEXT_OUTPUT=standalone` (UF-607).
+   *
+   * Le build trace alors les modules réellement importés et les recopie à côté
+   * d'un serveur minimal : c'est ce qui permet à l'image de préproduction de se
+   * passer d'un `node_modules` complet (C5). Conditionnée plutôt qu'activée en
+   * permanence parce qu'elle change la sortie du build — `npm run dev`, la CI
+   * et la mesure de budget éco (UF-605) doivent continuer de voir le `.next`
+   * habituel, sans quoi on mesurerait autre chose que ce qu'on livre.
+   */
+  output: process.env.NEXT_OUTPUT === 'standalone' ? 'standalone' : undefined,
   // Racine du monorepo (un lockfile parasite existe dans le dossier utilisateur)
   outputFileTracingRoot: path.join(__dirname, '../../'),
   async headers() {

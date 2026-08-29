@@ -14,6 +14,8 @@ import type {
   UserProfile,
 } from '@urbanflow/shared';
 
+import { resolveApiBaseUrl } from './api-base-url';
+import { recordApiRequestId } from './error-reporting';
 import { isServedFromCache } from './offline';
 
 /** Erreur API normalisée (corps du filtre d'exceptions global côté NestJS). */
@@ -27,23 +29,10 @@ export class ApiError extends Error {
   }
 }
 
-/**
- * Résout l'URL de base de l'API depuis l'environnement (UF-004) : jamais en dur.
- * En production, une variable absente est une erreur de configuration explicite
- * (fail-fast, C4) ; en développement seulement, repli sur l'API locale.
- */
-function resolveBaseUrl(): string {
-  const url = process.env.NEXT_PUBLIC_API_URL;
-  if (url) return url;
-  if (process.env.NODE_ENV === 'production') {
-    throw new Error(
-      'NEXT_PUBLIC_API_URL is not defined - set it in apps/web/.env (see apps/web/.env.example)',
-    );
-  }
-  return 'http://localhost:3001/api';
-}
-
-const BASE_URL = resolveBaseUrl();
+// URL de base résolue une fois (UF-004) — la logique vit dans `api-base-url.ts`,
+// partagée avec le signalement d'erreurs (UF-607) pour qu'il n'existe qu'un
+// seul fail-fast de configuration.
+const BASE_URL = resolveApiBaseUrl();
 
 /** Réaction applicative à une session invalide — branchée par `SessionProvider` (UF-106). */
 type UnauthorizedHandler = () => void;
@@ -108,6 +97,12 @@ async function request<T>(path: string, options?: RequestOptions): Promise<T> {
     headers: { 'Content-Type': 'application/json', ...init.headers },
     ...init,
   });
+
+  // UF-607 : mémorise l'identifiant de corrélation renvoyé par l'API, pour
+  // qu'un plantage d'écran survenant ensuite puisse pointer la requête qui l'a
+  // précédé. Placé avant le traitement des erreurs : c'est justement sur une
+  // réponse en échec que la corrélation sert le plus.
+  recordApiRequestId(response.headers);
 
   onResponse?.(response);
 

@@ -1,0 +1,55 @@
+# Taxonomie des labels du dépôt (UF-607) — référence écrite du suivi de bogues.
+#
+# GitHub ne versionne pas ses labels : ils vivent dans les réglages du dépôt, où
+# personne ne les relit et où rien n'explique pourquoi ils existent. Ce fichier
+# est la source de vérité documentaire ; il se rejoue à l'identique avec
+# `gh label create` (voir docs/bug-process.md, § « Outillage »).
+#
+# Deux dimensions seulement, et c'est délibéré : le TYPE (de quoi s'agit-il) et
+# la PRIORITÉ (dans quel ordre). Une taxonomie plus riche — composant, sprint,
+# difficulté — ne serait pas tenue à jour par une équipe d'une personne, et un
+# label faux est pire qu'un label absent.
+
+- name: bug
+  color: d73a4a
+  description: 'Comportement fautif du produit — voir docs/bug-process.md'
+
+- name: regression
+  color: b60205
+  description: 'Fonctionnait avant : à traiter en priorité et à couvrir par un test'
+
+- name: needs-triage
+  color: ededed
+  description: 'Signalé mais pas encore priorisé — retiré à la revue de tri'
+
+- name: 'priority: P0'
+  color: b60205
+  description: 'Bloquant : produit inutilisable ou donnée exposée — correction immédiate'
+
+- name: 'priority: P1'
+  color: d93f0b
+  description: 'Majeur : une fonctionnalité du périmètre est cassée — avant toute nouvelle fonctionnalité'
+
+- name: 'priority: P2'
+  color: fbca04
+  description: 'Mineur : gêne réelle avec contournement — planifié dans un sprint'
+
+- name: 'priority: P3'
+  color: c2e0c6
+  description: 'Cosmétique : sans effet fonctionnel — traité quand la charge le permet'
+
+- name: 'env: preprod'
+  color: 1d76db
+  description: 'Observé en préproduction (le plus proche de la livraison)'
+
+- name: 'env: dev'
+  color: c5def5
+  description: 'Observé en développement local uniquement'
+
+- name: documentation
+  color: 0075ca
+  description: 'Documentation du code ou du dossier projet'
+
+- name: enhancement
+  color: a2eeef
+  description: 'Évolution fonctionnelle — hors correction de défaut'

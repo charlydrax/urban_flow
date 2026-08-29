@@ -32,18 +32,22 @@ main ──●──────●──────────●────
    `feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `chore:` (+ référence `(UF-xxx)`).
 4. `git push -u origin feat/uf-xxx-description` puis ouvrir une **Pull Request**
    vers `main` (titre = ticket, description = résumé + recette).
-5. La **CI doit être verte** (format + lint + typecheck + build + tests) avant merge.
-6. Merge dans `main`, suppression de la branche distante.
+5. La **CI doit être verte** (format + lint + typecheck + build + tests, plus le
+   build des images de préproduction sur une PR) avant merge.
+6. Pour un **correctif de bogue**, rejouer le scénario en préproduction
+   (`make preprod-up`) avant de fusionner — voir [`bug-process.md`](bug-process.md).
+7. Merge dans `main`, suppression de la branche distante.
 
 ## Intégration continue (GitHub Actions)
 
 Fichier : [`.github/workflows/ci.yml`](../.github/workflows/ci.yml).
 Déclenchée sur **chaque push** (toutes branches) et chaque **PR vers `main`**.
 
-| Job          | Étapes                                                                                                 | Rôle                                                                                                  |
-| ------------ | ------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------- |
-| `lint-build` | `npm ci` → `format:check` → `prisma generate` → `npm run lint` → `npm run typecheck` → `npm run build` | Vérifie normes de code (C3) et compilation du front (Next.js), du back (NestJS) et du package partagé |
-| `test`       | `npm ci` → `prisma generate` → build shared → `npm run test`                                           | Exécute Jest (api) et Vitest (web) — prêt pour les sprints suivants                                   |
+| Job              | Étapes                                                                                                 | Rôle                                                                                                  |
+| ---------------- | ------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------- |
+| `lint-build`     | `npm ci` → `format:check` → `prisma generate` → `npm run lint` → `npm run typecheck` → `npm run build` | Vérifie normes de code (C3) et compilation du front (Next.js), du back (NestJS) et du package partagé |
+| `test`           | `npm ci` → `prisma generate` → build shared → `npm run test`                                           | Jest (api, dont les parcours critiques de bout en bout) et Vitest (web, dont l'audit a11y)            |
+| `preprod-images` | Build des images Docker `apps/api` et `apps/web` (**PR vers `main` uniquement**)                       | Garantit que l'environnement de préproduction reste constructible (UF-607)                            |
 
 Particularités :
 
@@ -59,6 +63,10 @@ Particularités :
   absente (UF-004, C4).
 - **`concurrency`** annule les runs obsolètes sur une même branche (C5,
   éco-conception : pas de minutes CI gaspillées).
+- **`preprod-images`** ne tourne que sur les PR vers `main` : construire deux
+  images à chaque commit de branche coûterait plusieurs minutes pour une
+  information qui n'est décisive qu'au moment de fusionner (C5). Le cache
+  GitHub Actions (`type=gha`) évite de réinstaller les dépendances à chaque run.
 
 ## Recette du ticket UF-009
 

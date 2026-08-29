@@ -20,7 +20,8 @@ urbanflow/
 │   └── shared/     # Types TypeScript partagés front/back (DTO, itinéraires, TransportMode)
 ├── docs/           # Diagrammes UML, specs, captures
 ├── docker/         # Services conteneurisés (init PostGIS, OpenTripPlanner)
-├── docker-compose.yml  # Base PostGIS + moteur de routage OTP
+├── docker-compose.yml          # Développement : base PostGIS + moteur de routage OTP
+├── docker-compose.preprod.yml  # Préproduction : base, API et PWA en images construites
 └── CLAUDE.md       # Contexte projet & conventions
 ```
 
@@ -107,6 +108,22 @@ make otp-test  # recette : calcule un trajet Part-Dieu -> Bellecour
 make help      # liste toutes les cibles
 ```
 
+### Préproduction (UF-607)
+
+Environnement **distinct** du développement, qui fait tourner le code tel qu'il serait
+livré (images construites, `NODE_ENV=production`, journaux JSON) : c'est là qu'on rejoue
+un bogue et qu'on valide un correctif avant de le fondre dans `main`.
+
+```bash
+make preprod-up        # construit les images et démarre : PWA 3100, API 3101, base 5434
+make preprod-migrate   # applique les migrations sur la base de préproduction
+make preprod-health    # sonde /api/health (API + base)
+make preprod-logs-api  # journaux JSON de l'API
+```
+
+Prérequis : `PREPROD_POSTGRES_PASSWORD` et `PREPROD_JWT_SECRET` dans le `.env` racine
+(voir `.env.example`). Détail complet : [`docs/preproduction.md`](docs/preproduction.md).
+
 Les serveurs applicatifs restent lancés via npm (`npm run dev:api` / `npm run dev:web`).
 
 ## Commandes utiles
@@ -183,6 +200,11 @@ cd apps/web && npm run eco:budget   # poids des pages — échoue si un budget e
 Lint strict (ESLint + Prettier partagés), hooks Git (Husky : lint-staged en `pre-commit`,
 commitlint en `commit-msg`) et convention **Conventional Commits** — voir
 [`CONTRIBUTING.md`](CONTRIBUTING.md) et [`docs/git-workflow.md`](docs/git-workflow.md).
+
+Le traitement des défauts — détection par les journaux structurés et la remontée d'erreurs
+front, priorisation P0→P3, correction couverte par un test, validation en préproduction —
+est décrit dans [`docs/bug-process.md`](docs/bug-process.md). Les signalements passent par
+le formulaire d'issue « 🐞 Bogue » du dépôt.
 
 ## Contraintes techniques
 

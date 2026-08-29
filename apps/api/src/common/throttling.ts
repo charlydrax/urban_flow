@@ -64,6 +64,20 @@ export const AUTH_THROTTLE_LIMIT = 5;
 export const PLAN_THROTTLE_LIMIT = 20;
 
 /**
+ * Plafond du signalement d'erreurs front (`POST /diagnostics/client-errors`).
+ *
+ * 10 signalements par minute et par IP. L'endpoint est **ouvert** (UF-607) :
+ * sans plafond serré, il devient un robinet à lignes de journal, et noyer les
+ * traces est une façon connue d'effacer les siennes (OWASP A09). Dix, c'est
+ * plus qu'un usager n'en produit — un écran qui casse émet un signalement, pas
+ * une rafale — et assez peu pour qu'un script n'aille nulle part.
+ *
+ * Le rejet 429 n'a aucun coût pour l'usager : le front ignore déjà le résultat
+ * de ce signalement, un envoi perdu ne dégrade pas son écran.
+ */
+export const CLIENT_ERROR_THROTTLE_LIMIT = 10;
+
+/**
  * Options du `ThrottlerModule` racine.
  *
  * Le stockage est celui par défaut : **en mémoire du processus**. Suffisant
@@ -92,3 +106,10 @@ export const ThrottleAuth = (): MethodDecorator & ClassDecorator =>
  */
 export const ThrottlePlan = (): MethodDecorator & ClassDecorator =>
   Throttle({ default: { ttl: ONE_MINUTE_MS, limit: PLAN_THROTTLE_LIMIT } });
+
+/**
+ * Décorateur du collecteur d'erreurs front — endpoint ouvert (UF-607).
+ * @see CLIENT_ERROR_THROTTLE_LIMIT pour la justification du seuil
+ */
+export const ThrottleClientErrors = (): MethodDecorator & ClassDecorator =>
+  Throttle({ default: { ttl: ONE_MINUTE_MS, limit: CLIENT_ERROR_THROTTLE_LIMIT } });

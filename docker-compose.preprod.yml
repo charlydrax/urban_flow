@@ -1,0 +1,134 @@
+# Environnement de PRÉPRODUCTION — UrbanFlow Mobility (UF-607).
+#
+#   db-preprod  : PostgreSQL + PostGIS, base et volume DISTINCTS du dev
+#   api-preprod : API Gateway NestJS, image bâtie (pas de rechargement à chaud)
+#   web-preprod : PWA Next.js, build de production servi par Next
+#
+# Fichier de SURCHARGE : il se combine au compose de développement, il ne le
+# remplace pas.
+#
+#     docker compose -f docker-compose.yml -f docker-compose.preprod.yml \
+#       up -d --build db-preprod api-preprod web-preprod
+#
+# (ou plus simplement `make preprod-up`.)
+#
+# ## Pourquoi combiner les deux fichiers plutôt qu'en écrire un autonome
+#
+# Pour partager le réseau avec le service `otp` du développement. Le graphe
+# OpenTripPlanner met de longues minutes à se construire et pèse plusieurs
+# gigaoctets : en dupliquer un second pour la préproduction coûterait cher (C5)
+# sans rien prouver de plus — OTP est une dépendance externe, pas notre code.
+# C'est un écart assumé au principe « préproduction isolée », et le seul :
+# base de données, secrets, images et ports sont bien distincts.
+#
+# ## Ce que cet environnement vaut, et ne vaut pas
+#
+# Il fait tourner **le code tel qu'il sera livré** : images construites,
+# `NODE_ENV=production`, bundle Next optimisé, journaux structurés, aucun
+# rechargement à chaud. C'est là qu'on rejoue un bogue signalé et qu'on valide
+# un correctif avant de le fondre dans `main` (docs/bug-process.md).
+# Il ne remplace pas une production : un seul nœud, pas de TLS terminé, pas de
+# sauvegarde — voir docs/preproduction.md.
+
+services:
+  # ---------------------------------------------------------------- base
+  db-preprod:
+    image: postgis/postgis:16-3.4
+    container_name: urbanflow-db-preprod
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${PREPROD_POSTGRES_USER:-urbanflow}
+      # Volontairement SANS valeur par défaut : une préproduction qui partage le
+      # mot de passe du développement n'est plus un environnement distinct (C4).
+      POSTGRES_PASSWORD: ${PREPROD_POSTGRES_PASSWORD:?Set PREPROD_POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${PREPROD_POSTGRES_DB:-urbanflow_preprod}
+    ports:
+      # Port hôte distinct du dev (5433) : les deux bases tournent en même temps,
+      # et on doit pouvoir inspecter celle de préproduction sans arrêter l'autre.
+      - '${PREPROD_POSTGRES_PORT:-5434}:5432'
+    volumes:
+      # Volume nommé PROPRE à la préproduction : ses données ne se mélangent
+      # jamais à celles du développement — c'est la moitié de l'intérêt d'avoir
+      # deux environnements.
+      - urbanflow_pgdata_preprod:/var/lib/postgresql/data
+      - ./docker/initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'pg_isready -U ${PREPROD_POSTGRES_USER:-urbanflow} -d ${PREPROD_POSTGRES_DB:-urbanflow_preprod}',
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ----------------------------------------------------------------- API
+  api-preprod:
+    build:
+      # Racine du dépôt : l'API importe `packages/shared` (voir apps/api/Dockerfile).
+      context: .
+      dockerfile: apps/api/Dockerfile
+    image: urbanflow-api:preprod
+    container_name: urbanflow-api-preprod
+    restart: unless-stopped
+    depends_on:
+      db-preprod:
+        condition: service_healthy
+    environment:
+      # `APP_ENV` étiquette les journaux ; `NODE_ENV` reste `production` pour
+      # que le code exécuté soit exactement celui de la production (UF-607).
+      APP_ENV: preproduction
+      LOG_FORMAT: json
+      PORT: 3001
+      # Origine autorisée = le front de préproduction, vu depuis le navigateur.
+      CORS_ORIGIN: http://localhost:${PREPROD_WEB_PORT:-3100}
+      DATABASE_URL: postgresql://${PREPROD_POSTGRES_USER:-urbanflow}:${PREPROD_POSTGRES_PASSWORD:?Set PREPROD_POSTGRES_PASSWORD in .env}@db-preprod:5432/${PREPROD_POSTGRES_DB:-urbanflow_preprod}?schema=public
+      # Secret PROPRE à la préproduction : un jeton émis ici ne doit jamais être
+      # accepté ailleurs, et réciproquement (C4/C11).
+      JWT_SECRET: ${PREPROD_JWT_SECRET:?Set PREPROD_JWT_SECRET in .env (32 characters minimum)}
+      JWT_EXPIRES_IN: ${PREPROD_JWT_EXPIRES_IN:-15m}
+      # OTP est partagé avec le développement — voir l'en-tête de ce fichier.
+      # Adressé par son nom de service : on est sur le réseau Docker, pas sur l'hôte.
+      OTP_BASE_URL: http://otp:8080
+      OTP_TIMEOUT_MS: ${OTP_TIMEOUT_MS:-12000}
+      GBFS_DISCOVERY_URL: ${GBFS_DISCOVERY_URL:-https://download.data.grandlyon.com/files/rdata/jcd_jcdecaux.jcdvelov/gbfs.json}
+      GBFS_TIMEOUT_MS: ${GBFS_TIMEOUT_MS:-5000}
+      GBFS_STATUS_TTL_MS: ${GBFS_STATUS_TTL_MS:-60000}
+    ports:
+      - '${PREPROD_API_PORT:-3101}:3001'
+    healthcheck:
+      # `/api/health` rapporte aussi l'état de la base (voir AppController) :
+      # c'est la sonde qui distingue « l'API répond » de « la pile fonctionne ».
+      test:
+        ['CMD-SHELL', 'wget -q -O - http://localhost:3001/api/health | grep -q ''"status":"ok"''']
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+
+  # ----------------------------------------------------------------- PWA
+  web-preprod:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        # ⚠️ Figée dans le bundle au moment du build (variable `NEXT_PUBLIC_*`) :
+        # changer le port de l'API impose de reconstruire l'image.
+        NEXT_PUBLIC_API_URL: http://localhost:${PREPROD_API_PORT:-3101}/api
+    image: urbanflow-web:preprod
+    container_name: urbanflow-web-preprod
+    restart: unless-stopped
+    depends_on:
+      api-preprod:
+        condition: service_healthy
+    ports:
+      - '${PREPROD_WEB_PORT:-3100}:3000'
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -q -O /dev/null http://localhost:3000/ || exit 1']
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+
+volumes:
+  urbanflow_pgdata_preprod:

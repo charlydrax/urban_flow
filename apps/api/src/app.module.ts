@@ -11,6 +11,7 @@ import { THROTTLER_OPTIONS } from './common/throttling';
 import { validateEnv } from './config/env.validation';
 import { AuthModule } from './modules/auth/auth.module';
 import { CarbonModule } from './modules/carbon/carbon.module';
+import { DiagnosticsModule } from './modules/diagnostics/diagnostics.module';
 import { PrivacyModule } from './modules/privacy/privacy.module';
 import { RoutesModule } from './modules/routes/routes.module';
 import { SearchHistoryModule } from './modules/search-history/search-history.module';
@@ -33,6 +34,9 @@ import { PrismaModule } from './prisma/prisma.module';
  * - `ScheduleModule` alimente la purge de rétention d'UF-603 : c'est la seule
  *   tâche périodique de l'API, et elle existe parce que la limitation de la
  *   conservation (C8) ne peut pas dépendre d'une action de l'utilisateur.
+ * - `DiagnosticsModule` (UF-607) recueille les erreurs survenues dans le
+ *   navigateur : sans lui, une panne d'affichage ne laisse aucune trace côté
+ *   serveur, puisque la requête, elle, a réussi.
  */
 @Module({
   imports: [
@@ -48,6 +52,7 @@ import { PrismaModule } from './prisma/prisma.module';
     TransportModule,
     CarbonModule,
     PrivacyModule,
+    DiagnosticsModule,
   ],
   controllers: [AppController],
   providers: [

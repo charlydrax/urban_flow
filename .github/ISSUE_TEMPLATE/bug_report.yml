@@ -1,0 +1,99 @@
+# Formulaire de signalement de bogue (UF-607).
+#
+# Un formulaire plutôt qu'un modèle Markdown libre : les champs obligatoires
+# empêchent l'ouverture d'un ticket qui ne dit ni comment reproduire, ni ce qui
+# était attendu — c'est-à-dire un ticket qu'il faudra rouvrir en conversation
+# avant de pouvoir travailler. La gravité et l'environnement sont demandés à la
+# saisie parce qu'ils commandent la priorisation (docs/bug-process.md), et
+# qu'ils ne se devinent pas trois jours plus tard.
+name: 🐞 Bogue
+description: Signaler un comportement fautif du produit (API, PWA, données).
+title: 'BUG-XXX — '
+labels: ['bug', 'needs-triage']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Merci de signaler ce défaut. Le traitement complet (détection →
+        priorisation → correction → validation) est décrit dans
+        [`docs/bug-process.md`](../blob/main/docs/bug-process.md).
+
+        **Ne collez ici aucune donnée personnelle** : ni adresse de domicile,
+        ni e-mail réel, ni coordonnées de trajet. La référence technique
+        demandée plus bas suffit à retrouver la trace serveur (C8/C11).
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: Ce qui se passe
+      description: Le symptôme, en une ou deux phrases.
+      placeholder: "Le bouton « Rechercher » reste inactif après la saisie d'une adresse."
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Comment le reproduire
+      description: Les étapes exactes, dans l'ordre. Un bogue non reproductible ne se corrige pas, il se devine.
+      placeholder: |
+        1. Ouvrir http://localhost:3100/
+        2. Saisir « Part-Dieu » dans le champ Départ
+        3. Cliquer sur « Rechercher »
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Ce qui était attendu
+      placeholder: 'La liste des itinéraires s’affiche, triée par empreinte croissante.'
+    validations:
+      required: true
+
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Gravité
+      description: |
+        Détermine la priorité de traitement — barème complet dans `docs/bug-process.md`.
+        En cas d'hésitation, choisir la gravité la PLUS haute : la revue de tri corrige à la baisse, jamais l'inverse.
+      options:
+        - 'P0 — bloquant : le produit est inutilisable, ou une donnée est exposée'
+        - 'P1 — majeur : une fonctionnalité du périmètre (F1/F2/F3, carbone) est cassée'
+        - 'P2 — mineur : gêne réelle, contournement possible'
+        - 'P3 — cosmétique : défaut d’affichage ou de libellé, sans effet fonctionnel'
+    validations:
+      required: true
+
+  - type: dropdown
+    id: environment
+    attributes:
+      label: Environnement
+      description: Où le défaut a été observé.
+      options:
+        - 'Préproduction (docker compose, web 3100 / api 3101)'
+        - 'Développement local (npm run dev, web 3000 / api 3001)'
+        - 'CI (GitHub Actions)'
+    validations:
+      required: true
+
+  - type: input
+    id: reference
+    attributes:
+      label: Référence technique
+      description: |
+        L'identifiant affiché par l'écran d'erreur de la PWA, ou l'en-tête `X-Request-Id`
+        de la réponse fautive. C'est la clé qui relie ce ticket à la trace serveur —
+        sans elle, l'enquête commence par une recherche à l'aveugle dans les journaux.
+      placeholder: 5f1d1c0a-2a6e-4f3b-9a8f-2c1d3e4f5a6b
+    validations:
+      required: false
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Contexte
+      description: Navigateur, taille d'écran, extrait de journal (`make preprod-logs-api`), capture. Tout ce qui aide à reproduire.
+    validations:
+      required: false

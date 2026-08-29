@@ -1,5 +1,6 @@
 import { plainToInstance } from 'class-transformer';
 import {
+  IsIn,
   IsInt,
   IsOptional,
   IsString,
@@ -40,6 +41,33 @@ class EnvironmentVariables {
   @Min(0)
   @Max(10)
   TRUST_PROXY?: number;
+
+  /**
+   * Nom de l'environnement de déploiement (UF-607) — `development`,
+   * `preproduction` ou `production`.
+   *
+   * Distincte de `NODE_ENV`, et c'est tout l'intérêt : la préproduction tourne
+   * en `NODE_ENV=production` (build optimisé, HSTS, CSP stricte — elle doit se
+   * comporter comme la production, sinon elle ne prouve rien). Sans variable
+   * séparée, ses journaux seraient étiquetés « production » et un incident de
+   * préproduction se confondrait avec un vrai. Elle n'est lue que pour
+   * étiqueter les journaux : aucun comportement fonctionnel n'en dépend, pour
+   * qu'aucun chemin de code ne puisse rester non testé avant la mise en ligne.
+   */
+  @IsOptional()
+  @IsIn(['development', 'preproduction', 'production'])
+  APP_ENV?: string;
+
+  /**
+   * Format des journaux (UF-607) : `json` (structuré) ou `pretty` (lisible).
+   *
+   * Facultative — la valeur par défaut dépend de l'environnement : lisible en
+   * développement, structurée partout ailleurs. On la force pour reproduire en
+   * local ce qu'écrira la préproduction (`LOG_FORMAT=json`).
+   */
+  @IsOptional()
+  @IsIn(['json', 'pretty'])
+  LOG_FORMAT?: string;
 
   /** Chaîne de connexion PostgreSQL/PostGIS (consommée par Prisma). */
   @IsString()

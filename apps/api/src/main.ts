@@ -9,6 +9,8 @@ import helmet from 'helmet';
 
 import { AppModule } from './app.module';
 import { COMPRESSION_THRESHOLD_BYTES, shouldCompress } from './common/compression';
+import { requestIdMiddleware } from './common/logging/request-id.middleware';
+import { createAppLogger } from './common/logging/structured-logger';
 
 /**
  * Bootstrap de l'API Gateway UrbanFlow.
@@ -25,11 +27,21 @@ import { COMPRESSION_THRESHOLD_BYTES, shouldCompress } from './common/compressio
  *   la limitation de débit compte les vraies IP clientes.
  * - C5/C10 (UF-605) : compression des réponses JSON — 85 % de trafic en moins
  *   sur `/routes/plan`, hors chemins portant un secret (voir common/compression.ts).
+ * - C11 (UF-607) : journalisation structurée hors développement et identifiant
+ *   de corrélation par requête — de quoi enquêter sur un bogue de
+ *   préproduction sans jamais journaliser de donnée personnelle.
  */
 async function bootstrap(): Promise<void> {
   // Typé `NestExpressApplication` : `app.set('trust proxy', …)` plus bas est une
   // API Express, invisible sur l'interface générique `INestApplication`.
-  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  //
+  // `logger` est fourni dès la création (UF-607) : les messages de démarrage de
+  // NestJS eux-mêmes doivent sortir au format de l'environnement, sinon les
+  // premières lignes du conteneur — celles qui disent pourquoi il refuse de
+  // démarrer — échappent au flux structuré.
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    logger: createAppLogger(),
+  });
   const config = app.get(ConfigService);
   const isProduction = process.env.NODE_ENV === 'production';
 
@@ -53,6 +65,16 @@ async function bootstrap(): Promise<void> {
   if (trustedProxies > 0) {
     app.set('trust proxy', trustedProxies);
   }
+
+  /*
+   * Identifiant de corrélation (UF-607) — enregistré en TÊTE de chaîne.
+   *
+   * Tout ce qui suit journalise : helmet peut refuser une requête, le guard de
+   * débit peut la couper, le filtre d'exceptions la conclut. Pour que ces
+   * lignes portent toutes le même identifiant, le contexte doit être ouvert
+   * avant elles. Voir common/logging/request-id.middleware.ts.
+   */
+  app.use(requestIdMiddleware);
 
   app.use(
     helmet({

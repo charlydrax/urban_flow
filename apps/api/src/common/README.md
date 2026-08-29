@@ -67,14 +67,61 @@ cd apps/api
 npx jest src/common/throttling.spec.ts
 ```
 
+## Journalisation structurée & corrélation (UF-607)
+
+`logging/` — le socle d'observabilité de l'API. Trois fichiers, un seul objectif :
+qu'un bogue signalé par un usager puisse être retrouvé dans les journaux.
+
+| Fichier                    | Rôle                                                                                             |
+| -------------------------- | ------------------------------------------------------------------------------------------------ |
+| `request-context.ts`       | `AsyncLocalStorage` portant le `requestId` de la requête en cours                                |
+| `request-id.middleware.ts` | Génère (ou reprend) l'identifiant, le renvoie en en-tête `X-Request-Id`, ouvre le contexte       |
+| `structured-logger.ts`     | `LoggerService` NestJS émettant **un objet JSON par ligne**, avec `requestId` quand il y en a un |
+
+### Le fil rouge
+
+L'identifiant apparaît à trois endroits : en-tête de réponse, corps de toute
+réponse d'erreur (`requestId`, ajouté par le filtre global), et chaque ligne de
+journal du traitement. L'écran d'erreur de la PWA l'affiche à l'usager ; recopié
+dans une issue, il mène droit à la trace :
+
+```bash
+make preprod-logs-api | grep '"requestId":"5f1d1c0a-…"'
+```
+
+L'en-tête entrant est une **entrée utilisateur** : repris seulement s'il fait au
+plus 64 caractères et n'utilise que `[A-Za-z0-9._:-]`. Sans ce filtre, un saut
+de ligne y forgerait une fausse entrée de journal (OWASP A09) et une valeur
+géante gonflerait chaque ligne.
+
+### Deux formats, un seul code appelant
+
+`createAppLogger()` choisit selon l'environnement : format coloré de NestJS en
+développement (le terminal reste lisible), JSON partout ailleurs. `LOG_FORMAT`
+force l'un ou l'autre — `LOG_FORMAT=json npm run dev:api` reproduit en local ce
+qu'écrira la préproduction. Aucun appelant n'est concerné : les `new
+Logger(X.name)` existants passent tous par là.
+
+### Ce qui n'entre jamais dans un journal
+
+Ni corps de requête, ni coordonnées, ni e-mail, ni jeton (C11 / RGPD). Les
+messages sont bornés à 2 000 caractères et leurs sauts de ligne échappés.
+
+```bash
+cd apps/api
+npx jest src/common/logging
+```
+
 ## Autres briques
 
 - `filters/global-exception.filter.ts` — normalise les réponses d'erreur, journalise sans
-  données personnelles (C11).
+  données personnelles (C11), et joint le `requestId` au corps pour que l'usager puisse le
+  citer dans un signalement (UF-607).
 - `enums/` — `TransportMode`, `RoutePriority` : vocabulaire métier partagé (F2/F3).
 
 ## Contraintes couvertes
 
 C4 (authentification par défaut, signature/expiration vérifiées, identité non usurpable,
-plafonds anti-brute-force), C11 (token lu depuis un cookie httpOnly), C5/C10 (les
-plafonds évitent de relayer des rafales inutiles vers nos sources de données).
+plafonds anti-brute-force, en-tête de corrélation validé), C11 (token lu depuis un cookie
+httpOnly, journaux sans donnée personnelle), C5/C10 (les plafonds évitent de relayer des
+rafales inutiles vers nos sources de données).

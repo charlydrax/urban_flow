@@ -1,0 +1,14 @@
+# Configuration des modèles d'issues (UF-607).
+#
+# `blank_issues_enabled: true` — volontairement. Le formulaire de bogue est là
+# pour cadrer les signalements, pas pour interdire d'ouvrir une note technique
+# ou une tâche de sprint : un outil de suivi qu'on doit contourner finit
+# contourné pour de bon, et les tickets repartent dans un carnet à côté.
+blank_issues_enabled: true
+contact_links:
+  - name: 📋 Procédure de traitement des bogues
+    url: https://github.com/charlydrax/urban_flow/blob/main/docs/bug-process.md
+    about: Détection, priorisation, correction, validation — et les délais associés à chaque gravité.
+  - name: 🧪 Environnement de préproduction
+    url: https://github.com/charlydrax/urban_flow/blob/main/docs/preproduction.md
+    about: Comment lancer la préproduction pour reproduire un bogue dans les conditions de la livraison.

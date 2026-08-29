@@ -199,6 +199,14 @@ npx prisma migrate dev      # migrations (penser aux extensions PostGIS)
 npx prisma studio
 ```
 
+Préproduction (UF-607) — images construites, journaux JSON, ports dédiés :
+
+```bash
+make preprod-up        # PWA sur 3100, API sur 3101, base sur 5434
+make preprod-migrate   # migrations Prisma sur la base de préproduction
+make preprod-logs-api  # journaux structurés de l'API
+```
+
 Initialisation PostGIS (à exécuter une fois sur la base) :
 
 ```sql
@@ -224,10 +232,15 @@ CREATE EXTENSION IF NOT EXISTS postgis;
 > correction a été volontairement remise à une passe dédiée. À traiter lors d'une
 > session « correction de bugs ». Retirer l'entrée une fois le défaut corrigé.
 >
-> Chaque entrée est doublée d'une **issue GitHub portant le label `bug`** — c'est
-> le suivi que met en place UF-607 (#80). Ce registre en est le rappel local :
-> il est lu à chaque session, l'issue ne l'est pas. L'issue reste la référence
-> pour le détail, les options écartées et la recette.
+> Chaque entrée est doublée d'une **issue GitHub portant le label `bug`** et une
+> priorité `P0`→`P3` — le suivi mis en place par UF-607 (#80). Ce registre en est
+> le rappel local : il est lu à chaque session, l'issue ne l'est pas. L'issue
+> reste la référence pour le détail, les options écartées et la recette.
+>
+> **Procédure complète** (détection → priorisation → correction → validation),
+> journalisation, remontée d'erreurs front et environnement de préproduction :
+> [`docs/bug-process.md`](docs/bug-process.md) et
+> [`docs/preproduction.md`](docs/preproduction.md).
 
 > **Registre vide à ce jour.** BUG-001 (#87 — fins de ligne CRLF vs
 > `endOfLine: "lf"`) était la seule entrée : corrigée le 29/08/2026 par la
