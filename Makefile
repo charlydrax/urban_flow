@@ -12,6 +12,11 @@ DB_SERVICE := db
 # Nom du service OpenTripPlanner (UF-301).
 OTP_SERVICE := otp
 
+# Préproduction (UF-607) : la surcharge se combine au compose de développement
+# — les services de préproduction partagent son réseau pour joindre OTP.
+PREPROD_COMPOSE := $(COMPOSE) -f docker-compose.yml -f docker-compose.preprod.yml
+PREPROD_SERVICES := db-preprod api-preprod web-preprod
+
 .DEFAULT_GOAL := help
 
 # Toutes les cibles sont des actions, pas des fichiers.
@@ -155,3 +160,51 @@ otp-reset:
 	$(COMPOSE) rm -sf $(OTP_SERVICE)
 	docker volume rm dev_urbanflow_otp_graph || true
 	$(COMPOSE) up -d $(OTP_SERVICE)
+
+# ---------------------------------------------------------------------------
+# Préproduction — environnement distinct du développement (UF-607)
+# ---------------------------------------------------------------------------
+# Prérequis : PREPROD_POSTGRES_PASSWORD et PREPROD_JWT_SECRET dans .env
+# (voir .env.example), et OTP démarré si l'on veut de vrais itinéraires TC.
+# Documentation : docs/preproduction.md.
+
+## preprod-up: Construit et démarre la préproduction (web 3100, api 3101, db 5434).
+preprod-up:
+	$(PREPROD_COMPOSE) up -d --build $(PREPROD_SERVICES)
+	@echo "Preproduction demarree : http://localhost:$${PREPROD_WEB_PORT:-3100}"
+	@echo "Appliquer les migrations : make preprod-migrate"
+
+## preprod-build: Reconstruit les images de préproduction sans les démarrer.
+preprod-build:
+	$(PREPROD_COMPOSE) build $(PREPROD_SERVICES)
+
+## preprod-down: Arrête la préproduction (le volume de données est conservé).
+preprod-down:
+	$(PREPROD_COMPOSE) stop $(PREPROD_SERVICES)
+	$(PREPROD_COMPOSE) rm -f $(PREPROD_SERVICES)
+
+## preprod-ps: État des conteneurs de préproduction.
+preprod-ps:
+	$(PREPROD_COMPOSE) ps $(PREPROD_SERVICES)
+
+## preprod-logs: Suit les journaux structurés des trois services.
+preprod-logs:
+	$(PREPROD_COMPOSE) logs -f $(PREPROD_SERVICES)
+
+## preprod-logs-api: Journaux JSON de l'API seule (à filtrer avec jq).
+preprod-logs-api:
+	$(PREPROD_COMPOSE) logs -f api-preprod
+
+## preprod-migrate: Applique les migrations Prisma sur la base de préproduction.
+preprod-migrate:
+	DATABASE_URL="postgresql://$${PREPROD_POSTGRES_USER:-urbanflow}:$${PREPROD_POSTGRES_PASSWORD}@localhost:$${PREPROD_POSTGRES_PORT:-5434}/$${PREPROD_POSTGRES_DB:-urbanflow_preprod}?schema=public" 		npm run db:migrate:deploy --workspace apps/api
+
+## preprod-health: Sonde de santé de l'API de préproduction (API + base).
+preprod-health:
+	@curl -fsS http://localhost:$${PREPROD_API_PORT:-3101}/api/health && echo ""
+
+## preprod-reset: Détruit la base de préproduction (volume inclus) et la recrée.
+preprod-reset:
+	$(PREPROD_COMPOSE) rm -sf $(PREPROD_SERVICES)
+	docker volume rm dev_urbanflow_pgdata_preprod || true
+	$(PREPROD_COMPOSE) up -d --build $(PREPROD_SERVICES)

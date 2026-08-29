@@ -92,3 +92,47 @@ jobs:
 
       - name: Run tests (jest + vitest)
         run: npm run test
+
+  # UF-607 : les images de préproduction doivent rester constructibles.
+  #
+  # Sans ce job, la rupture ne se découvre qu'au moment où l'on veut justement
+  # reproduire un bogue — c'est-à-dire au pire moment. Une dépendance de
+  # développement utilisée par du code d'exécution, un fichier oublié dans
+  # `.dockerignore` : rien de tout cela n'échoue en `npm run build`, tout échoue
+  # ici.
+  #
+  # Limité aux PR vers `main`, et non lancé sur chaque push : deux builds
+  # d'images à chaque commit de branche coûteraient plusieurs minutes de CI pour
+  # une information qui n'est décisive qu'au moment de fusionner (C5 —
+  # éco-conception, comme le `concurrency` plus haut).
+  preprod-images:
+    name: Images de préproduction (api + web)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build API image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/api/Dockerfile
+          push: false
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,mode=max,scope=api
+
+      - name: Build web image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/web/Dockerfile
+          push: false
+          # Valeur factice : l'URL réelle est injectée au déploiement. Elle doit
+          # être fournie, `next build` appliquant le fail-fast d'UF-004.
+          build-args: NEXT_PUBLIC_API_URL=http://localhost:3101/api
+          cache-from: type=gha,scope=web
+          cache-to: type=gha,mode=max,scope=web

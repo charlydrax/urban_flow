@@ -1,0 +1,41 @@
+# Ce qui ne doit jamais entrer dans un contexte de build Docker (UF-607).
+#
+# Deux raisons, également importantes :
+#  - la vitesse : le contexte est envoyé au démon avant le premier `RUN`, et un
+#    `node_modules` de monorepo pèse plusieurs centaines de mégaoctets ;
+#  - la sécurité (C4/C11) : un `.env` copié dans une couche d'image y reste
+#    lisible pour quiconque récupère l'image, même s'il est supprimé plus tard.
+
+# Dépendances et artefacts : réinstallés et recompilés dans l'image.
+node_modules
+**/node_modules
+.next
+**/.next
+.next-eco
+**/.next-eco
+dist
+**/dist
+coverage
+**/coverage
+*.tsbuildinfo
+
+# Secrets — jamais dans une image.
+.env
+.env.*
+!.env.example
+
+# Historique et outillage de poste de travail.
+.git
+.github
+.husky
+.vscode
+.idea
+
+# Données volumineuses d'OpenTripPlanner (graphe, GTFS, OSM) : montées en
+# volume par docker-compose, elles n'ont rien à faire dans une image applicative.
+docker/otp/data
+
+# Documentation et livrables : sans effet sur le runtime.
+docs
+*.md
+!README.md
