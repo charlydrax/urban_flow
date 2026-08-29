@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useEffect, useRef } from 'react';
 
 import { Button } from '../../components/ui/button';
@@ -51,6 +52,13 @@ function ConsentPanel({
         UrbanFlow lira les coordonnées fournies par votre navigateur pour pré-remplir votre point de
         départ et recentrer la carte. Elles ne servent qu’au calcul de vos itinéraires. Votre accord
         est enregistré avec sa date et reste révocable à tout moment depuis votre profil.
+      </p>
+      {/* UF-603 : « éclairé » suppose que le détail soit atteignable au moment
+          du choix, pas seulement quelque part dans le pied de page (C8). */}
+      <p className="text-xs">
+        <Link href="/confidentialite" className="underline underline-offset-4 text-action-dark">
+          Lire la politique de confidentialité
+        </Link>
       </p>
       <div className="flex flex-wrap gap-2">
         <Button variant="secondary" size="sm" onClick={onGrant} disabled={busy}>

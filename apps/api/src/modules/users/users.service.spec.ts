@@ -14,6 +14,10 @@ import { DEFAULT_PREFERENCES, UsersService } from './users.service';
  *  2. un utilisateur n'accède qu'à SON profil : la clé de toutes les requêtes
  *     est l'identifiant issu du JWT, jamais une donnée du corps (C4/OWASP A01) ;
  *  3. le consentement géolocalisation est horodaté et révocable (C8).
+ *
+ * Étendus par UF-603 avec le **droit à l'effacement** (art. 17 RGPD) : la
+ * suppression est réelle et non logique, et elle est verrouillée sur le même
+ * identifiant de token que les autres méthodes.
  */
 describe('UsersService', () => {
   let service: UsersService;
@@ -22,6 +26,9 @@ describe('UsersService', () => {
   let updateUser: jest.Mock;
   let upsertProfile: jest.Mock;
   let findProfile: jest.Mock;
+  let deleteUser: jest.Mock;
+  let countHistory: jest.Mock;
+  let countProfile: jest.Mock;
 
   const createdAt = new Date('2026-01-15T10:00:00.000Z');
 
@@ -53,10 +60,19 @@ describe('UsersService', () => {
     updateUser = jest.fn();
     upsertProfile = jest.fn();
     findProfile = jest.fn();
+    deleteUser = jest.fn();
+    countHistory = jest.fn().mockResolvedValue(0);
+    countProfile = jest.fn().mockResolvedValue(0);
 
     const prismaMock: Record<string, unknown> = {
-      user: { findUnique: findUser, findUniqueOrThrow: findUserOrThrow, update: updateUser },
-      mobilityProfile: { upsert: upsertProfile, findUnique: findProfile },
+      user: {
+        findUnique: findUser,
+        findUniqueOrThrow: findUserOrThrow,
+        update: updateUser,
+        delete: deleteUser,
+      },
+      mobilityProfile: { upsert: upsertProfile, findUnique: findProfile, count: countProfile },
+      searchHistory: { count: countHistory },
     };
     // Transaction interactive : on exécute le callback avec le client mocké,
     // ce qui vérifie au passage que TOUTES les écritures y passent (atomicité).
@@ -223,6 +239,64 @@ describe('UsersService', () => {
       ).rejects.toBeInstanceOf(NotFoundException);
       expect(upsertProfile).not.toHaveBeenCalled();
       expect(updateUser).not.toHaveBeenCalled();
+    });
+  });
+
+  /** Recette 3 d'UF-603 : « l'utilisateur peut supprimer son compte et ses données ». */
+  describe('deleteAccount', () => {
+    it('erases the account for real, keyed on the token identifier (C8 art. 17)', async () => {
+      findUser.mockResolvedValue({ id: 'user-1' });
+      countHistory.mockResolvedValue(42);
+      countProfile.mockResolvedValue(1);
+
+      const result = await service.deleteAccount('user-1');
+
+      // Suppression réelle : `delete`, pas un `update` posant un `deletedAt`.
+      expect(deleteUser).toHaveBeenCalledWith({ where: { id: 'user-1' } });
+      expect(updateUser).not.toHaveBeenCalled();
+      // Verrouillage sur l'identifiant du token, comme les autres méthodes.
+      expect(countHistory.mock.calls[0][0].where).toEqual({ userId: 'user-1' });
+      expect(result).toEqual({
+        deletedUserId: 'user-1',
+        deletedSearchHistoryCount: 42,
+        deletedMobilityProfile: true,
+        deletedAt: expect.any(String),
+      });
+    });
+
+    it('counts before deleting, so the proof of erasure is not always zero', async () => {
+      const calls: string[] = [];
+      findUser.mockResolvedValue({ id: 'user-1' });
+      countHistory.mockImplementation(() => {
+        calls.push('count');
+        return Promise.resolve(3);
+      });
+      deleteUser.mockImplementation(() => {
+        calls.push('delete');
+        return Promise.resolve({});
+      });
+
+      await service.deleteAccount('user-1');
+
+      expect(calls).toEqual(['count', 'delete']);
+    });
+
+    it('reports no mobility profile when the account never saved one', async () => {
+      findUser.mockResolvedValue({ id: 'user-1' });
+      countHistory.mockResolvedValue(0);
+      countProfile.mockResolvedValue(0);
+
+      const result = await service.deleteAccount('user-1');
+
+      expect(result.deletedMobilityProfile).toBe(false);
+      expect(result.deletedSearchHistoryCount).toBe(0);
+    });
+
+    it('throws a 404 without deleting anything when the account is already gone', async () => {
+      findUser.mockResolvedValue(null);
+
+      await expect(service.deleteAccount('ghost')).rejects.toBeInstanceOf(NotFoundException);
+      expect(deleteUser).not.toHaveBeenCalled();
     });
   });
 });

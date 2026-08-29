@@ -94,7 +94,11 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           <footer className="border-t border-ink-200 bg-white">
             <div className="mx-auto max-w-5xl px-4 py-4 text-sm">
               <p>UrbanFlow Mobility — prototype T6 CDSD. </p>
-              <Link href="/" className="underline underline-offset-4">
+              {/* UF-603 : la politique de confidentialité est joignable depuis
+                  n'importe quelle page, connecté ou non — c'est la condition
+                  d'un consentement éclairé (C8). Elle pointait sur `/` en
+                  attendant l'écran, livré par ce ticket. */}
+              <Link href="/confidentialite" className="underline underline-offset-4">
                 Politique de confidentialité (RGPD)
               </Link>
             </div>

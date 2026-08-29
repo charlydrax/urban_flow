@@ -1,5 +1,6 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import type { MobilityProfile, Prisma } from '@prisma/client';
+import type { DeleteAccountResult } from '@urbanflow/shared';
 
 import { PrismaService } from '../../prisma/prisma.service';
 import {
@@ -80,6 +81,16 @@ const PROFILE_SELECT = {
  */
 @Injectable()
 export class UsersService {
+  /**
+   * Journal d'audit de l'effacement (C8/C11).
+   *
+   * Il consigne **l'événement**, jamais la personne : identifiant technique et
+   * décomptes, ni email ni trajet. Une trace RGPD qui recopierait les données
+   * qu'on vient d'effacer les ferait survivre dans les logs — c'est exactement
+   * ce que l'article 17 interdit.
+   */
+  private readonly logger = new Logger(UsersService.name);
+
   constructor(private readonly prisma: PrismaService) {}
 
   /**
@@ -156,6 +167,63 @@ export class UsersService {
     });
 
     return UsersService.toProfileView(updated);
+  }
+
+  /**
+   * Efface le compte connecté **et toutes ses données** — droit à l'effacement
+   * (art. 17 RGPD, C8 ; recette 3 du ticket UF-603).
+   *
+   * L'effacement est **réel, pas logique** : pas de colonne `deletedAt`, pas de
+   * ligne anonymisée conservée « au cas où ». Un compte marqué supprimé reste un
+   * compte, et l'historique de déplacements est justement la donnée que le
+   * recoupement rend ré-identifiable (domicile = point de départ récurrent du
+   * matin). La ligne `users` part, et les suppressions en cascade déclarées au
+   * schéma emportent `mobility_profiles` (dont la donnée sensible PMR) et
+   * `search_history`.
+   *
+   * Les décomptes sont relevés **avant** le `DELETE`, dans la même transaction :
+   * après, il n'y a plus rien à compter, et hors transaction un enregistrement
+   * concurrent fausserait le total rendu à l'utilisateur.
+   *
+   * Le cookie de session est purgé par le contrôleur : le JWT déjà émis reste
+   * cryptographiquement valide jusqu'à son expiration, mais toute route
+   * protégée répondra désormais 404 — le compte qu'il désigne n'existe plus.
+   *
+   * @param userId Identifiant issu du JWT vérifié (jamais du corps — C4)
+   * @returns Preuve d'exécution : ce qui a réellement été supprimé
+   * @throws NotFoundException (404) si le compte a déjà été effacé
+   */
+  async deleteAccount(userId: string): Promise<DeleteAccountResult> {
+    const result = await this.prisma.$transaction(async (tx) => {
+      const user = await tx.user.findUnique({
+        where: { id: userId },
+        select: { id: true },
+      });
+
+      if (!user) throw new NotFoundException('User not found');
+
+      const [deletedSearchHistoryCount, mobilityProfileCount] = await Promise.all([
+        tx.searchHistory.count({ where: { userId } }),
+        tx.mobilityProfile.count({ where: { userId } }),
+      ]);
+
+      // La cascade du schéma fait le reste : une seule suppression suffit.
+      await tx.user.delete({ where: { id: userId } });
+
+      return {
+        deletedUserId: userId,
+        deletedSearchHistoryCount,
+        deletedMobilityProfile: mobilityProfileCount > 0,
+        deletedAt: new Date().toISOString(),
+      };
+    });
+
+    this.logger.log(
+      `Account erased (GDPR art. 17): user=${result.deletedUserId} ` +
+        `history=${result.deletedSearchHistoryCount} profile=${result.deletedMobilityProfile}`,
+    );
+
+    return result;
   }
 
   /**

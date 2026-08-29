@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   buildLoginUrl,
+  isAuthPath,
   isPublicPath,
   readSession,
   readTokenClaims,
@@ -105,9 +106,15 @@ describe('sanitizeNextPath', () => {
     expect(sanitizeNextPath(raw)).toBeNull();
   });
 
-  it('rejects public screens to avoid a login → login loop', () => {
+  it('rejects the auth screens to avoid a login → login loop', () => {
     expect(sanitizeNextPath('/login')).toBeNull();
     expect(sanitizeNextPath('/register')).toBeNull();
+  });
+
+  it('keeps an open public page as a valid destination (UF-603)', () => {
+    // On y était avant d'être redirigé : on doit pouvoir y revenir. Seuls les
+    // écrans d'authentification boucleraient.
+    expect(sanitizeNextPath('/confidentialite')).toBe('/confidentialite');
   });
 });
 
@@ -117,11 +124,36 @@ describe('isPublicPath', () => {
     expect(isPublicPath('/register')).toBe(true);
   });
 
+  it('marks the privacy policy as public (UF-603 — readable before signing up)', () => {
+    // Une politique de confidentialité qu'il faudrait un compte pour lire
+    // arriverait après la collecte qu'elle explique (C8).
+    expect(isPublicPath('/confidentialite')).toBe(true);
+  });
+
   it('marks everything else as private by default', () => {
     expect(isPublicPath('/')).toBe(false);
     expect(isPublicPath('/carbon')).toBe(false);
     // Piège classique : un préfixe ne suffit pas à rendre une route publique.
     expect(isPublicPath('/login-history')).toBe(false);
+  });
+});
+
+describe('isAuthPath', () => {
+  it('covers the two screens a signed-in user must be redirected away from', () => {
+    expect(isAuthPath('/login')).toBe(true);
+    expect(isAuthPath('/register')).toBe(true);
+  });
+
+  it('does not cover the privacy policy, which stays readable while signed in', () => {
+    // La distinction porte tout UF-603 : confondre les deux listes éjecterait
+    // vers l'accueil l'utilisateur connecté venu relire ses durées de rétention.
+    expect(isAuthPath('/confidentialite')).toBe(false);
+    expect(isPublicPath('/confidentialite')).toBe(true);
+  });
+
+  it('does not cover private pages', () => {
+    expect(isAuthPath('/profil')).toBe(false);
+    expect(isAuthPath('/')).toBe(false);
   });
 });
 

@@ -14,13 +14,18 @@ import { UsersController } from './users.controller';
 import { UsersService } from './users.service';
 
 /**
- * Tests HTTP des endpoints de profil (UF-107) — `GET/PATCH /users/me`.
+ * Tests HTTP des endpoints de profil (UF-107, UF-603) — `GET/PATCH/DELETE /users/me`.
  *
  * On passe par la couche HTTP réelle (app Nest + cookie-parser + guard global +
  * ValidationPipe identique à `main.ts`), et la persistance est simulée par un
  * **faux Prisma en mémoire** partagé par deux comptes. C'est la seule façon de
  * démontrer la recette 2 du ticket — « un utilisateur ne peut accéder qu'à SON
  * profil (test avec deux comptes) » : un stub par test la rendrait triviale.
+ *
+ * UF-603 y ajoute le droit à l'effacement : l'entrepôt simule aussi la
+ * **cascade** du schéma Prisma (supprimer un compte emporte son profil et son
+ * historique), sans quoi le test dirait « la ligne users a disparu » et laisserait
+ * passer la fuite qu'on cherche justement à exclure.
  */
 const JWT_SECRET = 'test-secret-uf107-profile';
 
@@ -47,12 +52,19 @@ interface FakeProfile {
   updatedAt: Date;
 }
 
-describe('UsersController — profil de mobilité (UF-107)', () => {
+/** Ligne `search_history` du faux entrepôt (UF-603 : ce que la cascade doit emporter). */
+interface FakeHistory {
+  id: string;
+  userId: string;
+}
+
+describe('UsersController — profil de mobilité (UF-107) et effacement (UF-603)', () => {
   let app: INestApplication;
   let jwt: JwtService;
   let baseUrl: string;
   let users: Map<string, FakeUser>;
   let profiles: Map<string, FakeProfile>;
+  let history: Map<string, FakeHistory>;
 
   /** Session valide du compte donné, sous forme d'en-tête `Cookie`. */
   const sessionOf = (user: { id: string; email: string }) => ({
@@ -69,9 +81,13 @@ describe('UsersController — profil de mobilité (UF-107)', () => {
       body: JSON.stringify(body),
     });
 
+  const deleteAccount = (user: { id: string; email: string }) =>
+    fetch(`${baseUrl}/users/me`, { method: 'DELETE', headers: sessionOf(user) });
+
   beforeAll(async () => {
     users = new Map();
     profiles = new Map();
+    history = new Map();
 
     /**
      * Faux client Prisma : deux Map en mémoire, avec la même sémantique que les
@@ -96,8 +112,29 @@ describe('UsersController — profil de mobilité (UF-107)', () => {
           users.set(where.id, { ...user, ...data });
           return Promise.resolve(users.get(where.id));
         },
+        /*
+         * Reproduit la CASCADE déclarée au schéma Prisma : supprimer un compte
+         * emporte son profil de mobilité et son historique. Simuler la seule
+         * ligne `users` rendrait le test aveugle à ce qui compte (C8).
+         */
+        delete: ({ where }: { where: { id: string } }) => {
+          const user = users.get(where.id);
+          if (!user) return Promise.reject(new Error('not found'));
+          users.delete(where.id);
+          profiles.delete(where.id);
+          for (const [id, row] of history) if (row.userId === where.id) history.delete(id);
+          return Promise.resolve(user);
+        },
+      },
+      searchHistory: {
+        count: ({ where }: { where: { userId: string } }) =>
+          Promise.resolve(
+            [...history.values()].filter((row) => row.userId === where.userId).length,
+          ),
       },
       mobilityProfile: {
+        count: ({ where }: { where: { userId: string } }) =>
+          Promise.resolve(profiles.has(where.userId) ? 1 : 0),
         findUnique: ({ where }: { where: { userId: string } }) =>
           Promise.resolve(profiles.get(where.userId) ?? null),
         upsert: ({
@@ -164,6 +201,7 @@ describe('UsersController — profil de mobilité (UF-107)', () => {
   beforeEach(() => {
     users.clear();
     profiles.clear();
+    history.clear();
     for (const account of [MARIE, JULIEN]) {
       users.set(account.id, {
         ...account,
@@ -336,6 +374,74 @@ describe('UsersController — profil de mobilité (UF-107)', () => {
       // Julien garde ses défauts et n'a jamais consenti : rien n'a fui d'un compte à l'autre.
       expect(julien.preferences.maxWalkMinutes).toBe(15);
       expect(julien.geolocationConsentAt).toBeNull();
+    });
+
+    it('erasing one account leaves the other one untouched (UF-603)', async () => {
+      await patchProfile(MARIE, { preferences: { maxWalkMinutes: 30 } });
+      await patchProfile(JULIEN, { preferences: { maxWalkMinutes: 5 } });
+      history.set('h-julien', { id: 'h-julien', userId: JULIEN.id });
+
+      await deleteAccount(MARIE);
+
+      // Julien conserve compte, préférences et historique : la suppression est
+      // bornée au porteur du token, faute de pouvoir en désigner un autre.
+      const julien = (await (await getProfile(JULIEN)).json()) as {
+        preferences: { maxWalkMinutes: number };
+      };
+      expect(julien.preferences.maxWalkMinutes).toBe(5);
+      expect(history.has('h-julien')).toBe(true);
+    });
+  });
+
+  /** Recette 3 d'UF-603 : effacement effectif du compte ET des données en base. */
+  describe('DELETE /users/me — droit à l’effacement (RGPD art. 17)', () => {
+    it('returns 401 without a session (an anonymous request erases nothing)', async () => {
+      const res = await fetch(`${baseUrl}/users/me`, { method: 'DELETE' });
+
+      expect(res.status).toBe(401);
+      expect(users.has(MARIE.id)).toBe(true);
+    });
+
+    it('erases the account, its preferences and its trips in one call', async () => {
+      await patchProfile(MARIE, {
+        preferences: { reducedMobility: true },
+        geolocationConsent: true,
+      });
+      history.set('h-1', { id: 'h-1', userId: MARIE.id });
+      history.set('h-2', { id: 'h-2', userId: MARIE.id });
+
+      const res = await deleteAccount(MARIE);
+
+      expect(res.status).toBe(200);
+      await expect(res.json()).resolves.toEqual({
+        deletedUserId: MARIE.id,
+        deletedSearchHistoryCount: 2,
+        deletedMobilityProfile: true,
+        deletedAt: expect.any(String),
+      });
+      // Effacement RÉEL : plus une ligne, dans aucune des trois tables.
+      expect(users.has(MARIE.id)).toBe(false);
+      expect(profiles.has(MARIE.id)).toBe(false);
+      expect([...history.values()].filter((row) => row.userId === MARIE.id)).toEqual([]);
+    });
+
+    it('clears the session cookie so the browser stops sending a dead token', async () => {
+      const res = await deleteAccount(MARIE);
+
+      const setCookie = res.headers.get('set-cookie') ?? '';
+      expect(setCookie).toContain('access_token=');
+      // Expiration au 1er janvier 1970 : la marque d'un cookie purgé.
+      expect(setCookie).toMatch(/Expires=Thu, 01 Jan 1970/);
+      expect(setCookie).toContain('HttpOnly');
+    });
+
+    it('answers 404 to a still-valid token whose account is already gone', async () => {
+      await deleteAccount(MARIE);
+
+      // Le JWT reste signé et non expiré : c'est l'absence du compte qui répond.
+      const res = await deleteAccount(MARIE);
+      expect(res.status).toBe(404);
+      await expect(getProfile(MARIE)).resolves.toMatchObject({ status: 404 });
     });
   });
 });

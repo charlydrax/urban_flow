@@ -28,14 +28,43 @@ export const NEXT_PARAM = 'next';
 /** Paramètre de requête expliquant *pourquoi* l'utilisateur a été redirigé. */
 export const REASON_PARAM = 'reason';
 
-/** Motifs de redirection vers /login, utilisés pour le message affiché (C7). */
-export type LogoutReason = 'auth-required' | 'session-expired' | 'signed-out';
+/**
+ * Motifs de redirection vers /login, utilisés pour le message affiché (C7).
+ *
+ * `account-deleted` (UF-603) est distinct de `signed-out` : « vous avez été
+ * déconnecté » après une suppression de compte laisserait croire qu'il suffit de
+ * se reconnecter. L'écran doit confirmer l'effacement, pas le masquer.
+ */
+export type LogoutReason = 'auth-required' | 'session-expired' | 'signed-out' | 'account-deleted';
+
+/**
+ * Écrans d'authentification : publics, **et interdits à qui est déjà connecté**.
+ * Afficher un formulaire de connexion à une session valide n'a aucun sens.
+ */
+const AUTH_PATHS = ['/login', '/register'] as const;
+
+/**
+ * Pages lisibles sans session mais qui restent lisibles **avec** (UF-603).
+ *
+ * La politique de confidentialité en est le premier cas : elle doit être
+ * consultable avant de créer un compte — c'est la condition d'un consentement
+ * éclairé (C8) — sans pour autant éjecter vers l'accueil l'utilisateur connecté
+ * qui vient y relire la durée de conservation de ses trajets. La distinction
+ * avec `AUTH_PATHS` n'est donc pas cosmétique : confondre les deux rendrait la
+ * page inaccessible à la moitié des gens qu'elle concerne.
+ */
+const OPEN_PATHS = ['/confidentialite'] as const;
 
 /**
  * Routes accessibles sans session. Tout le reste est privé par défaut :
  * un oubli d'inscription à cette liste ferme la porte, il ne l'ouvre pas.
  */
-const PUBLIC_PATHS = ['/login', '/register'] as const;
+const PUBLIC_PATHS = [...AUTH_PATHS, ...OPEN_PATHS] as const;
+
+/** Teste l'appartenance d'un chemin à une liste (préfixe complet, jamais partiel). */
+function matchesAny(pathname: string, paths: readonly string[]): boolean {
+  return paths.some((path) => pathname === path || pathname.startsWith(`${path}/`));
+}
 
 /** Charge utile minimale attendue dans l'access token (miroir de `JwtPayload` côté API). */
 interface TokenClaims {
@@ -46,9 +75,17 @@ interface TokenClaims {
   exp?: number;
 }
 
-/** Indique si un chemin fait partie des écrans publics (connexion / inscription). */
+/** Indique si un chemin est accessible **sans** session (aucune redirection vers /login). */
 export function isPublicPath(pathname: string): boolean {
-  return PUBLIC_PATHS.some((path) => pathname === path || pathname.startsWith(`${path}/`));
+  return matchesAny(pathname, PUBLIC_PATHS);
+}
+
+/**
+ * Indique si un chemin est un écran d'authentification, dont un utilisateur
+ * **déjà connecté** doit être détourné (UF-106).
+ */
+export function isAuthPath(pathname: string): boolean {
+  return matchesAny(pathname, AUTH_PATHS);
 }
 
 /** Décodage base64url compatible Edge/Node/navigateur (pas de `Buffer`). */
@@ -128,8 +165,10 @@ export function sanitizeNextPath(raw: string | null | undefined): string | null 
   if (!raw.startsWith('/') || raw.startsWith('//') || raw.startsWith('/\\')) return null;
   // Un chemin interne ne contient jamais de schéma (javascript:, data:, http:).
   if (raw.includes(':')) return null;
-  // Ne jamais renvoyer vers un écran public : on tournerait en rond après connexion.
-  if (isPublicPath(raw)) return null;
+  // Ne jamais renvoyer vers un écran d'authentification : on tournerait en rond
+  // après connexion. Les autres pages publiques (politique de confidentialité)
+  // restent des destinations valides — on y était, on doit y revenir.
+  if (isAuthPath(raw)) return null;
   return raw;
 }
 

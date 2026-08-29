@@ -11,15 +11,13 @@ import {
 } from '@nestjs/swagger';
 import { Response } from 'express';
 
+import { AUTH_COOKIE, clearAuthCookie, setAuthCookie } from '../../common/auth-cookie';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Public } from '../../common/decorators/public.decorator';
 import { AuthenticatedUser } from '../../common/strategies/jwt.strategy';
 import { AuthResponse, AuthService, SessionUser } from './auth.service';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
-
-/** Nom du cookie portant l'access token (partagé par la pose et la purge). */
-const AUTH_COOKIE = 'access_token';
 
 /**
  * Contrôleur d'authentification (F1).
@@ -49,7 +47,7 @@ export class AuthController {
     @Res({ passthrough: true }) res: Response,
   ): Promise<AuthResponse> {
     const auth = await this.authService.register(dto);
-    this.setAuthCookie(res, auth.accessToken);
+    setAuthCookie(res, auth.accessToken);
     return auth;
   }
 
@@ -65,7 +63,7 @@ export class AuthController {
     @Res({ passthrough: true }) res: Response,
   ): Promise<AuthResponse> {
     const auth = await this.authService.login(dto);
-    this.setAuthCookie(res, auth.accessToken);
+    setAuthCookie(res, auth.accessToken);
     return auth;
   }
 
@@ -104,25 +102,8 @@ export class AuthController {
   @ApiOperation({ summary: 'Déconnexion : purge le cookie de session httpOnly' })
   @ApiNoContentResponse({ description: 'Cookie purgé (idempotent).' })
   logout(@Res({ passthrough: true }) res: Response): void {
-    // Mêmes attributs qu'à la pose, sinon le navigateur ne cible pas le bon cookie.
-    res.clearCookie(AUTH_COOKIE, {
-      httpOnly: true,
-      sameSite: 'lax',
-      secure: process.env.NODE_ENV === 'production',
-      path: '/',
-    });
-  }
-
-  /**
-   * Pose le cookie d'authentification.
-   * httpOnly + SameSite=lax (C11) ; `secure` sera forcé en production (HTTPS — C4).
-   */
-  private setAuthCookie(res: Response, token: string): void {
-    res.cookie(AUTH_COOKIE, token, {
-      httpOnly: true,
-      sameSite: 'lax',
-      secure: process.env.NODE_ENV === 'production',
-      path: '/',
-    });
+    // Attributs de pose et de purge partagés (`common/auth-cookie`) : sans
+    // attributs identiques, le navigateur ne cible pas le bon cookie.
+    clearAuthCookie(res);
   }
 }

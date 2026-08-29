@@ -16,13 +16,40 @@ import { AppModule } from './app.module';
  *   CORS restreint à l'origine du front.
  * - C9 (interopérabilité) : documentation OpenAPI/Swagger exposée sur /api/docs.
  * - C11 (sécurité données) : cookie-parser pour lire le JWT depuis un cookie httpOnly.
+ * - C8/C11 (UF-603) : HSTS explicite — les données de déplacement ne circulent
+ *   qu'en HTTPS, y compris à la toute première requête.
  */
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule);
   const config = app.get(ConfigService);
 
   app.setGlobalPrefix('api');
-  app.use(helmet());
+  app.use(
+    helmet({
+      /*
+       * HSTS (RGPD art. 32 « chiffrement en transit » — C8/C11, recette 4
+       * d'UF-603). Helmet l'active par défaut ; il est écrit explicitement ici
+       * parce que la valeur par défaut d'une dépendance n'est pas une décision
+       * traçable, et que ce header est justement celui qu'un audit RGPD
+       * cherche.
+       *
+       * Ce qu'il apporte concrètement : une fois l'en-tête reçu, le navigateur
+       * refuse de rappeler ce domaine en HTTP, même si l'utilisateur tape
+       * l'adresse à la main ou suit un vieux lien. Sans lui, la toute première
+       * requête d'une session — celle qui porte le cookie de session — peut
+       * partir en clair et être interceptée avant même la redirection 301.
+       *
+       * `maxAge` à 6 mois : la durée recommandée par l'ANSSI et l'OWASP. Plus
+       * court affaiblit la protection, plus long piège le domaine si le projet
+       * devait un jour repasser en HTTP.
+       *
+       * `includeSubDomains` : le front, l'API et un éventuel sous-domaine de
+       * tuiles partagent le même cookie de session — protéger le seul domaine
+       * apex laisserait la porte ouverte à côté.
+       */
+      hsts: { maxAge: 15_552_000, includeSubDomains: true, preload: false },
+    }),
+  );
   app.use(cookieParser());
   app.enableCors({
     // C4 : seule l'origine du client PWA est autorisée (pas de wildcard)
