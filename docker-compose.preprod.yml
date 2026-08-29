@@ -124,7 +124,13 @@ services:
     ports:
       - '${PREPROD_WEB_PORT:-3100}:3000'
     healthcheck:
-      test: ['CMD-SHELL', 'wget -q -O /dev/null http://localhost:3000/ || exit 1']
+      # `127.0.0.1` et non `localhost` : le serveur autonome de Next écoute sur
+      # `HOSTNAME=0.0.0.0`, donc en IPv4 seulement, alors que `localhost` se
+      # résout d'abord en `::1` dans l'image Alpine — la sonde recevait un
+      # « connection refused » sur un service parfaitement joignable, et le
+      # conteneur restait « unhealthy » sans raison. L'API, servie par Nest en
+      # double pile, n'a pas ce problème.
+      test: ['CMD-SHELL', 'wget -q -O /dev/null http://127.0.0.1:3000/ || exit 1']
       interval: 10s
       timeout: 5s
       retries: 6
