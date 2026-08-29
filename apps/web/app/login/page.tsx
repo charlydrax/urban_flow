@@ -15,10 +15,17 @@ const REASON_MESSAGES: Record<LogoutReason, string> = {
   'auth-required': 'Connectez-vous pour accéder à cette page.',
   'session-expired': 'Votre session a expiré. Reconnectez-vous pour continuer.',
   'signed-out': 'Vous avez été déconnecté.',
+  'account-deleted':
+    'Votre compte et toutes vos données ont été supprimés. Vous pouvez créer un nouveau compte à tout moment.',
 };
 
 function isLogoutReason(value: string | undefined): value is LogoutReason {
-  return value === 'auth-required' || value === 'session-expired' || value === 'signed-out';
+  return (
+    value === 'auth-required' ||
+    value === 'session-expired' ||
+    value === 'signed-out' ||
+    value === 'account-deleted'
+  );
 }
 
 /**

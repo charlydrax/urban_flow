@@ -1,4 +1,4 @@
-# Module `users` — Profil & préférences de mobilité (F1)
+# Module `users` — Profil, préférences de mobilité et droits RGPD (F1)
 
 ## Rôle
 
@@ -7,12 +7,17 @@ et des **préférences de mobilité** (modes acceptés, priorité rapide/écolo,
 accessibilité PMR, marche maximale), lues par le Service Itinéraire à l'étape 3
 du flux de référence puis appliquées au tri des options (F2).
 
+Depuis UF-603, le module porte aussi le **droit à l'effacement** (art. 17 RGPD) :
+consulter, rectifier et supprimer ses données se font au même endroit — voir
+[`docs/rgpd.md`](../../../../docs/rgpd.md).
+
 ## Endpoints (tous protégés par le guard JWT global)
 
-| Méthode | Route           | Description                                        |
-| ------- | --------------- | -------------------------------------------------- |
-| GET     | `/api/users/me` | Profil du compte connecté (identité + préférences) |
-| PATCH   | `/api/users/me` | Mise à jour **partielle** du profil                |
+| Méthode | Route           | Description                                                |
+| ------- | --------------- | ---------------------------------------------------------- |
+| GET     | `/api/users/me` | Profil du compte connecté (identité + préférences)         |
+| PATCH   | `/api/users/me` | Mise à jour **partielle** du profil                        |
+| DELETE  | `/api/users/me` | Efface le compte et toutes ses données (RGPD art. 17 — C8) |
 
 ### `GET /api/users/me`
 
@@ -52,6 +57,33 @@ Réponses : `200` (profil relu en base), `400` (validation — clé inconnue, mo
 hors catalogue, liste de modes vide, marche hors 0–60), `401` (session absente ou
 expirée), `404` (compte supprimé alors que le token est encore valide).
 
+### `DELETE /api/users/me`
+
+Aucun corps, aucun paramètre : le compte effacé est celui du token vérifié.
+
+```json
+{
+  "deletedUserId": "11111111-1111-4111-8111-111111111111",
+  "deletedSearchHistoryCount": 42,
+  "deletedMobilityProfile": true,
+  "deletedAt": "2026-08-29T10:12:00.000Z"
+}
+```
+
+L'effacement est **réel, pas logique** : pas de `deletedAt` en base, pas de ligne
+anonymisée conservée. Une seule suppression suffit, les cascades du schéma Prisma
+emportent `mobility_profiles` et `search_history`. Les décomptes sont relevés
+**avant** le `DELETE`, dans la même transaction — après, il n'y aurait plus rien à
+compter, et hors transaction une écriture concurrente fausserait le total.
+
+Le cookie de session est purgé dans la foulée (attributs partagés avec la pose —
+`common/auth-cookie.ts`, sinon le navigateur ne cible pas le bon cookie). Le JWT
+déjà émis reste cryptographiquement valide jusqu'à expiration, mais il ne désigne
+plus rien : toute route protégée répond désormais `404`.
+
+Réponses : `200` (preuve d'exécution ci-dessus), `401` (session absente),
+`404` (compte déjà supprimé).
+
 ## Isolation des profils (OWASP A01)
 
 Aucune route n'accepte d'identifiant : `me` est le **seul** moyen de désigner un
@@ -69,13 +101,13 @@ n'expose délibérément aucune méthode « lire le profil de X ».
 
 ## Contraintes couvertes
 
-| Contrainte | Traduction dans le module                                                                             |
-| ---------- | ----------------------------------------------------------------------------------------------------- |
-| C4         | Validation stricte des DTO, identité issue du token, aucune route paramétrée par un identifiant       |
-| C5 / C10   | `PATCH` partiel, lecture sans écriture, sélection Prisma limitée aux colonnes utiles                  |
-| C8         | Minimisation (jamais d'historique ni de hash), consentement géolocalisation horodaté **et révocable** |
-| C11        | `passwordHash` jamais sélectionné, donc jamais journalisé ni sérialisé                                |
-| C12        | Préférence PMR transmise au planificateur pour les itinéraires accessibles                            |
+| Contrainte | Traduction dans le module                                                                                                                 |
+| ---------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| C4         | Validation stricte des DTO, identité issue du token, aucune route paramétrée par un identifiant                                           |
+| C5 / C10   | `PATCH` partiel, lecture sans écriture, sélection Prisma limitée aux colonnes utiles                                                      |
+| C8         | Minimisation (jamais d'historique ni de hash), consentement géolocalisation horodaté **et révocable**, droit à l'effacement (`DELETE me`) |
+| C11        | `passwordHash` jamais sélectionné, donc jamais journalisé ni sérialisé                                                                    |
+| C12        | Préférence PMR transmise au planificateur pour les itinéraires accessibles                                                                |
 
 ## Tests
 
@@ -83,12 +115,14 @@ n'expose délibérément aucune méthode « lire le profil de X ».
   traçabilité du consentement, 404 sur compte supprimé.
 - `users.controller.spec.ts` — parcours HTTP réel (guard + `ValidationPipe`) avec
   **deux comptes** en base simulée : chacun ne lit et n'écrit que son profil
-  (recette 2 du ticket).
+  (recette 2 du ticket). L'entrepôt simule aussi la **cascade** du schéma, sans
+  quoi le test d'effacement dirait « la ligne `users` a disparu » et laisserait
+  passer la fuite qu'on cherche justement à exclure.
 
-## Reste à faire (hors UF-107)
+## Reste à faire
 
 - Changement d'email et de mot de passe : nécessite une re-vérification de
-  l'adresse et la réémission du JWT — hors périmètre de ce ticket.
-- Suppression du compte (droit à l'effacement, C8) : la cascade est en place dans
-  le schéma Prisma, l'endpoint reste à exposer.
-- Consommation de `getPreferences()` par le planificateur (F2, étape 3 du flux).
+  l'adresse et la réémission du JWT — hors périmètre.
+- Export des données personnelles (art. 20, portabilité) : la lecture est possible
+  via `GET me` et `GET /api/search-history`, mais aucun fichier téléchargeable
+  n'est proposé (cf. `docs/rgpd.md` §6).

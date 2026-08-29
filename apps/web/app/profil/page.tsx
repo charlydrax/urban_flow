@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 
 import { AccountCard } from '../../features/profile/account-card';
+import { DeleteAccountCard } from '../../features/profile/delete-account-card';
 import { MobilityProfileForm } from '../../features/profile/mobility-profile-form';
 
 export const metadata: Metadata = {
@@ -17,8 +18,18 @@ export const metadata: Metadata = {
  * appel sans session valide (UF-104). Après déconnexion, cette page redirige
  * donc vers l'écran de connexion (recette 3 du ticket).
  *
+ * Depuis UF-603, elle porte aussi les **droits RGPD** de l'utilisateur (C8) :
+ * consulter et rectifier ses préférences, retirer son consentement à la
+ * géolocalisation, et supprimer son compte. Les trois sont réunis ici parce que
+ * c'est l'écran qu'on ouvre quand on se demande « qu'est-ce qu'ils savent de
+ * moi ? » — les disperser reviendrait à rendre ces droits théoriques.
+ *
+ * L'ordre est délibéré : la suppression ferme la page, après les réglages qui
+ * suffisent le plus souvent (révoquer la géolocalisation, restreindre les modes).
+ *
  * Reste un **Server Component** : elle ne porte que les métadonnées et la mise
- * en page ; seuls la carte de compte et le formulaire sont hydratés (C5, C10).
+ * en page ; seuls les cartes de compte, le formulaire et la zone de suppression
+ * sont hydratés (C5, C10).
  */
 export default function ProfilePage() {
   return (
@@ -35,6 +46,7 @@ export default function ProfilePage() {
         <div className="flex flex-col gap-4">
           <AccountCard />
           <MobilityProfileForm />
+          <DeleteAccountCard />
         </div>
       </section>
     </div>

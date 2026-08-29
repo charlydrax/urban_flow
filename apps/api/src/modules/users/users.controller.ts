@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Patch } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Patch, Res } from '@nestjs/common';
 import {
   ApiBadRequestResponse,
   ApiBearerAuth,
@@ -9,9 +9,13 @@ import {
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
+import type { DeleteAccountResult } from '@urbanflow/shared';
+import { Response } from 'express';
 
+import { clearAuthCookie } from '../../common/auth-cookie';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { AuthenticatedUser } from '../../common/strategies/jwt.strategy';
+import { DeleteAccountResultDto } from './dto/delete-account-result.dto';
 import { UpdateUserProfileDto } from './dto/update-user-profile.dto';
 import { UsersService, UserProfileView } from './users.service';
 
@@ -25,6 +29,10 @@ import { UsersService, UserProfileView } from './users.service';
  *
  * Les données exposées sont réduites au strict nécessaire (minimisation RGPD — C8) :
  * ni hash de mot de passe, ni token, ni historique.
+ *
+ * Depuis UF-603, le module porte aussi le **droit à l'effacement** (`DELETE me`) :
+ * consulter, rectifier et supprimer ses données se font au même endroit, ce qui
+ * est aussi ce que l'utilisateur cherche quand il ouvre son profil.
  */
 @ApiTags('users')
 @ApiBearerAuth()
@@ -59,5 +67,38 @@ export class UsersController {
     @Body() dto: UpdateUserProfileDto,
   ): Promise<UserProfileView> {
     return this.usersService.updateProfile(user.userId, dto);
+  }
+
+  /**
+   * Efface le compte connecté et toutes ses données — droit à l'effacement
+   * (art. 17 RGPD, C8 ; recette 3 du ticket UF-603).
+   *
+   * `DELETE /users/me`, sans identifiant ni corps : comme les deux routes
+   * précédentes, le compte visé est celui du token vérifié et lui seul. Il n'y a
+   * donc structurellement aucune requête capable de supprimer le compte d'autrui
+   * (C4 / OWASP A01) — la protection ne repose pas sur un contrôle qu'on
+   * pourrait oublier, mais sur l'absence de paramètre.
+   *
+   * La réponse est un `200` porteur du **décompte de ce qui a disparu**, pas un
+   * `204` muet : exercer un droit sans en recevoir la preuve d'exécution n'aide
+   * ni l'utilisateur, ni la recette du ticket.
+   *
+   * Le cookie de session est purgé dans la foulée. Le JWT déjà émis reste
+   * cryptographiquement valide jusqu'à expiration — on ne peut pas révoquer un
+   * jeton sans état — mais il ne désigne plus rien : toute route protégée
+   * répondra 404, et le navigateur n'a de toute façon plus de cookie à envoyer.
+   */
+  @Delete('me')
+  @ApiOperation({ summary: 'Supprime le compte connecté et toutes ses données (RGPD art. 17)' })
+  @ApiOkResponse({ type: DeleteAccountResultDto })
+  @ApiNotFoundResponse({ description: 'Compte déjà supprimé alors que le token est valide.' })
+  async deleteMe(
+    @CurrentUser() user: AuthenticatedUser,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<DeleteAccountResult> {
+    const result = await this.usersService.deleteAccount(user.userId);
+    // Après le service : un échec de suppression ne doit pas déconnecter.
+    clearAuthCookie(res);
+    return result;
   }
 }

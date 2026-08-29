@@ -10,6 +10,10 @@ import { middleware } from './middleware';
  *  1. une page privée sans session renvoie vers /login ;
  *  2. un token expiré est traité comme une absence de session ;
  *  3. la page demandée est mémorisée pour y revenir après connexion.
+ *
+ * UF-603 y ajoute la politique de confidentialité, qui n'entre dans aucune des
+ * deux cases habituelles : publique **sans** être un écran d'authentification.
+ * C'est le cas que la version précédente du middleware traitait mal.
  */
 
 /** Fabrique un JWT de test (charge utile seule : le front ne vérifie pas la signature). */
@@ -76,5 +80,19 @@ describe('middleware — protection des routes (UF-106)', () => {
     const response = middleware(requestFor('/login', makeToken(900)));
 
     expect(locationOf(response).pathname).toBe('/');
+  });
+
+  describe('politique de confidentialité (UF-603)', () => {
+    it('is readable without an account — the condition of informed consent', () => {
+      expect(middleware(requestFor('/confidentialite')).headers.get('location')).toBeNull();
+    });
+
+    it('stays readable while signed in, unlike the auth screens', () => {
+      // Le piège : traiter cette page comme /login éjecterait vers l'accueil
+      // l'utilisateur connecté venu relire la durée de conservation de ses trajets.
+      const response = middleware(requestFor('/confidentialite', makeToken(900)));
+
+      expect(response.headers.get('location')).toBeNull();
+    });
   });
 });

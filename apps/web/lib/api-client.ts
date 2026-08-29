@@ -3,6 +3,7 @@ import type {
   CarbonSummary,
   CarbonSummaryDays,
   CreateSearchHistoryPayload,
+  DeleteAccountResult,
   PlanRouteRequest,
   PlanRoutesResponse,
   SearchHistoryEntry,
@@ -200,6 +201,26 @@ export const apiClient = {
    */
   updateProfile(payload: UpdateUserProfilePayload): Promise<UserProfile> {
     return request('/users/me', { method: 'PATCH', body: JSON.stringify(payload) });
+  },
+
+  /**
+   * Supprime le compte connecté et toutes ses données (UF-603 — droit à
+   * l'effacement, art. 17 RGPD).
+   *
+   * Comme les deux appels précédents, aucun identifiant n'est transmis : l'API
+   * efface le porteur du token, et il n'existe pas de forme de cette requête
+   * capable de viser quelqu'un d'autre (C4).
+   *
+   * `skipUnauthorizedHandler` : au retour, la session **n'existe plus** — l'API
+   * a purgé le cookie. Laisser l'intercepteur global traiter un éventuel 401
+   * déclencherait une redirection « session expirée » par-dessus l'écran de
+   * confirmation, en donnant l'impression d'une panne là où tout s'est bien
+   * passé. L'appelant enchaîne lui-même sur la déconnexion.
+   *
+   * @returns Le décompte de ce qui a été effacé, affiché en confirmation
+   */
+  deleteAccount(): Promise<DeleteAccountResult> {
+    return request('/users/me', { method: 'DELETE', skipUnauthorizedHandler: true });
   },
 
   /**

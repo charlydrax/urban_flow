@@ -13,3 +13,4 @@ export * from './cycle-path';
 export * from './auth';
 export * from './user';
 export * from './carbon';
+export * from './privacy';

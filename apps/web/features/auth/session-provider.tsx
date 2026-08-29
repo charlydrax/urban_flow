@@ -23,6 +23,15 @@ export interface SessionState {
   status: 'authenticated' | 'unauthenticated';
   /** Déconnexion volontaire : purge le cookie côté API puis renvoie vers /login. */
   signOut: () => Promise<void>;
+  /**
+   * Purge **locale** de la session, sans appel réseau (UF-603).
+   *
+   * Réservé au cas où l'API a déjà supprimé le cookie de son côté — la
+   * suppression de compte. Rappeler `/auth/logout` y serait un aller-retour pour
+   * effacer un cookie qui n'existe plus (C5), et masquerait le vrai motif de
+   * redirection derrière un « vous avez été déconnecté » trompeur.
+   */
+  forgetSession: (reason: LogoutReason) => void;
 }
 
 const SessionContext = createContext<SessionState | null>(null);
@@ -129,9 +138,18 @@ export function SessionProvider({
     }
   }, [endSession]);
 
+  /** Purge locale : la session est déjà morte côté serveur, il n'y a rien à demander. */
+  const forgetSession = useCallback(
+    (reason: LogoutReason) => {
+      expiringRef.current = true;
+      endSession(reason);
+    },
+    [endSession],
+  );
+
   return (
     <SessionContext.Provider
-      value={{ user, status: user ? 'authenticated' : 'unauthenticated', signOut }}
+      value={{ user, status: user ? 'authenticated' : 'unauthenticated', signOut, forgetSession }}
     >
       {children}
     </SessionContext.Provider>
