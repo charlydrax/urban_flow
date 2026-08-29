@@ -66,7 +66,9 @@ const config = [
   },
 
   {
-    ignores: ['.next/**', 'node_modules/**', 'public/sw.js', 'next-env.d.ts'],
+    // `.next-eco/**` : sortie du build de mesure d'éco-conception (UF-605), au
+    // même titre que `.next/**` — du code généré, jamais relu à la main.
+    ignores: ['.next/**', '.next-eco/**', 'node_modules/**', 'public/sw.js', 'next-env.d.ts'],
   },
   {
     rules: {
@@ -77,6 +79,19 @@ const config = [
         { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
       ],
       'no-console': ['warn', { allow: ['warn', 'error'] }],
+    },
+  },
+
+  {
+    /*
+     * Outillage en ligne de commande (UF-605) : écrire sur la sortie standard
+     * est la fonction même de ces scripts, pas une trace de débogage oubliée.
+     * La règle reste active partout ailleurs — c'est dans le code applicatif
+     * qu'un `console.log` fuit en production.
+     */
+    files: ['scripts/**/*.mjs'],
+    rules: {
+      'no-console': 'off',
     },
   },
 ];

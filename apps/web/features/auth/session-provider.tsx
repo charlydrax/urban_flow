@@ -37,6 +37,16 @@ export interface SessionState {
 const SessionContext = createContext<SessionState | null>(null);
 
 /**
+ * Fenêtre de coalescence des revalidations de session (UF-605 — C5).
+ *
+ * `visibilitychange` et `focus` se déclenchent tous les deux au retour sur un
+ * onglet ; sans cette fenêtre, une seule question donnerait deux
+ * `GET /auth/session`. Deux secondes couvrent très largement l'écart entre les
+ * deux événements sans jamais masquer une expiration : le JWT vit 15 minutes.
+ */
+const REVALIDATE_COALESCE_MS = 2000;
+
+/**
  * Fournit l'état de session à toute la PWA (UF-106).
  *
  * L'état initial vient du **serveur** (`getServerSession()` dans le layout) : le
@@ -109,12 +119,41 @@ export function SessionProvider({
     });
   }, [endSession]);
 
-  /** Revalidation au retour sur l'onglet (voir plus haut : pas de polling — C5). */
+  /**
+   * Revalidation au retour sur l'onglet (voir plus haut : pas de polling — C5).
+   *
+   * ## Pourquoi deux écouteurs, et pourquoi ils doivent être fusionnés (UF-605)
+   *
+   * Les deux événements sont nécessaires, car aucun ne couvre l'autre :
+   * `visibilitychange` seul rate le retour depuis une autre **application**
+   * (la page est restée visible, elle n'a fait que perdre le focus), et
+   * `focus` seul rate le retour depuis un autre **onglet** sur les navigateurs
+   * qui ne redonnent pas le focus à la fenêtre.
+   *
+   * Mais dans le cas le plus courant — revenir d'un autre onglet de la même
+   * fenêtre — les deux se déclenchent, à quelques millisecondes d'intervalle :
+   * c'étaient **deux `GET /auth/session` pour une seule question**. Un appel
+   * réseau redondant, exactement ce que la recette 3 du ticket cherche.
+   *
+   * La coalescence par fenêtre de temps règle le cas sans rien perdre : la
+   * session vient d'être vérifiée, la seconde réponse serait identique à la
+   * première. La fenêtre est volontairement large au regard de l'écart entre
+   * les deux événements (quelques millisecondes) et ridiculement courte au
+   * regard de la durée de vie d'un JWT (15 minutes) — elle ne peut donc pas
+   * masquer une expiration.
+   */
   useEffect(() => {
     if (!user) return;
 
+    let lastCheckedAt = 0;
+
     const revalidate = () => {
       if (document.visibilityState !== 'visible' || expiringRef.current) return;
+
+      const now = Date.now();
+      if (now - lastCheckedAt < REVALIDATE_COALESCE_MS) return;
+      lastCheckedAt = now;
+
       // Un 401 est capté par l'intercepteur ci-dessus, qui gère purge + redirection.
       void apiClient.getSession().catch(() => undefined);
     };

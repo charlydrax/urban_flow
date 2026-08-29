@@ -3,10 +3,12 @@ import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import compression from 'compression';
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 
 import { AppModule } from './app.module';
+import { COMPRESSION_THRESHOLD_BYTES, shouldCompress } from './common/compression';
 
 /**
  * Bootstrap de l'API Gateway UrbanFlow.
@@ -21,6 +23,8 @@ import { AppModule } from './app.module';
  *   qu'en HTTPS, y compris à la toute première requête.
  * - C4 (UF-604) : CSP explicite, et confiance au reverse proxy déclarée pour que
  *   la limitation de débit compte les vraies IP clientes.
+ * - C5/C10 (UF-605) : compression des réponses JSON — 85 % de trafic en moins
+ *   sur `/routes/plan`, hors chemins portant un secret (voir common/compression.ts).
  */
 async function bootstrap(): Promise<void> {
   // Typé `NestExpressApplication` : `app.set('trust proxy', …)` plus bas est une
@@ -152,6 +156,24 @@ async function bootstrap(): Promise<void> {
       },
     }),
   );
+  /*
+   * Compression des réponses (UF-605 — C5 éco-conception, C10 performances).
+   *
+   * Enregistrée AVANT tout ce qui écrit un corps, et après helmet : le
+   * middleware doit envelopper `res.write`/`res.end` des couches situées en
+   * dessous de lui pour avoir quoi comprimer.
+   *
+   * Le « pourquoi » (gain mesuré, exclusion BREACH des réponses porteuses de
+   * jeton, seuil de 1 Ko) est documenté dans `common/compression.ts` — ici on
+   * ne fait que le brancher.
+   */
+  app.use(
+    compression({
+      threshold: COMPRESSION_THRESHOLD_BYTES,
+      filter: (req, res) => shouldCompress(req, res, compression.filter),
+    }),
+  );
+
   app.use(cookieParser());
   app.enableCors({
     // C4 : seule l'origine du client PWA est autorisée (pas de wildcard)
