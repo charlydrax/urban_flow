@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import type {
+  AppliedRouteConstraints,
   CarbonFootprint,
   CarbonSegmentFootprint,
   Itinerary,
@@ -240,11 +241,33 @@ export class SourceAvailabilityDto implements SourceAvailability {
 }
 
 /**
+ * Contraintes du profil qui ont réduit la liste rendue (UF-602, C7/C12).
+ *
+ * Le pendant de `sources` pour le profil : `sources` explique ce que le réseau
+ * n'a pas fourni, `appliedConstraints` explique ce que le profil a écarté. Sans
+ * l'un ou l'autre, une liste courte reste inexplicable côté client.
+ */
+export class AppliedRouteConstraintsDto implements AppliedRouteConstraints {
+  @ApiProperty({
+    example: false,
+    description:
+      'Vrai quand le profil demande des itinéraires praticables en fauteuil roulant (C12). ' +
+      'La requête OpenTripPlanner porte alors `wheelchair: true` et la fusion écarte tout ' +
+      'candidat non accessible : c’est un filtre dur, pas un critère de classement.',
+  })
+  reducedMobility!: boolean;
+}
+
+/**
  * Réponse de `POST /api/routes/plan` (étape 8 du flux : 200 + itinéraires + CO₂).
  *
  * Depuis UF-305, elle porte aussi l'état des trois sources : un `200` avec une
  * liste vide et trois sources indisponibles n'est pas la même réponse qu'un
  * `200` avec une liste vide et trois sources en bonne santé.
+ *
+ * Depuis UF-602, elle porte en plus les **contraintes du profil appliquées** :
+ * la même liste vide n'a pas la même explication selon qu'un filtre PMR était
+ * actif ou non, et seul le serveur le sait.
  */
 export class PlanRoutesResponseDto implements PlanRoutesResponse {
   /** Itinéraires proposés, triés par empreinte carbone croissante (mobilité douce d'abord). */
@@ -281,6 +304,21 @@ export class PlanRoutesResponseDto implements PlanRoutesResponse {
       'source `sharedMobility` indisponible ne se lisent pas pareil.',
   })
   sources!: SourceAvailabilityDto[];
+
+  /**
+   * Contraintes du profil appliquées à cette recherche (UF-602).
+   *
+   * Toujours présent, même quand aucune contrainte n'est active : le client
+   * doit pouvoir distinguer « aucun filtre » d'« une réponse rendue par un
+   * cache antérieur au ticket », qui, elle, n'a pas le champ du tout (C10).
+   */
+  @ApiProperty({
+    type: AppliedRouteConstraintsDto,
+    description:
+      'Contraintes dures issues du profil ayant retiré des options de la liste. Le tri ' +
+      'n’en fait pas partie : il réordonne sans rien enlever, et `sortedBy` le dit déjà.',
+  })
+  appliedConstraints!: AppliedRouteConstraintsDto;
 
   /**
    * Identifiant de la ligne écrite dans `search_history` pour cette recherche

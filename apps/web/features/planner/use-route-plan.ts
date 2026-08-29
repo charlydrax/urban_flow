@@ -1,6 +1,7 @@
 'use client';
 
 import type {
+  AppliedRouteConstraints,
   Itinerary,
   ItinerarySortKey,
   Place,
@@ -36,6 +37,15 @@ export interface RoutePlanState {
   sortedBy: ItinerarySortKey | null;
   /** État des trois sources pour cette recherche (UF-305) — alimente le bandeau « mode dégradé ». */
   sources: SourceAvailability[];
+  /**
+   * Contraintes du profil qui ont réduit cette liste (UF-602) — alimente la
+   * note « filtre accessibilité actif ».
+   *
+   * `null` tant qu'aucune réponse n'est arrivée, **et** quand la réponse vient
+   * d'un cache antérieur au ticket : dans les deux cas on ne sait rien, et
+   * affirmer « aucun filtre » serait une affirmation de trop.
+   */
+  appliedConstraints: AppliedRouteConstraints | null;
   /** Itinéraire mis en avant sur la carte. */
   selectedId: string | null;
   /**
@@ -152,6 +162,9 @@ export function useRoutePlan(onSearchRecorded?: SearchRecordedHandler): RoutePla
   const [itineraries, setItineraries] = useState<Itinerary[]>([]);
   const [sortedBy, setSortedBy] = useState<ItinerarySortKey | null>(null);
   const [sources, setSources] = useState<SourceAvailability[]>([]);
+  const [appliedConstraints, setAppliedConstraints] = useState<AppliedRouteConstraints | null>(
+    null,
+  );
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [failure, setFailure] = useState<PlanFailure | null>(null);
   const [servedFromCache, setServedFromCache] = useState(false);
@@ -192,6 +205,7 @@ export function useRoutePlan(onSearchRecorded?: SearchRecordedHandler): RoutePla
     setItineraries([]);
     setSortedBy(null);
     setSources([]);
+    setAppliedConstraints(null);
     setSelectedId(null);
     // La ligne d'historique de la recherche précédente n'a plus cours : un clic
     // arrivé après le lancement d'une nouvelle recherche ne doit pas inscrire
@@ -206,6 +220,10 @@ export function useRoutePlan(onSearchRecorded?: SearchRecordedHandler): RoutePla
         setItineraries(response.itineraries);
         setSortedBy(response.sortedBy);
         setSources(response.sources);
+        // `?? null` et non `?? { reducedMobility: false }` : une réponse rejouée
+        // depuis un cache antérieur à UF-602 n'a pas le champ, et lui prêter
+        // « aucun filtre » masquerait un filtre peut-être bien actif (C10).
+        setAppliedConstraints(response.appliedConstraints ?? null);
         setSelectedId(response.itineraries[0]?.id ?? null);
         setStatus('ready');
         setServedFromCache(fromCache);
@@ -248,6 +266,7 @@ export function useRoutePlan(onSearchRecorded?: SearchRecordedHandler): RoutePla
           // sait pas quelles sources ont parlé : `sources` reste vide, et le
           // message se rabat sur sa formulation neutre.
           setSources([]);
+          setAppliedConstraints(null);
           setStatus('ready');
           return;
         }
@@ -256,6 +275,7 @@ export function useRoutePlan(onSearchRecorded?: SearchRecordedHandler): RoutePla
         // `SessionProvider` (UF-106) : le hook se contente d'en publier la
         // nature, sans exposer le statut ni le détail renvoyé par l'API (C11).
         setSources([]);
+        setAppliedConstraints(null);
         setFailure(kind);
         setStatus('error');
       });
@@ -315,6 +335,7 @@ export function useRoutePlan(onSearchRecorded?: SearchRecordedHandler): RoutePla
     itineraries,
     sortedBy,
     sources,
+    appliedConstraints,
     selectedId,
     servedFromCache,
     failure,

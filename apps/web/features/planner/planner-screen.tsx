@@ -7,6 +7,7 @@ import {
   CACHED_ROUTE_NOTICE,
   PLAN_FAILURE_NOTICES,
   SOURCE_LABELS,
+  describeAppliedConstraints,
   describeDegradedSources,
   describeEmptyResult,
 } from '../../lib/plan-feedback';
@@ -99,7 +100,19 @@ export function PlannerScreen() {
       : routePlan.failure === 'offline'
         ? 'warning'
         : 'error';
-  const emptyNotice = isEmptyResult ? describeEmptyResult(routePlan.sources) : null;
+  const emptyNotice = isEmptyResult
+    ? describeEmptyResult(routePlan.sources, routePlan.appliedConstraints)
+    : null;
+  // Le filtre PMR (UF-602) est annoncé dès qu'une réponse est là, liste pleine
+  // ou vide : c'est ce qui relie les options affichées à la case cochée dans le
+  // profil, peut-être des semaines plus tôt et sur une autre page (C7/C12).
+  // Sur une liste vide, le message de `describeEmptyResult` le dit déjà — et
+  // mieux, puisqu'il explique le vide : les afficher tous les deux ferait lire
+  // deux fois la même contrainte.
+  const constraintNotice =
+    routePlan.status === 'ready' && !isEmptyResult
+      ? describeAppliedConstraints(routePlan.appliedConstraints)
+      : null;
   const degraded = routePlan.status === 'ready' ? describeDegradedSources(routePlan.sources) : null;
 
   // Le détail carbone (UF-501) porte sur l'option retenue, et sur elle seule :
@@ -154,6 +167,16 @@ export function PlannerScreen() {
             role={emptyNotice.role}
             message={emptyNotice.message}
           />
+        )}
+
+        {/*
+          Filtre d'accessibilité actif (UF-602) : ton `info`, pas `warning` — la
+          contrainte fait exactement ce qu'on lui demande, il n'y a rien à
+          corriger. Le peindre en orange ferait chercher un problème dans un
+          réglage volontaire.
+        */}
+        {constraintNotice && (
+          <PlanNotice tone="info" role={constraintNotice.role} message={constraintNotice.message} />
         )}
 
         {/*

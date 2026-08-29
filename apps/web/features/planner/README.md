@@ -1007,3 +1007,41 @@ de « vérifier votre connexion » — elle est déjà connue pour absente — e
 pas peint en rouge, puisqu'il n'y a rien à réparer avant le retour du réseau.
 Les erreurs qui viennent de notre **contrat** (401, 400, 404) gardent leur sens
 même hors-ligne : ce sont des réponses lues, pas des suppositions.
+
+## Filtre d'accessibilité PMR annoncé à l'écran (UF-602) — C7 / C12
+
+Le filtre PMR agissait depuis UF-302/UF-401, **sans que rien à l'écran ne le
+dise**. Un usager en fauteuil qui obtenait une option au lieu de quatre ne pouvait
+pas savoir si le réseau était pauvre ou si son propre réglage — coché peut-être
+des semaines plus tôt, sur la page profil — avait écarté le reste. C'est le même
+défaut que d'afficher une liste filtrée en cachant le filtre actif (WCAG 3.3.1).
+
+`POST /routes/plan` publie désormais `appliedConstraints`, que `use-route-plan`
+remonte tel quel et que `plan-feedback.ts` traduit en deux messages distincts :
+
+| Situation                    | Message                                                             | Rôle     |
+| ---------------------------- | ------------------------------------------------------------------- | -------- |
+| Liste non vide, filtre actif | « Filtre accessibilité actif : seuls les itinéraires praticables… » | `status` |
+| Liste vide, filtre actif     | « Aucun itinéraire praticable en fauteuil roulant… décochez… »      | `status` |
+| Liste vide, aucune source    | « Aucune de nos sources n'a répondu » — la panne l'emporte          | `alert`  |
+
+### Pourquoi jamais les deux à la fois
+
+Sur une liste vide, le message de `describeEmptyResult` **contient déjà** la
+mention du filtre — et mieux, puisqu'il explique le vide au lieu de le constater.
+Afficher en plus la note « filtre actif » ferait lire deux fois la même
+contrainte, dont une fois sans rien apprendre.
+
+### Pourquoi un ton `info`, pas `warning`
+
+La contrainte fait exactement ce qu'on lui demande : il n'y a **rien à corriger**.
+La peindre en orange ferait chercher un problème dans un réglage volontaire, et
+suggérerait de le retirer — ce qui n'est pas notre rôle. Le message dit seulement
+où le changer, pour qui le voudrait.
+
+### Le champ absent ne vaut pas « aucun filtre »
+
+Une réponse rejouée depuis un cache antérieur à ce ticket ne porte pas
+`appliedConstraints`. Le hook publie alors `null` — pas `{ reducedMobility: false }` :
+prêter « aucun filtre » à une réponse qui n'en sait rien masquerait un filtre
+peut-être bien actif (C10).

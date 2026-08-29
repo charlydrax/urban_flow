@@ -148,6 +148,16 @@ ressource, dernier itinéraire rejoué sans réseau, fond de carte déjà consul
 indicateur « hors-ligne » — est documenté dans
 [`docs/pwa-offline.md`](docs/pwa-offline.md).
 
+L'**accessibilité WCAG 2.1 AA** (UF-602) — méthode d'audit à trois étages
+(`jsx-a11y` strict, `axe-core` sur composants rendus, contrastes assertés sur les
+tokens), résultats, effet réel de l'option PMR sur les itinéraires et écarts
+résiduels justifiés — est documentée dans
+[`docs/accessibility.md`](docs/accessibility.md).
+
+```bash
+npm run test:a11y   # audit axe-core seul (inclus dans `npm test`)
+```
+
 ## Qualité de code & contribution
 
 Lint strict (ESLint + Prettier partagés), hooks Git (Husky : lint-staged en `pre-commit`,

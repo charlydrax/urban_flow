@@ -1,4 +1,8 @@
-import type { RouteSourceName, SourceAvailability } from '@urbanflow/shared';
+import type {
+  AppliedRouteConstraints,
+  RouteSourceName,
+  SourceAvailability,
+} from '@urbanflow/shared';
 
 import { ApiError } from './api-client';
 
@@ -196,13 +200,25 @@ export const SOURCE_LABELS: Record<RouteSourceName, string> = {
  *   il n'y a simplement pas de trajet. Ton `status` : inviter à vérifier sa
  *   connexion serait un contresens.
  *
+ * Depuis UF-602, une **troisième** cause s'intercale entre les deux : le profil
+ * a pu écarter tout ce que les sources proposaient. Elle passe avant le message
+ * neutre, parce qu'elle est la seule sur laquelle l'usager ait prise —
+ * « essayez une adresse plus proche d'un axe desservi » est un mauvais conseil
+ * quand le réseau desservait bien le trajet, mais pas en fauteuil roulant.
+ *
  * @param sources État des sources publié par l'API pour cette recherche ; un
  * tableau vide (cas d'un 404 renvoyé par un intermédiaire) est traité comme
  * « pas d'information » et rend le message neutre
+ * @param constraints Contraintes du profil appliquées à cette recherche ;
+ * absentes d'une réponse mise en cache avant UF-602, auquel cas le message
+ * revient à sa formulation d'origine
  * @returns Le message à afficher — jamais `null` : une liste vide se commente
  * toujours, sinon l'écran ne fait que ne rien afficher
  */
-export function describeEmptyResult(sources: readonly SourceAvailability[]): PlanNotice {
+export function describeEmptyResult(
+  sources: readonly SourceAvailability[],
+  constraints?: AppliedRouteConstraints | null,
+): PlanNotice {
   if (sources.length > 0 && sources.every((source) => !source.available)) {
     return {
       role: 'alert',
@@ -211,10 +227,60 @@ export function describeEmptyResult(sources: readonly SourceAvailability[]): Pla
     };
   }
 
+  // Les sources ont parlé, et c'est le filtre qui a tout retiré : le dire est
+  // la seule façon d'éviter que l'usager conclue « ce trajet n'existe pas »
+  // alors qu'il existe, mais pas sous la contrainte qu'il a lui-même posée
+  // (C7 — WCAG 3.3.1, C12).
+  if (constraints?.reducedMobility) {
+    return {
+      role: 'status',
+      message:
+        'Aucun itinéraire praticable en fauteuil roulant entre ces deux points. D’autres trajets existent peut-être : décochez « Itinéraires accessibles PMR » dans votre profil pour les voir.',
+    };
+  }
+
   return {
     role: 'status',
     message:
       'Aucun trajet disponible entre ces deux points pour l’instant. Essayez une adresse plus proche d’un axe desservi.',
+  };
+}
+
+/**
+ * Dit que le profil a **restreint** la liste affichée (UF-602 — C7/C12).
+ *
+ * ## Pourquoi ce message existe
+ *
+ * Le filtre PMR est appliqué en deux endroits invisibles à l'écran : la requête
+ * envoyée à OpenTripPlanner porte `wheelchair: true`, puis la fusion écarte tout
+ * candidat non accessible. L'usager ne voit que le résultat — trois options au
+ * lieu de cinq — sans rien qui le relie à la case qu'il a cochée, peut-être des
+ * semaines plus tôt, sur une autre page. C'est le même défaut que d'afficher
+ * une liste filtrée sans montrer le filtre actif.
+ *
+ * ## Pourquoi il n'est pas un avertissement
+ *
+ * Ton `info` et rôle `status` : la contrainte fait exactement ce qu'on lui
+ * demande, il n'y a **rien à corriger**. Le peindre en orange ferait chercher
+ * un problème dans un réglage volontaire, et suggérerait de le retirer — ce qui
+ * n'est pas notre rôle.
+ *
+ * Rend `null` quand aucune contrainte n'est active : un bandeau permanent
+ * « aucun filtre » finirait par ne plus être lu, et rendrait le vrai message
+ * invisible le jour où il paraît.
+ *
+ * @param constraints Contraintes publiées par l'API pour cette recherche
+ * @returns Le message à afficher, ou `null` s'il n'y a rien à signaler
+ */
+export function describeAppliedConstraints(
+  constraints: AppliedRouteConstraints | null | undefined,
+): PlanNotice | null {
+  if (!constraints?.reducedMobility) return null;
+
+  return {
+    role: 'status',
+    message:
+      'Filtre accessibilité actif : seuls les itinéraires praticables en fauteuil roulant vous sont proposés. Modifiable dans votre profil de mobilité.',
   };
 }
 

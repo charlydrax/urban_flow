@@ -7,6 +7,7 @@ import {
   PLAN_FAILURE_NOTICES,
   SOURCE_LABELS,
   classifyPlanFailure,
+  describeAppliedConstraints,
   describeDegradedSources,
   describeEmptyResult,
 } from './plan-feedback';
@@ -146,6 +147,61 @@ describe('describeEmptyResult', () => {
 
     expect(notice.role).toBe('status');
     expect(notice.message).toContain('Aucun trajet disponible');
+  });
+
+  it('impute le vide au filtre PMR quand c’est lui qui a tout retiré (UF-602, C12)', () => {
+    const notice = describeEmptyResult(allAvailable(), { reducedMobility: true });
+
+    // « Essayez une adresse plus proche d'un axe desservi » serait un mauvais
+    // conseil : le réseau desservait bien ce trajet, mais pas en fauteuil.
+    expect(notice.role).toBe('status');
+    expect(notice.message).toContain('fauteuil roulant');
+    expect(notice.message).toContain('profil');
+  });
+
+  it('donne la priorité à la panne totale sur le filtre (UF-602)', () => {
+    const notice = describeEmptyResult(withFailed('transit', 'sharedMobility', 'cyclePaths'), {
+      reducedMobility: true,
+    });
+
+    // Sans aucune donnée collectée, le filtre n'a rien pu écarter : lui
+    // imputer le vide accuserait le réglage de l'usager à la place d'une panne.
+    expect(notice.role).toBe('alert');
+    expect(notice.message).toContain('Réessayez');
+  });
+
+  it('garde son message d’origine sans information sur les contraintes', () => {
+    // Réponse rejouée depuis un cache antérieur à UF-602 : le champ n'existe pas.
+    expect(describeEmptyResult(allAvailable(), undefined).message).toContain(
+      'Aucun trajet disponible',
+    );
+    expect(describeEmptyResult(allAvailable(), null).message).toContain('Aucun trajet disponible');
+  });
+});
+
+describe('describeAppliedConstraints', () => {
+  it('annonce le filtre PMR sans le peindre comme un problème (C7/C12)', () => {
+    const notice = describeAppliedConstraints({ reducedMobility: true });
+
+    // `status` : la contrainte fait ce qu'on lui demande. Un `alert` ferait
+    // chercher une panne dans un réglage volontaire.
+    expect(notice?.role).toBe('status');
+    expect(notice?.message).toContain('fauteuil roulant');
+  });
+
+  it('dit où le réglage se change, sinon l’annonce ne sert à rien', () => {
+    expect(describeAppliedConstraints({ reducedMobility: true })?.message).toContain('profil');
+  });
+
+  it('ne dit rien quand aucune contrainte n’est active', () => {
+    // Un bandeau permanent « aucun filtre » finirait par ne plus être lu, et
+    // rendrait le vrai message invisible le jour où il paraît.
+    expect(describeAppliedConstraints({ reducedMobility: false })).toBeNull();
+  });
+
+  it('ne dit rien tant qu’aucune réponse n’a été reçue', () => {
+    expect(describeAppliedConstraints(null)).toBeNull();
+    expect(describeAppliedConstraints(undefined)).toBeNull();
   });
 });
 

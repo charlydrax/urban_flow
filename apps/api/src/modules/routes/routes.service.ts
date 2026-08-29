@@ -73,6 +73,11 @@ export class RoutesService {
     // corps de la requête (anti-IDOR — C4).
     const preferences = await this.users.getPreferences(userId);
 
+    // Publié dans les deux sorties de la méthode (UF-602) : que la liste soit
+    // pleine, courte ou vide, le client doit pouvoir dire *pourquoi* — un
+    // filtre PMR actif change la lecture d'un « aucun itinéraire » (C7/C12).
+    const appliedConstraints = { reducedMobility: preferences.reducedMobility };
+
     // Étape 18 : la recherche est enregistrée dès sa soumission, en même temps
     // que la collecte démarre. Deux raisons de ne pas attendre le résultat :
     // l'historique décrit ce que l'usager a *cherché*, pas ce que nos sources
@@ -99,6 +104,7 @@ export class RoutesService {
         itineraries: [],
         sortedBy: 'carbonAsc',
         sources: this.collector.toAvailability(collected),
+        appliedConstraints,
         searchHistoryId: await recording,
       };
     }
@@ -126,6 +132,7 @@ export class RoutesService {
       itineraries: priced,
       sortedBy,
       sources: this.collector.toAvailability(collected),
+      appliedConstraints,
       searchHistoryId: await recording,
     };
   }
