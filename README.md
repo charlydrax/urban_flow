@@ -168,6 +168,16 @@ curl -D - -o /dev/null http://localhost:3001/api/health   # en-têtes de l'API
 npm audit                                                 # état des dépendances
 ```
 
+L'**éco-conception et les performances** (UF-605) — méthode de mesure reproductible,
+poids des pages sous budget vérifié au build, scores Lighthouse mobile, compression
+des réponses d'API (−85 % sur `/routes/plan`), audit des appels réseau redondants et
+récapitulatif des 17 principes appliqués — sont documentés dans
+[`docs/eco-conception.md`](docs/eco-conception.md).
+
+```bash
+cd apps/web && npm run eco:budget   # poids des pages — échoue si un budget est dépassé
+```
+
 ## Qualité de code & contribution
 
 Lint strict (ESLint + Prettier partagés), hooks Git (Husky : lint-staged en `pre-commit`,

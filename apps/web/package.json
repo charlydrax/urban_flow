@@ -12,6 +12,7 @@
     "test:a11y": "vitest run --project a11y",
     "test:watch": "vitest",
     "build:sw": "esbuild sw.ts --bundle --minify --outfile=public/sw.js",
+    "eco:budget": "node scripts/eco-budget.mjs",
     "typecheck:sw": "tsc -p tsconfig.sw.json --noEmit"
   },
   "lint-staged": {

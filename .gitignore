@@ -11,6 +11,10 @@ node_modules/
 out/
 next-env.d.ts
 
+# Build de mesure éco-conception (UF-605) — sortie isolée de `.next/` pour ne
+# pas retirer ses chunks au serveur de développement en cours d'exécution.
+.next-eco/
+
 # NestJS / TypeScript build output
 dist/
 *.tsbuildinfo
