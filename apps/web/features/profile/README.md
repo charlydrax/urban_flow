@@ -62,3 +62,17 @@ Le consentement à la géolocalisation se donne et se retire **du même geste** 
 date de consentement initiale n'est pas réécrite tant que le choix ne change pas
 (traçabilité). La préférence PMR est annoncée comme facultative et n'est utilisée
 que pour le calcul d'itinéraires.
+
+### Le libellé PMR dit ce que le serveur fait, pas moins (UF-602)
+
+L'aide du champ disait « **privilégie** les stations avec ascenseurs et quais
+adaptés ». Côté API, `reducedMobility` est un **filtre dur** : la requête envoyée
+à OpenTripPlanner porte `wheelchair: true`, puis la fusion écarte tout candidat
+non accessible (`itinerary-merger.ts`). « Privilégie » laissait donc croire que
+les options écartées restaient visibles plus bas dans la liste.
+
+Le texte annonce maintenant la contrainte réelle — « seuls les itinéraires
+praticables en fauteuil roulant vous seront proposés » — et le planificateur
+**répète** l'information au moment où elle agit, via `appliedConstraints`
+(voir `docs/accessibility.md` §5). Une contrainte réglée une fois sur cette page
+ne peut pas rester invisible sur celle où elle produit son effet (C7 — WCAG 3.3.2).

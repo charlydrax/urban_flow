@@ -271,9 +271,19 @@ export function MobilityProfileForm() {
                 <span aria-hidden="true">♿ </span>
                 Itinéraires accessibles PMR
               </span>
+              {/*
+                Le texte dit **exactement** ce que le serveur fait (UF-602) :
+                `reducedMobility` est un filtre dur côté API — un itinéraire non
+                praticable en fauteuil est écarté, pas rétrogradé
+                (`itinerary-merger.ts`). L'ancien « privilégie » laissait croire
+                à un simple ordre de préférence : promettre moins que la
+                contrainte réelle, c'est laisser l'usager croire qu'il voit
+                encore les options écartées (C7 — WCAG 3.3.2, C12).
+              */}
               <span id="pmr-hint" className="block text-xs text-ink-700">
-                Privilégie les stations avec ascenseurs et quais adaptés. Facultatif : cette
-                information sert uniquement au calcul de vos itinéraires.
+                Seuls les itinéraires praticables en fauteuil roulant vous seront proposés —
+                stations avec ascenseurs et quais adaptés. Facultatif : cette information sert
+                uniquement au calcul de vos itinéraires.
               </span>
             </span>
           </label>

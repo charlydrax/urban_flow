@@ -169,8 +169,8 @@ export default function UiKitPage() {
             ))}
           </div>
           <p className="text-xs text-ink-500">
-            Survol : nuance foncée · Focus clavier : outline bleu 3 px (Tab pour tester) ·
-            Désactivé : fond Ink 200.
+            Survol : nuance foncée · Focus clavier : outline bleu 3 px (Tab pour tester) · Désactivé
+            : fond Ink 200.
           </p>
         </Card>
       </section>

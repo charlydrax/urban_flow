@@ -246,6 +246,37 @@ describe('RoutesService', () => {
     expect(result.sources.every((source) => source.available)).toBe(true);
   });
 
+  it('publishes the profile constraints that narrowed the list (UF-602, C7/C12)', async () => {
+    getPreferences.mockResolvedValue({ ...DEFAULT_PREFERENCES, reducedMobility: true });
+
+    const result = await service.plan(dto(), userId);
+
+    // Le client ne peut pas déduire ce filtre : il ne voit que le résultat.
+    // Sans cette publication, une liste réduite — voire vide — reste
+    // inexplicable à l'écran.
+    expect(result.appliedConstraints).toEqual({ reducedMobility: true });
+  });
+
+  it('publishes the constraints even when every source went silent (UF-602)', async () => {
+    getPreferences.mockResolvedValue({ ...DEFAULT_PREFERENCES, reducedMobility: true });
+    collectAllSources.mockResolvedValue({ ...collected(), allSourcesFailed: true });
+
+    const result = await service.plan(dto(), userId);
+
+    // La sortie anticipée est le cas où l'information manque le plus : liste
+    // vide, aucune source, et un filtre actif que rien d'autre ne dirait.
+    expect(result.itineraries).toHaveLength(0);
+    expect(result.appliedConstraints).toEqual({ reducedMobility: true });
+  });
+
+  it('says « no constraint » rather than staying silent on a default profile (UF-602)', async () => {
+    const result = await service.plan(dto(), userId);
+
+    // Le champ est toujours présent : c'est son absence qui signale au client
+    // une réponse rendue par un cache antérieur au ticket.
+    expect(result.appliedConstraints).toEqual({ reducedMobility: false });
+  });
+
   it('builds real itineraries out of what the sources returned, no mock left', async () => {
     const result = await service.plan(dto(), userId);
 

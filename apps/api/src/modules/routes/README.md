@@ -16,7 +16,7 @@ Contrat d'entrée : `{ from: {label, lat, lng}, to: {...} }` — **sans `userId`
 L'identité vient du JWT et de lui seul (anti-IDOR, C4) ; le `ValidationPipe`
 global rejette en `400` une requête qui en enverrait encore un.
 
-Contrat de sortie : `{ itineraries, sortedBy, sources, searchHistoryId }`.
+Contrat de sortie : `{ itineraries, sortedBy, sources, appliedConstraints, searchHistoryId }`.
 
 ⚠️ Les **coordonnées sont obligatoires** depuis UF-305 : les trois sources
 travaillent sur des points, et le géocodage est fait par le client (UF-203). Un
@@ -116,6 +116,25 @@ l'usager, et c'est ce qui alimente le bandeau « mode dégradé » (C10).
 La cause publiée reste générique : le détail technique n'apprendrait rien à
 l'usager et exposerait notre topologie (C11).
 
+### Le pendant côté profil : `appliedConstraints` (UF-602)
+
+`sources` explique ce que le **réseau** n'a pas fourni ; `appliedConstraints`
+explique ce que le **profil** a écarté :
+
+```jsonc
+"appliedConstraints": { "reducedMobility": true }
+```
+
+Sans lui, la liste réduite d'un usager en fauteuil est tout aussi ambiguë que la
+liste sans vélo : le réseau est-il pauvre, ou est-ce sa propre préférence —
+cochée peut-être des semaines plus tôt, sur une autre page — qui a retiré le
+reste ? Le client peut alors annoncer « filtre accessibilité actif » au-dessus de
+la liste, et imputer un résultat vide à la bonne cause (C7 — WCAG 3.3.1, C12).
+
+Le champ ne porte que les contraintes **dures**, celles qui retirent des options.
+`priority` n'en fait pas partie : elle réordonne sans rien enlever, et `sortedBy`
+le dit déjà.
+
 **Trois sources muettes donnent un `200`** avec une liste vide, jamais un `500` :
 un code d'erreur ferait croire que la requête de l'usager est fautive.
 
@@ -206,12 +225,12 @@ mémoïse les flux entiers et filtre en mémoire (C5).
 
 ### Comment les préférences agissent
 
-| Préférence        | Effet                | Pourquoi                                                                                                   |
-| ----------------- | -------------------- | ---------------------------------------------------------------------------------------------------------- |
-| `reducedMobility` | **filtre dur** (C12) | ce n'est pas un goût mais une contrainte : proposer un trajet impraticable serait une faute                |
-| `maxWalkMinutes`  | **filtre dur**       | c'est un maximum annoncé par l'usager ; le dépasser reviendrait à ignorer sa saisie                        |
-| `preferredModes`  | **sélection**        | n'exclut rien : un profil « métro et vélo » ne doit pas rester sans réponse le jour où seul un bus circule |
-| `priority`        | **tri publié**       | `carbonAsc` pour « écolo », `durationAsc` pour « rapide » — et `sortedBy` le dit au client                 |
+| Préférence        | Effet                | Pourquoi                                                                                                                                                      |
+| ----------------- | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `reducedMobility` | **filtre dur** (C12) | ce n'est pas un goût mais une contrainte : proposer un trajet impraticable serait une faute — et depuis UF-602 la réponse l'annonce dans `appliedConstraints` |
+| `maxWalkMinutes`  | **filtre dur**       | c'est un maximum annoncé par l'usager ; le dépasser reviendrait à ignorer sa saisie                                                                           |
+| `preferredModes`  | **sélection**        | n'exclut rien : un profil « métro et vélo » ne doit pas rester sans réponse le jour où seul un bus circule                                                    |
+| `priority`        | **tri publié**       | `carbonAsc` pour « écolo », `durationAsc` pour « rapide » — et `sortedBy` le dit au client                                                                    |
 
 ### Ce que les tronçons cyclables changent
 

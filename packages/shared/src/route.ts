@@ -179,10 +179,43 @@ export type ItinerarySortKey =
   /** Durée totale croissante — priorité « rapide ». */
   | 'durationAsc';
 
+/**
+ * Contraintes du profil qui ont **réduit** la liste rendue (UF-602, C7/C12).
+ *
+ * Publiées parce que le client ne peut pas les déduire : une liste courte, ou
+ * vide, ne dit pas d'elle-même si le réseau ne propose rien ou si un filtre a
+ * écarté ce qu'il proposait. Sans cette information, l'usager en fauteuil qui
+ * ne voit plus qu'une option ignore qu'il en existait quatre — et l'application
+ * lui cache la raison de son propre résultat (WCAG 3.3.1 : une contrainte qui
+ * agit doit être identifiable).
+ *
+ * Ne portent que les contraintes **dures**, celles qui retirent des options.
+ * La priorité de tri n'en est pas une : elle réordonne sans rien enlever, et
+ * `sortedBy` la dit déjà.
+ */
+export interface AppliedRouteConstraints {
+  /**
+   * Le profil demande des itinéraires praticables en fauteuil roulant (C12).
+   *
+   * Effet réel, en deux temps : la requête envoyée à OpenTripPlanner porte
+   * `wheelchair: true`, puis la fusion écarte tout candidat non accessible
+   * (`itinerary-merger.ts`). Ce n'est donc pas une préférence de classement.
+   */
+  reducedMobility: boolean;
+}
+
 /** Réponse de POST /api/routes/plan, triée selon la priorité du profil. */
 export interface PlanRoutesResponse {
   itineraries: Itinerary[];
   sortedBy: ItinerarySortKey;
+  /**
+   * Contraintes du profil appliquées à **cette** recherche (UF-602).
+   *
+   * Toujours présent, y compris quand aucune contrainte n'est active : le
+   * client doit pouvoir distinguer « aucun filtre » d'« une réponse d'un cache
+   * antérieur au ticket », et le second cas se lit à l'absence du champ.
+   */
+  appliedConstraints: AppliedRouteConstraints;
   /**
    * État des trois sources pour **cette** recherche (UF-305).
    *
