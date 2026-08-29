@@ -96,3 +96,39 @@ describe('middleware — protection des routes (UF-106)', () => {
     });
   });
 });
+
+/**
+ * UF-604 — la CSP est posée par le middleware parce qu'elle porte un nonce par
+ * requête. Ces tests vérifient qu'aucun chemin de sortie ne l'oublie : une
+ * redirection sans CSP n'est pas un trou béant, mais la première réponse d'une
+ * session en est souvent une, et une politique « presque partout » n'en est pas.
+ */
+describe('middleware — en-tête Content-Security-Policy (UF-604)', () => {
+  const cspOf = (response: Response) => response.headers.get('content-security-policy') ?? '';
+
+  it('pose la CSP sur une page rendue', () => {
+    expect(cspOf(middleware(requestFor('/', makeToken(900))))).toContain("default-src 'self'");
+  });
+
+  it('la pose aussi sur la redirection vers /login', () => {
+    expect(cspOf(middleware(requestFor('/')))).toContain("frame-ancestors 'none'");
+  });
+
+  it('la pose sur la redirection inverse (connecté arrivant sur /login)', () => {
+    expect(cspOf(middleware(requestFor('/login', makeToken(900))))).toContain("script-src 'self'");
+  });
+
+  it('la pose sur une page publique comme la politique de confidentialité', () => {
+    expect(cspOf(middleware(requestFor('/confidentialite')))).toContain("object-src 'none'");
+  });
+
+  it('tire un nonce neuf à chaque requête — le réutiliser reviendrait à le publier', () => {
+    const first = cspOf(middleware(requestFor('/', makeToken(900))));
+    const second = cspOf(middleware(requestFor('/', makeToken(900))));
+
+    const nonceOf = (policy: string) => /'nonce-([^']+)'/.exec(policy)?.[1];
+
+    expect(nonceOf(first)).toBeDefined();
+    expect(nonceOf(first)).not.toBe(nonceOf(second));
+  });
+});

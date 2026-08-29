@@ -158,6 +158,16 @@ résiduels justifiés — est documentée dans
 npm run test:a11y   # audit axe-core seul (inclus dans `npm test`)
 ```
 
+La **sécurité OWASP** (UF-604) — checklist Top 10 point par point, en-têtes HTTP et
+politique de sécurité de contenu, plafonds de requêtes anti-brute-force, audit des
+dépendances et vulnérabilités résiduelles assumées — est documentée dans
+[`docs/securite-owasp.md`](docs/securite-owasp.md).
+
+```bash
+curl -D - -o /dev/null http://localhost:3001/api/health   # en-têtes de l'API
+npm audit                                                 # état des dépendances
+```
+
 ## Qualité de code & contribution
 
 Lint strict (ESLint + Prettier partagés), hooks Git (Husky : lint-staged en `pre-commit`,
