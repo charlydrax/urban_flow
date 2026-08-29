@@ -1,5 +1,14 @@
 import { plainToInstance } from 'class-transformer';
-import { IsInt, IsString, IsUrl, Max, Min, MinLength, validateSync } from 'class-validator';
+import {
+  IsInt,
+  IsOptional,
+  IsString,
+  IsUrl,
+  Max,
+  Min,
+  MinLength,
+  validateSync,
+} from 'class-validator';
 
 /**
  * Schéma de validation des variables d'environnement.
@@ -15,6 +24,22 @@ class EnvironmentVariables {
   /** Origine autorisée pour le CORS (URL du client PWA). */
   @IsUrl({ require_tld: false, require_protocol: true })
   CORS_ORIGIN!: string;
+
+  /**
+   * Nombre de reverse proxys de confiance devant l'API (UF-604 — C4).
+   *
+   * **Facultative, et volontairement à 0 par défaut.** Elle commande la lecture
+   * de `X-Forwarded-For`, donc l'IP sur laquelle la limitation de débit compte
+   * ses requêtes. La valeur sûre est celle qui n'invente rien : sans proxy
+   * déclaré, l'API se fie à l'IP de la connexion TCP, qu'on ne peut pas forger.
+   * Mettre `1` (ou davantage, un par proxy chaîné) seulement en déploiement,
+   * derrière un ingress ou un Nginx maîtrisé — voir docs/securite-owasp.md.
+   */
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(10)
+  TRUST_PROXY?: number;
 
   /** Chaîne de connexion PostgreSQL/PostGIS (consommée par Prisma). */
   @IsString()

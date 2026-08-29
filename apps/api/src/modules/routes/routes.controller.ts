@@ -6,11 +6,13 @@ import {
   ApiOkResponse,
   ApiOperation,
   ApiTags,
+  ApiTooManyRequestsResponse,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
 
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { AuthenticatedUser } from '../../common/strategies/jwt.strategy';
+import { PLAN_THROTTLE_LIMIT, ThrottlePlan } from '../../common/throttling';
 import { PlanRoutesResponseDto } from './dto/itinerary.dto';
 import { PlanRouteDto } from './dto/plan-route.dto';
 import { RoutesService } from './routes.service';
@@ -47,7 +49,11 @@ export class RoutesController {
    * Trois sources muettes donnent un `200` avec une liste vide, jamais un
    * `500` : un code d'erreur ferait croire à l'usager que sa requête est
    * fautive, alors que ce sont nos sources qui manquent (C10).
+   *
+   * Endpoint **plafonné** (UF-604) : c'est le plus coûteux du système, et le
+   * seul qui amplifie une requête entrante en trois requêtes sortantes.
    */
+  @ThrottlePlan()
   @Post('plan')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
@@ -75,6 +81,12 @@ export class RoutesController {
   @ApiBadRequestResponse({
     description:
       'Corps invalide, ou extrémité sans coordonnées : le géocodage est fait par le client (C4).',
+  })
+  @ApiTooManyRequestsResponse({
+    description:
+      `Plus de ${PLAN_THROTTLE_LIMIT} calculs par minute depuis la même IP (UF-604). ` +
+      'Chaque appel relaie trois requêtes vers des sources externes : le plafond protège ' +
+      'aussi leurs quotas, partagés par tous nos utilisateurs.',
   })
   plan(
     @Body() dto: PlanRouteDto,

@@ -41,6 +41,32 @@ cd apps/api
 npx jest src/common/guards/jwt-auth.guard.spec.ts
 ```
 
+## Limitation de débit (UF-604)
+
+Plafonds de requêtes **par adresse IP**, définis et justifiés en un seul endroit :
+`throttling.ts`. Un plafond de sécurité se relit en bloc — dispersé dans les contrôleurs,
+on ne voit plus lequel manque.
+
+| Périmètre                            | Plafond     | Décorateur        |
+| ------------------------------------ | ----------- | ----------------- |
+| Tous les endpoints                   | 120 req/min | (guard global)    |
+| `POST /auth/login`, `/auth/register` | 5 req/min   | `@ThrottleAuth()` |
+| `POST /routes/plan`                  | 20 req/min  | `@ThrottlePlan()` |
+
+`ThrottlerGuard` est déclaré **avant** `JwtAuthGuard` dans `app.module.ts` : une rafale
+anonyme est coupée sans payer la vérification de signature ni la moindre requête en base.
+Le compteur est indexé sur l'IP et non sur l'e-mail visé — compter par e-mail ouvrirait
+un déni de service ciblé sur le compte d'un tiers. Aucun compte n'est verrouillé : la
+fenêtre expire d'elle-même au bout d'une minute.
+
+Analyse complète, limites (stockage en mémoire, `TRUST_PROXY`) et checklist OWASP :
+[`docs/securite-owasp.md`](../../../../docs/securite-owasp.md).
+
+```bash
+cd apps/api
+npx jest src/common/throttling.spec.ts
+```
+
 ## Autres briques
 
 - `filters/global-exception.filter.ts` — normalise les réponses d'erreur, journalise sans
@@ -49,5 +75,6 @@ npx jest src/common/guards/jwt-auth.guard.spec.ts
 
 ## Contraintes couvertes
 
-C4 (authentification par défaut, signature/expiration vérifiées, identité non usurpable),
-C11 (token lu depuis un cookie httpOnly).
+C4 (authentification par défaut, signature/expiration vérifiées, identité non usurpable,
+plafonds anti-brute-force), C11 (token lu depuis un cookie httpOnly), C5/C10 (les
+plafonds évitent de relayer des rafales inutiles vers nos sources de données).

@@ -2,10 +2,12 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_FILTER, APP_GUARD } from '@nestjs/core';
 import { ScheduleModule } from '@nestjs/schedule';
+import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 
 import { AppController } from './app.controller';
 import { GlobalExceptionFilter } from './common/filters/global-exception.filter';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
+import { THROTTLER_OPTIONS } from './common/throttling';
 import { validateEnv } from './config/env.validation';
 import { AuthModule } from './modules/auth/auth.module';
 import { CarbonModule } from './modules/carbon/carbon.module';
@@ -25,6 +27,9 @@ import { PrismaModule } from './prisma/prisma.module';
  *   données personnelles (C11).
  * - La configuration est chargée depuis .env et validée au démarrage : l'API
  *   refuse de démarrer si une variable obligatoire manque (fail-fast, C4).
+ * - Le guard de limitation de débit est déclaré **avant** le guard JWT : une
+ *   rafale de requêtes anonymes doit être coupée au plus tôt, sans payer la
+ *   vérification de signature ni la moindre requête en base (UF-604 — C4).
  * - `ScheduleModule` alimente la purge de rétention d'UF-603 : c'est la seule
  *   tâche périodique de l'API, et elle existe parce que la limitation de la
  *   conservation (C8) ne peut pas dépendre d'une action de l'utilisateur.
@@ -33,6 +38,8 @@ import { PrismaModule } from './prisma/prisma.module';
   imports: [
     ConfigModule.forRoot({ isGlobal: true, validate: validateEnv }),
     ScheduleModule.forRoot(),
+    // C4 (UF-604) : plafonds de requêtes par IP — voir common/throttling.ts.
+    ThrottlerModule.forRoot(THROTTLER_OPTIONS),
     PrismaModule,
     AuthModule,
     UsersModule,
@@ -44,6 +51,8 @@ import { PrismaModule } from './prisma/prisma.module';
   ],
   controllers: [AppController],
   providers: [
+    // L'ordre compte : les guards globaux s'exécutent dans l'ordre de déclaration.
+    { provide: APP_GUARD, useClass: ThrottlerGuard },
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_FILTER, useClass: GlobalExceptionFilter },
   ],

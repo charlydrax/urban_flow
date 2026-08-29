@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+import { buildContentSecurityPolicy } from './lib/security-headers';
 import {
   buildLoginUrl,
   DEFAULT_AFTER_LOGIN,
@@ -10,7 +11,7 @@ import {
 } from './lib/session';
 
 /**
- * Middleware de protection des routes (UF-106).
+ * Middleware de protection des routes (UF-106) et de pose de la CSP (UF-604).
  *
  * Toute page est **privée par défaut** ; seules les routes déclarées publiques
  * dans `lib/session.ts` échappent à la règle. Sans session valide, la navigation
@@ -43,19 +44,53 @@ export function middleware(request: NextRequest): NextResponse {
   const { pathname, search } = request.nextUrl;
   const session = readSession(request.cookies.get(SESSION_COOKIE)?.value);
 
+  // UF-604 : un nonce neuf par requête — c'est ce qui rend la CSP efficace
+  // contre le XSS. Réutiliser le même d'une réponse à l'autre reviendrait à le
+  // publier, et un script injecté n'aurait qu'à le recopier.
+  const csp = buildContentSecurityPolicy({
+    nonce: crypto.randomUUID(),
+    isDev: process.env.NODE_ENV !== 'production',
+    apiUrl: process.env.NEXT_PUBLIC_API_URL,
+    mapStyleUrl: process.env.NEXT_PUBLIC_MAP_STYLE_URL,
+  });
+
   if (isPublicPath(pathname)) {
     if (session && isAuthPath(pathname)) {
-      return NextResponse.redirect(new URL(DEFAULT_AFTER_LOGIN, request.url));
+      return withCsp(NextResponse.redirect(new URL(DEFAULT_AFTER_LOGIN, request.url)), csp);
     }
-    return NextResponse.next();
+    return renderWithCsp(request, csp);
   }
 
   if (!session) {
     // On mémorise le chemin **et** sa query : « /?from=A&to=B » doit être restitué tel quel.
-    return NextResponse.redirect(new URL(buildLoginUrl(`${pathname}${search}`), request.url));
+    return withCsp(
+      NextResponse.redirect(new URL(buildLoginUrl(`${pathname}${search}`), request.url)),
+      csp,
+    );
   }
 
-  return NextResponse.next();
+  return renderWithCsp(request, csp);
+}
+
+/** Pose l'en-tête CSP sur une réponse déjà construite (redirections comprises). */
+function withCsp(response: NextResponse, csp: string): NextResponse {
+  response.headers.set('Content-Security-Policy', csp);
+  return response;
+}
+
+/**
+ * Laisse passer la requête vers le rendu, avec la CSP posée des deux côtés.
+ *
+ * La recopier sur les en-têtes **de la requête** n'est pas une redondance :
+ * c'est ainsi que Next.js y lit le nonce du jour et l'applique aux `<script>`
+ * qu'il injecte lui-même (hydratation, chargement des chunks). Sans cela, la
+ * politique bloquerait l'application avant tout attaquant.
+ */
+function renderWithCsp(request: NextRequest, csp: string): NextResponse {
+  const requestHeaders = new Headers(request.headers);
+  requestHeaders.set('Content-Security-Policy', csp);
+
+  return withCsp(NextResponse.next({ request: { headers: requestHeaders } }), csp);
 }
 
 export const config = {
@@ -67,6 +102,11 @@ export const config = {
    *   enregistrer son service worker sans session (C1) — sinon le navigateur
    *   récupère une redirection HTML à la place du manifeste ;
    * - `favicon.ico`.
+   *
+   * Ces réponses-là ne portent donc pas la CSP, et n'en ont pas besoin : une
+   * CSP ne s'applique qu'au document qui l'a reçue. Les en-têtes de sécurité
+   * qui, eux, comptent partout (nosniff, X-Frame-Options…) sont posés par
+   * `next.config.ts` sur toutes les routes (UF-604).
    */
   matcher: ['/((?!_next/static|_next/image|favicon.ico|icons/|manifest.json|sw.js).*)'],
 };
