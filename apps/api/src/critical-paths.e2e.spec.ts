@@ -9,7 +9,6 @@ import type {
 import cookieParser from 'cookie-parser';
 import type { AddressInfo } from 'net';
 
-import { AppModule } from './app.module';
 import { GlobalExceptionFilter } from './common/filters/global-exception.filter';
 import { requestIdMiddleware } from './common/logging/request-id.middleware';
 import { TransportMode } from './common/enums/transport-mode.enum';
@@ -106,6 +105,31 @@ const TRANSIT_JOURNEY: TransitJourney = {
   ],
 };
 
+/*
+ * Configuration factice, posée à l'ÉVALUATION du module de test — donc avant
+ * l'import d'`AppModule`, et c'est tout l'enjeu.
+ *
+ * `ConfigModule.forRoot({ validate })` s'exécute au **chargement** d'
+ * `app.module.ts`, pas au montage de l'application : la validation
+ * d'environnement (fail-fast C4) a donc déjà eu lieu quand `beforeAll`
+ * démarre. Renseigner ces variables dans `beforeAll` ne servait à rien — sur un
+ * poste de développement, le `.env` d'`apps/api` masquait le problème ; en CI,
+ * où il n'y en a pas, la suite refusait de se charger. D'où le couple
+ * « affectation au chargement + import dynamique d'`AppModule` » ci-dessous.
+ */
+Object.assign(process.env, {
+  PORT: '3001',
+  CORS_ORIGIN: 'http://localhost:3000',
+  DATABASE_URL: 'postgresql://user:pass@localhost:5432/urbanflow?schema=public',
+  JWT_SECRET: 'test-secret-uf607-critical-paths-at-least-32-chars',
+  JWT_EXPIRES_IN: '15m',
+  OTP_BASE_URL: 'http://localhost:8080',
+  OTP_TIMEOUT_MS: '12000',
+  GBFS_DISCOVERY_URL: 'http://localhost:9999/gbfs.json',
+  GBFS_TIMEOUT_MS: '5000',
+  GBFS_STATUS_TTL_MS: '60000',
+});
+
 /** Comptes créés pendant le test, indexés par e-mail — la « base » du test. */
 interface StoredUser {
   id: string;
@@ -184,21 +208,11 @@ describe('Parcours critiques (auth + plan) — UF-607', () => {
   let baseUrl: string;
 
   beforeAll(async () => {
-    // Configuration minimale et factice : `validateEnv` refuse de démarrer si
-    // une variable manque (fail-fast C4), et c'est très bien — le test doit
-    // partir d'une application correctement configurée, pas d'une exception.
-    Object.assign(process.env, {
-      PORT: '3001',
-      CORS_ORIGIN: 'http://localhost:3000',
-      DATABASE_URL: 'postgresql://user:pass@localhost:5432/urbanflow?schema=public',
-      JWT_SECRET: 'test-secret-uf607-critical-paths-at-least-32-chars',
-      JWT_EXPIRES_IN: '15m',
-      OTP_BASE_URL: 'http://localhost:8080',
-      OTP_TIMEOUT_MS: '12000',
-      GBFS_DISCOVERY_URL: 'http://localhost:9999/gbfs.json',
-      GBFS_TIMEOUT_MS: '5000',
-      GBFS_STATUS_TTL_MS: '60000',
-    });
+    // Import dynamique : `app.module.ts` valide l'environnement dès son
+    // chargement (voir plus haut). Un `import` statique en tête de fichier
+    // serait hissé avant l'affectation des variables, et la suite ne se
+    // chargerait pas.
+    const { AppModule } = await import('./app.module');
 
     const transitDouble = {
       getTransitJourneys: (): Promise<TransitJourneysResult> =>
