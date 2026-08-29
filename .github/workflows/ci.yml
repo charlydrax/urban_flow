@@ -1,5 +1,6 @@
 # UF-009 — CI minimale : valide chaque push et chaque PR vers main.
-# Pipeline : install → lint → build (front + back), + job de test (sprints suivants).
+# Pipeline : install → format:check → lint → typecheck → build (front + back),
+# + job de test.
 name: CI
 
 on:
@@ -29,6 +30,13 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      # BUG-001 (#87) : la verification etait rouge en permanence sous Windows
+      # (`core.autocrlf` vs `endOfLine: "lf"`), donc inutilisable en CI. Depuis la
+      # normalisation `* text=auto eol=lf` de `.gitattributes`, elle est fiable :
+      # elle entre ici, avant lint, car elle ne demande ni Prisma ni build.
+      - name: Format check (prettier)
+        run: npm run format:check
 
       # Le client Prisma doit être généré avant lint/build de l'API
       # (les types @prisma/client sont importés par les services NestJS).

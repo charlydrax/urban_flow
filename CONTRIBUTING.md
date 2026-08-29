@@ -19,6 +19,23 @@ npm run format        # formate tout le code
 npm run format:check  # vérifie le formatage sans modifier
 ```
 
+## Fins de ligne — LF partout
+
+[`.gitattributes`](.gitattributes) déclare `* text=auto eol=lf` : tout fichier texte est
+stocké **et extrait** en LF, quelle que soit la valeur de `core.autocrlf` sur la machine.
+Sans cette règle, un poste Windows par défaut extrait le dépôt en CRLF et
+`npm run format:check` échoue en permanence sur des fichiers non modifiés, puisque
+`.prettierrc` impose `"endOfLine": "lf"` (BUG-001, #87).
+
+Rien à configurer côté contributeur. Une seule commande facultative, une fois par clone,
+pour que `git blame` saute le commit de renormalisation :
+
+```bash
+git config blame.ignoreRevsFile .git-blame-ignore-revs
+```
+
+GitHub applique ce fichier automatiquement dans son interface de blame.
+
 ## Hooks Git (Husky)
 
 Installés automatiquement par `npm install` (script `prepare`). Ils s'exécutent en local

@@ -32,7 +32,7 @@ main ──●──────●──────────●────
    `feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `chore:` (+ référence `(UF-xxx)`).
 4. `git push -u origin feat/uf-xxx-description` puis ouvrir une **Pull Request**
    vers `main` (titre = ticket, description = résumé + recette).
-5. La **CI doit être verte** (lint + build + tests) avant merge.
+5. La **CI doit être verte** (format + lint + typecheck + build + tests) avant merge.
 6. Merge dans `main`, suppression de la branche distante.
 
 ## Intégration continue (GitHub Actions)
@@ -40,14 +40,18 @@ main ──●──────●──────────●────
 Fichier : [`.github/workflows/ci.yml`](../.github/workflows/ci.yml).
 Déclenchée sur **chaque push** (toutes branches) et chaque **PR vers `main`**.
 
-| Job | Étapes | Rôle |
-|-----|--------|------|
-| `lint-build` | `npm ci` → `prisma generate` → `npm run lint` → `npm run build` | Vérifie normes de code (C3) et compilation du front (Next.js), du back (NestJS) et du package partagé |
-| `test` | `npm ci` → `prisma generate` → build shared → `npm run test` | Exécute Jest (api) et Vitest (web) — prêt pour les sprints suivants |
+| Job          | Étapes                                                                                                 | Rôle                                                                                                  |
+| ------------ | ------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------- |
+| `lint-build` | `npm ci` → `format:check` → `prisma generate` → `npm run lint` → `npm run typecheck` → `npm run build` | Vérifie normes de code (C3) et compilation du front (Next.js), du back (NestJS) et du package partagé |
+| `test`       | `npm ci` → `prisma generate` → build shared → `npm run test`                                           | Exécute Jest (api) et Vitest (web) — prêt pour les sprints suivants                                   |
 
 Particularités :
 
 - **Node 22** (aligné sur `engines` du `package.json` racine) avec cache npm.
+- **`format:check`** (Prettier) passe en premier : il ne demande ni Prisma ni
+  build, et échoue vite. Il n’a pu entrer en CI qu’une fois la règle
+  `* text=auto eol=lf` posée dans `.gitattributes` — auparavant la commande
+  était rouge en permanence sous Windows (BUG-001, #87).
 - **`prisma generate`** est exécuté avant lint/build : les services NestJS
   importent les types `@prisma/client` ; aucune base de données n'est requise.
 - **`NEXT_PUBLIC_API_URL`** est injectée au build du front : `next build` tourne
