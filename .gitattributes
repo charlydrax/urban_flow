@@ -7,3 +7,28 @@
 *.sh text eol=lf
 Dockerfile text eol=lf
 *.dockerfile text eol=lf
+
+# Normalisation générale — BUG-001 (#87).
+#
+# `text=auto eol=lf` : tout fichier détecté comme texte est stocké en LF dans
+# l'index ET extrait en LF dans la copie de travail, quelle que soit la valeur
+# de `core.autocrlf` sur la machine. Sans cette ligne, un poste Windows par
+# défaut (`core.autocrlf=true`) extrait tout en CRLF, ce qui met
+# `npm run format:check` en échec permanent sur des fichiers non modifiés
+# (`.prettierrc` impose `"endOfLine": "lf"`).
+#
+# La règle prolonge la décision prise en UF-301 ci-dessus au lieu d'en
+# introduire une nouvelle, et aligne la copie de travail sur ce que le dépôt
+# contient déjà : du LF.
+* text=auto eol=lf
+
+# Fichiers binaires — jamais de conversion de fins de ligne.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.pdf binary
+*.woff binary
+*.woff2 binary
