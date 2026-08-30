@@ -78,9 +78,16 @@ const VIEWPORTS = [
   { name: 'desktop 1440', width: 1440, height: 900, mobile: false },
 ];
 
-/** Écrans clés du parcours. `private` : exige une session ouverte. */
+/**
+ * Écrans clés du parcours. `private` : exige une session ouverte.
+ *
+ * Le planificateur est passé à `false` avec UF-803 : il est **public** depuis
+ * UF-801, et le laisser marqué privé faisait discrètement sauter l'écran le plus
+ * large du produit dès que l'API n'était pas jointe — c'est-à-dire précisément
+ * quand on lance l'audit sur un front seul.
+ */
 const ROUTES = [
-  { path: '/', label: 'planificateur', private: true, settleMs: 6000 },
+  { path: '/', label: 'planificateur', private: false, settleMs: 6000 },
   { path: '/impact', label: 'impact', private: true, settleMs: 4000 },
   { path: '/profil', label: 'profil', private: true, settleMs: 4000 },
   { path: '/login', label: 'connexion', private: false, settleMs: 2500 },
@@ -140,9 +147,14 @@ const AUDIT_SCRIPT = String.raw`JSON.stringify((() => {
       if (el.classList.contains('skip-link')) continue;
       guilty.push(el.tagName.toLowerCase() + (el.className ? '.' + String(el.className).trim().split(/ +/)[0] : '')
         + ' [' + Math.round(r.left) + '→' + Math.round(r.right) + 'px]');
+      // Huit fautifs listés et non trois (UF-803) : la barre d'onglets est en
+      // position fixed et s'étire à la largeur de défilement du document. Elle
+      // apparaît donc en tête de liste dès qu'une autre boîte déborde, et avec
+      // ses deux enfants elle consommait à elle seule les trois places
+      // disponibles — le vrai coupable n'était jamais imprimé.
     }
     add('debordement-horizontal', de.scrollWidth + 'px de contenu pour ' + de.clientWidth + 'px de fenêtre'
-      + (guilty.length ? ' — ' + guilty.slice(0, 3).join(', ') : ''));
+      + (guilty.length ? ' — ' + guilty.slice(0, 8).join(', ') : ''));
   }
 
   // --- C7 : cibles tactiles ---------------------------------------------

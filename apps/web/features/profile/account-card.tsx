@@ -5,7 +5,7 @@ import { useState } from 'react';
 import { Button } from '../../components/ui/button';
 import { Card } from '../../components/ui/card';
 import { useSession } from '../auth/session-provider';
-import { initialsFromEmail } from './preferences';
+import { initialsFromEmail } from '../../lib/initials';
 
 /**
  * Carte d'identité du compte connecté (F1, UF-107) — maquette « 3. PROFIL F1 » :

@@ -133,11 +133,3 @@ export const PRIORITY_LABELS: Record<RoutePriority, string> = {
   [RoutePriority.GREENEST]: 'Privilégier l’éco-mobilité',
   [RoutePriority.FASTEST]: 'Privilégier la rapidité',
 };
-
-/** Initiales affichées dans la pastille d'avatar (maquette « 3. PROFIL F1 »). */
-export function initialsFromEmail(email: string): string {
-  const [local = ''] = email.split('@');
-  const parts = local.split(/[._-]+/).filter(Boolean);
-  const letters = parts.length >= 2 ? `${parts[0][0]}${parts[1][0]}` : local.slice(0, 2);
-  return letters.toUpperCase() || '?';
-}

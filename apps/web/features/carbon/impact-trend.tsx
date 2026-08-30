@@ -86,26 +86,37 @@ export function ImpactTrend({ buckets }: ImpactTrendProps) {
             Même information que les barres, sous la forme qui se lit sans voir.
             `sr-only` plutôt que masqué en CSS : le tableau doit rester dans
             l'ordre de tabulation et l'arbre d'accessibilité (C7 — WCAG 1.1.1).
+
+            ⚠️ Le `sr-only` porte sur un `<div>`, pas sur le `<table>` (corrigé
+            lors d'UF-803). L'utilitaire confine son contenu avec
+            `overflow: hidden` dans une boîte de 1 px — or `overflow` **ne
+            s'applique pas** à une boîte `display: table` : Chrome l'ignore, les
+            cellules débordaient à leur largeur naturelle et poussaient la page à
+            396 px sur un écran de 375 (C2). Le tableau était invisible, mais
+            l'écran défilait latéralement. Un `<div>` est un conteneur de bloc,
+            où la règle s'applique ; `npm run audit:responsive` le vérifie.
           */}
-          <table className="sr-only">
-            <caption>Évolution du CO₂ évité, par tranche de la période</caption>
-            <thead>
-              <tr>
-                <th scope="col">Début de la tranche</th>
-                <th scope="col">CO₂ évité</th>
-                <th scope="col">Trajets retenus</th>
-              </tr>
-            </thead>
-            <tbody>
-              {buckets.map((bucket) => (
-                <tr key={bucket.from}>
-                  <th scope="row">{bucketLabel(bucket)}</th>
-                  <td>{formatCarbon(bucket.avoidedGrams)}</td>
-                  <td>{bucket.tripsCount}</td>
+          <div className="sr-only">
+            <table>
+              <caption>Évolution du CO₂ évité, par tranche de la période</caption>
+              <thead>
+                <tr>
+                  <th scope="col">Début de la tranche</th>
+                  <th scope="col">CO₂ évité</th>
+                  <th scope="col">Trajets retenus</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {buckets.map((bucket) => (
+                  <tr key={bucket.from}>
+                    <th scope="row">{bucketLabel(bucket)}</th>
+                    <td>{formatCarbon(bucket.avoidedGrams)}</td>
+                    <td>{bucket.tripsCount}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </>
       )}
     </section>

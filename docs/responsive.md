@@ -58,6 +58,11 @@ qu'un compte à l'adresse longue ne puisse pas reproduire le pliage à 1024 px.
 Le point de rupture suit ce que le contenu exige, pas une taille d'écran
 symbolique.
 
+> **Depuis UF-803, cet en-tête n'existe plus.** La navigation a pris la forme
+> dessinée sur la planche — barre d'onglets basse sous 1024 px, rail sombre
+> au-delà — et le menu hamburger a disparu avec elle. Le point de rupture retenu
+> ici, en revanche, a survécu : c'est celui qui sépare les deux formes.
+
 ### 1.3 La carte de compte comprimait l'e-mail sur mobile
 
 **Symptôme.** Sur 375 px, `marie@urbanflow.dev` s'affichait sur trois lignes,
@@ -104,15 +109,17 @@ profil s'étalaient déjà sur près de 1000 px avant cette passe.
 ### Écarts restants, assumés
 
 Ils l'étaient déjà avant ce ticket ; la passe les confirme plutôt qu'elle ne les
-découvre.
+découvre. Les deux premières lignes ont depuis été levées par **UF-803**, qui a
+refondu la navigation sur la planche ; elles restent listées pour que la trace du
+raisonnement — et de sa levée — soit lisible.
 
-| Élément de la maquette                    | État    | Pourquoi                                                                                                                                           |
-| ----------------------------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Barre d'onglets basse (mobile)            | Absente | Le menu replié couvre les mêmes trois destinations ; une barre basse à cinq entrées supposerait des écrans « Défis » et « Trajets » hors périmètre |
-| Navigation latérale persistante (desktop) | Absente | Même raison : la barre latérale de la maquette liste sept entrées, dont quatre n'existent pas                                                      |
-| Écrans « Défis », « Récompenses »         | Absents | Gamification **hors périmètre** du prototype (CLAUDE.md §3)                                                                                        |
-| « ★ Recommandé IA », prix « 1,90 € »      | Absents | Aucun modèle ne classe les options, aucune source ne publie de tarif — les inventer serait mentir à l'écran                                        |
-| Répartition par mode (page impact)        | Absente | Supposerait de stocker le détail par segment de chaque trajet retenu (UF-505)                                                                      |
+| Élément de la maquette                    | État                 | Pourquoi                                                                                                    |
+| ----------------------------------------- | -------------------- | ----------------------------------------------------------------------------------------------------------- |
+| Barre d'onglets basse (mobile)            | ✅ Livrée par UF-803 | Reste réduite aux écrans qui existent : trois onglets pour un connecté, deux pour un visiteur               |
+| Navigation latérale persistante (desktop) | ✅ Livrée par UF-803 | Rail sombre de 230 px, mêmes entrées que la barre d'onglets — voir `apps/web/components/layout/README.md`   |
+| Écrans « Défis », « Récompenses »         | Absents              | Gamification **hors périmètre** du prototype (CLAUDE.md §3)                                                 |
+| « ★ Recommandé IA », prix « 1,90 € »      | Absents              | Aucun modèle ne classe les options, aucune source ne publie de tarif — les inventer serait mentir à l'écran |
+| Répartition par mode (page impact)        | Absente              | Supposerait de stocker le détail par segment de chaque trajet retenu (UF-505)                               |
 
 ---
 

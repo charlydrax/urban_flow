@@ -23,6 +23,14 @@
   --color-surface: #f6f8fb;
   --color-surface-muted: #f1f3f8;
 
+  /*
+   * Texte au repos du rail de navigation sombre (UF-803) — `#C9D2E2` de la
+   * planche « 03 · Maquettes desktop » (`.desk nav a`). C'est le seul gris de la
+   * charte pensé pour un fond Ink 900 : 12.03:1, là où Ink 500 y tomberait à
+   * 2.3:1. Contraste vérifié par lib/design-tokens.test.ts (C7).
+   */
+  --color-rail-ink: #c9d2e2;
+
   /* Système & gamification */
   --color-success: #0e7a3f;
   --color-warning: #8a5300;

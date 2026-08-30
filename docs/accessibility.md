@@ -87,22 +87,23 @@ un token de la charte est modifié sous le seuil.
 
 ## 4. Ce qui est en place, critère par critère
 
-| Critère WCAG 2.1 AA                | Comment il est tenu                                                                                    | Où                                                                  |
-| ---------------------------------- | ------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------- |
-| 1.1.1 Contenu non textuel          | Tous les emoji sont `aria-hidden` et doublés d'un libellé écrit ; la carte a une alternative textuelle | `itinerary-cards.ts`, `map-view.tsx`                                |
-| 1.3.1 Information et relations     | `fieldset`/`legend` sur chaque question à choix multiples, landmarks header/nav/main/footer            | `mobility-profile-form.tsx`, `app/layout.tsx`                       |
-| 1.3.5 Identifier le but d'un champ | `autocomplete` standard sur email et mots de passe                                                     | `login-form.tsx`, `register-form.tsx`                               |
-| 1.4.1 Utilisation de la couleur    | Chaque information colorée est **doublée** : pictogramme, libellé, et niveau nommé dans l'`aria-label` | `itinerary-card.tsx`, `carbon-badge.ts`                             |
-| 1.4.3 / 1.4.11 Contrastes          | Tokens de la charte assertés au seuil texte (4.5:1) et objets graphiques (3:1)                         | `design-tokens.test.ts`, `route-map-layers.test.ts`                 |
-| 2.1.1 Clavier                      | Aucun gestionnaire de clic sur élément non focusable ; motifs natifs (radio, checkbox, `<details>`)    | vérifié par `jsx-a11y` strict                                       |
-| 2.3.3 Animations                   | `prefers-reduced-motion` coupe le halo du marqueur et les transitions                                  | `app/globals.css`                                                   |
-| 2.4.1 Contourner des blocs         | Lien d'évitement « Aller au contenu principal », visible au focus                                      | `app/layout.tsx`, `.skip-link`                                      |
-| 2.4.7 Focus visible                | Anneau global `3px` sur `:focus-visible`, rétabli sur les contrôles MapLibre                           | `app/globals.css`                                                   |
-| 2.5.5 Taille de cible              | Cibles ≥ 44 px sur écran tactile ; la carte de résultat entière est un `<label>`                       | `globals.css`, `itinerary-card.tsx`                                 |
-| 3.3.1 Identification des erreurs   | Chaque cas non nominal a son message ; un vide filtré dit **pourquoi** il est vide                     | `plan-feedback.ts`                                                  |
-| 3.3.2 Étiquettes et instructions   | Aides reliées par `aria-describedby`, jamais seulement posées à côté                                   | `input-field.tsx`, `mobility-profile-form.tsx`                      |
-| 4.1.2 Nom, rôle, valeur            | Groupes radio nommés, `aria-expanded`/`aria-controls` sur le menu, combobox ARIA 1.2                   | `itinerary-list.tsx`, `site-header.tsx`, `address-autocomplete.tsx` |
-| 4.1.3 Messages de statut           | `status` par défaut, `alert` réservé aux vraies pannes ; régions live montées **d'avance**             | `plan-feedback.ts`, `offline-banner.tsx`                            |
+| Critère WCAG 2.1 AA                | Comment il est tenu                                                                                    | Où                                                              |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------- |
+| 1.1.1 Contenu non textuel          | Tous les emoji sont `aria-hidden` et doublés d'un libellé écrit ; la carte a une alternative textuelle | `itinerary-cards.ts`, `map-view.tsx`                            |
+| 1.3.1 Information et relations     | `fieldset`/`legend` sur chaque question à choix multiples, landmarks header/nav/main/footer            | `mobility-profile-form.tsx`, `app/layout.tsx`                   |
+| 1.3.5 Identifier le but d'un champ | `autocomplete` standard sur email et mots de passe                                                     | `login-form.tsx`, `register-form.tsx`                           |
+| 1.4.1 Utilisation de la couleur    | Chaque information colorée est **doublée** : pictogramme, libellé, et niveau nommé dans l'`aria-label` | `itinerary-card.tsx`, `carbon-badge.ts`                         |
+| 1.4.3 / 1.4.11 Contrastes          | Tokens de la charte assertés au seuil texte (4.5:1) et objets graphiques (3:1)                         | `design-tokens.test.ts`, `route-map-layers.test.ts`             |
+| 2.1.1 Clavier                      | Aucun gestionnaire de clic sur élément non focusable ; motifs natifs (radio, checkbox, `<details>`)    | vérifié par `jsx-a11y` strict                                   |
+| 2.3.3 Animations                   | `prefers-reduced-motion` coupe le halo du marqueur et les transitions                                  | `app/globals.css`                                               |
+| 2.4.1 Contourner des blocs         | Lien d'évitement « Aller au contenu principal », visible au focus                                      | `app/layout.tsx`, `.skip-link`                                  |
+| 1.3.1 / 2.4.1 Repères              | **Un seul** repère `navigation` nommé, quelle que soit sa forme (onglets ou rail) — UF-803             | `app-nav.tsx`, `layout.a11y.test.tsx`                           |
+| 2.4.7 Focus visible                | Anneau global `3px` sur `:focus-visible`, rétabli sur les contrôles MapLibre                           | `app/globals.css`                                               |
+| 2.5.5 Taille de cible              | Cibles ≥ 44 px sur écran tactile ; la carte de résultat entière est un `<label>`                       | `globals.css`, `itinerary-card.tsx`                             |
+| 3.3.1 Identification des erreurs   | Chaque cas non nominal a son message ; un vide filtré dit **pourquoi** il est vide                     | `plan-feedback.ts`                                              |
+| 3.3.2 Étiquettes et instructions   | Aides reliées par `aria-describedby`, jamais seulement posées à côté                                   | `input-field.tsx`, `mobility-profile-form.tsx`                  |
+| 4.1.2 Nom, rôle, valeur            | Groupes radio nommés, `aria-current="page"` sur l'onglet ouvert, combobox ARIA 1.2                     | `itinerary-list.tsx`, `app-nav.tsx`, `address-autocomplete.tsx` |
+| 4.1.3 Messages de statut           | `status` par défaut, `alert` réservé aux vraies pannes ; régions live montées **d'avance**             | `plan-feedback.ts`, `offline-banner.tsx`                        |
 
 ---
 

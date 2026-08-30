@@ -28,6 +28,13 @@ export const urbanflowColors = {
   placeholder: '#9aa3b5',
   /** Fond de page. */
   surface: '#f6f8fb',
+  /**
+   * Texte au repos du rail de navigation sombre (UF-803, planche « 03 ·
+   * Maquettes desktop »). Ajouté au miroir parce qu'il pose du texte sur Ink 900
+   * et non sur blanc : un couple fond/texte absent d'ici est un contraste que
+   * personne ne teste.
+   */
+  railInk: '#c9d2e2',
 
   /** États système. */
   success: '#0e7a3f',
