@@ -59,6 +59,34 @@ describe('coque commune — WCAG 2.1 AA', () => {
     expect(document.getElementById(controlled as string)).not.toBeNull();
   });
 
+  describe('navigation d’un visiteur sans compte (UF-801)', () => {
+    it('propose le planificateur, désormais ouvert à tous', () => {
+      renderHeader(null);
+
+      // Sans ce lien, un visiteur parti lire la politique de confidentialité
+      // n'aurait aucun chemin de retour vers l'écran de recherche.
+      expect(screen.getByRole('link', { name: /itinéraires/i })).toBeDefined();
+    });
+
+    it('ne propose pas les écrans qui exigent un compte', () => {
+      renderHeader(null);
+
+      // Un lien qui se solde par une redirection vers /login n'est pas une
+      // navigation, c'est une impasse.
+      expect(screen.queryByRole('link', { name: /mon impact/i })).toBeNull();
+      expect(screen.queryByRole('link', { name: /mon profil/i })).toBeNull();
+      expect(screen.getByRole('link', { name: /connexion/i })).toBeDefined();
+    });
+
+    it('rend les trois liens à un utilisateur connecté', () => {
+      renderHeader({ id: 'user-1', email: 'marie@example.org' });
+
+      expect(screen.getByRole('link', { name: /itinéraires/i })).toBeDefined();
+      expect(screen.getByRole('link', { name: /mon impact/i })).toBeDefined();
+      expect(screen.getByRole('link', { name: /mon profil/i })).toBeDefined();
+    });
+  });
+
   it('le bandeau hors-ligne existe avant la coupure (WCAG 4.1.3)', async () => {
     render(<OfflineBanner />);
 

@@ -24,10 +24,17 @@ import {
  *
  * ⚠️ Deux natures de pages publiques, depuis UF-603 : les **écrans
  * d'authentification** (`isAuthPath`), dont on détourne une session valide, et
- * les pages **ouvertes à tous** — la politique de confidentialité — que la
- * session soit présente ou non. Renvoyer un utilisateur connecté vers l'accueil
- * parce qu'il consulte la politique de confidentialité la rendrait illisible à
- * ceux-là mêmes dont elle décrit les données (C8).
+ * les pages **ouvertes à tous** — la politique de confidentialité, et depuis
+ * UF-801 le planificateur lui-même — que la session soit présente ou non.
+ * Renvoyer un utilisateur connecté vers l'accueil parce qu'il consulte la
+ * politique de confidentialité la rendrait illisible à ceux-là mêmes dont elle
+ * décrit les données (C8) ; et détourner l'accueil vers `/login` interdirait à
+ * un visiteur de chercher son bus.
+ *
+ * ⚠️ L'accès invité d'UF-801 **n'élargit pas** la règle : `/impact`, `/profil`
+ * et toute page à venir restent privées par défaut, et le planificateur ne
+ * devient public que parce qu'il est nommément inscrit dans `OPEN_PATHS`. Un
+ * oubli d'inscription ferme toujours la porte, il ne l'ouvre pas.
  *
  * ⚠️ **Ce middleware est une garde de navigation, pas une frontière de
  * sécurité** : il se contente de lire l'expiration inscrite dans le token, sans
@@ -42,7 +49,11 @@ import {
  */
 export function middleware(request: NextRequest): NextResponse {
   const { pathname, search } = request.nextUrl;
-  const session = readSession(request.cookies.get(SESSION_COOKIE)?.value);
+  const token = request.cookies.get(SESSION_COOKIE)?.value;
+  const session = readSession(token);
+  // Un cookie qu'on n'arrive pas à lire (expiré, tronqué) n'est plus une
+  // session : c'est un reliquat, et depuis UF-801 c'est un reliquat nuisible.
+  const staleCookie = Boolean(token) && session === null;
 
   // UF-604 : un nonce neuf par requête — c'est ce qui rend la CSP efficace
   // contre le XSS. Réutiliser le même d'une réponse à l'autre reviendrait à le
@@ -58,18 +69,54 @@ export function middleware(request: NextRequest): NextResponse {
     if (session && isAuthPath(pathname)) {
       return withCsp(NextResponse.redirect(new URL(DEFAULT_AFTER_LOGIN, request.url)), csp);
     }
-    return renderWithCsp(request, csp);
+    return purgeStaleSession(renderWithCsp(request, csp), staleCookie);
   }
 
   if (!session) {
     // On mémorise le chemin **et** sa query : « /?from=A&to=B » doit être restitué tel quel.
-    return withCsp(
-      NextResponse.redirect(new URL(buildLoginUrl(`${pathname}${search}`), request.url)),
-      csp,
+    return purgeStaleSession(
+      withCsp(
+        NextResponse.redirect(new URL(buildLoginUrl(`${pathname}${search}`), request.url)),
+        csp,
+      ),
+      staleCookie,
     );
   }
 
   return renderWithCsp(request, csp);
+}
+
+/**
+ * Efface un cookie de session devenu illisible (UF-801).
+ *
+ * ## Le cas que ça règle
+ *
+ * Avant UF-801, un cookie périmé n'allait jamais bien loin : la page suivante
+ * était privée, le middleware redirigeait vers `/login`, et la reconnexion
+ * réécrivait le cookie. Maintenant que le planificateur est public, ce même
+ * visiteur atteint l'écran — mais son navigateur continue de joindre le jeton
+ * mort à chaque appel. Or `POST /routes/plan` refuse un jeton présenté et
+ * invalide (c'est délibéré : une session morte doit se dire, cf.
+ * `OptionalAuth`). Le visiteur se retrouverait donc devant un planificateur
+ * ouvert qui refuse de calculer, sans qu'aucune action de sa part n'en sorte :
+ * il n'est pas connecté, il n'a donc rien à déconnecter.
+ *
+ * Purger le cookie au passage referme la boucle — la requête suivante ne
+ * présente plus rien, et l'API la sert comme celle de n'importe quel invité.
+ *
+ * L'effacement demande **les mêmes attributs qu'à la pose**, sans quoi le
+ * navigateur ne reconnaît pas le cookie visé : `path: '/'`, celui de
+ * `AUTH_COOKIE_OPTIONS` côté API.
+ *
+ * ⚠️ Ne s'applique qu'aux jetons illisibles ou expirés — jamais à une session
+ * valide, qui ne passe pas par ici.
+ *
+ * @param response Réponse déjà construite (rendu ou redirection)
+ * @param stale `true` si un cookie était présent sans donner de session
+ */
+function purgeStaleSession(response: NextResponse, stale: boolean): NextResponse {
+  if (stale) response.cookies.delete({ name: SESSION_COOKIE, path: '/' });
+  return response;
 }
 
 /** Pose l'en-tête CSP sur une réponse déjà construite (redirections comprises). */

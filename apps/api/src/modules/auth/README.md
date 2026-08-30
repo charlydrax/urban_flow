@@ -41,6 +41,26 @@ Le token est posé en **cookie httpOnly** `access_token` (C11) et renvoyé dans 
   tout de même vérifié pour garder un temps de réponse constant.
 - Le JWT émis contient le **`userId` réel** (`sub`) et une **expiration** (`JWT_EXPIRES_IN`).
 
+## Les trois régimes du guard JWT global
+
+Le guard s'applique à **toute** l'API ; ce qui varie, c'est ce qu'il exige.
+
+| Régime            | Sans jeton           | Jeton invalide | Jeton valide      | Où                                      |
+| ----------------- | -------------------- | -------------- | ----------------- | --------------------------------------- |
+| défaut            | `401`                | `401`          | identité exposée  | partout ailleurs                        |
+| `@OptionalAuth()` | passe, sans identité | `401`          | identité exposée  | `POST /routes/plan` (UF-801)            |
+| `@Public()`       | passe                | passe          | **sans identité** | `login`, `register`, `logout`, `health` |
+
+La dernière colonne de `@Public()` est le piège d'UF-801 : la stratégie Passport
+n'y est jamais jouée, donc un utilisateur connecté arrive **anonyme**. C'est
+sans conséquence sur `login` ou `health`, qui n'ont que faire d'une identité ;
+ça l'aurait été sur le planificateur, dont le résultat dépend du profil.
+
+L'extraction du jeton (cookie httpOnly d'abord, en-tête `Bearer` ensuite) est
+définie une seule fois, dans `src/common/access-token.ts`, et sert à la fois à
+la stratégie et au guard — deux lectures divergentes du même en-tête finiraient
+par ne plus s'accorder sur qui a le droit d'entrer.
+
 ## Dépendances
 
 - `@nestjs/jwt` + `passport-jwt` (stratégie dans `src/common/strategies/jwt.strategy.ts`)

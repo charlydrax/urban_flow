@@ -5,11 +5,21 @@ import { useState } from 'react';
 
 import { useSession } from '../../features/auth/session-provider';
 
+/**
+ * Navigation principale. `guestVisible` dit qui a le droit de **voir** le lien,
+ * pas qui a le droit d'ouvrir la page : l'autorité reste le middleware (UF-106)
+ * et, derrière lui, le guard JWT de l'API (C4).
+ *
+ * Depuis UF-801, le planificateur est ouvert aux visiteurs : son lien doit donc
+ * l'être aussi. Les deux autres restent réservés aux connectés — proposer « Mon
+ * impact CO₂ » à quelqu'un qui n'a pas de compte l'enverrait sur un écran de
+ * connexion, ce qui n'est pas une navigation mais une impasse.
+ */
 const navLinks = [
-  { href: '/', label: 'Itinéraires' },
+  { href: '/', label: 'Itinéraires', guestVisible: true },
   // Pointait sur `/` en attendant l'écran de suivi carbone, livré par UF-505.
-  { href: '/impact', label: 'Mon impact CO₂' },
-  { href: '/profil', label: 'Mon profil' },
+  { href: '/impact', label: 'Mon impact CO₂', guestVisible: false },
+  { href: '/profil', label: 'Mon profil', guestVisible: false },
 ];
 
 /**
@@ -34,7 +44,9 @@ const navLinks = [
  * Reflète l'**état de session** (UF-106) : compte connecté + bouton
  * « Déconnexion », ou lien « Connexion ». Les liens de navigation privés ne
  * sont affichés qu'aux utilisateurs connectés — inutile de proposer des liens
- * qui se solderaient par une redirection vers l'écran de connexion.
+ * qui se solderaient par une redirection vers l'écran de connexion. Le lien du
+ * planificateur, lui, est visible de tous depuis UF-801 : un visiteur doit
+ * pouvoir revenir à l'écran de recherche depuis n'importe quelle page.
  *
  * Accessibilité (C7) : `aria-expanded`/`aria-controls` sur le bouton,
  * libellé explicite pour lecteurs d'écran, zone tactile ≥ 44 px,
@@ -96,8 +108,9 @@ export function SiteHeader() {
           id="menu-principal"
           className={`${menuOpen ? 'flex' : 'hidden'} flex-col gap-1 border-t border-ink-200 py-3 text-sm lg:flex lg:flex-row lg:items-center lg:gap-5 lg:border-t-0 lg:py-0`}
         >
-          {user &&
-            navLinks.map((link) => (
+          {navLinks
+            .filter((link) => user || link.guestVisible)
+            .map((link) => (
               <li key={link.label}>
                 <Link
                   href={link.href}

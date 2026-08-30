@@ -3,7 +3,7 @@ import type { ItinerarySortKey } from '@urbanflow/shared';
 
 import { CarbonService } from '../carbon/carbon.service';
 import { SearchHistoryService } from '../search-history/search-history.service';
-import { UsersService } from '../users/users.service';
+import { DEFAULT_PREFERENCES, UsersService } from '../users/users.service';
 import { ItineraryDto, PlanRoutesResponseDto } from './dto/itinerary.dto';
 import { PlaceDto, PlanRouteDto } from './dto/plan-route.dto';
 import { comparatorFor, mergeIntoItineraries, type MergeEndpoint } from './merge/itinerary-merger';
@@ -60,18 +60,42 @@ export class RoutesService {
    * ne sait pas quels itinéraires l'usager accepte, et en inventer serait pire
    * que d'échouer. La dégradation gracieuse commence à la collecte.
    *
+   * ## Visiteur non connecté (UF-801)
+   *
+   * `userId` vaut `null`. Deux conséquences, et deux seulement : les
+   * préférences appliquées sont `DEFAULT_PREFERENCES` — sans requête en base,
+   * puisqu'il n'y a pas de profil à lire —, et la recherche n'est pas
+   * mémorisée (`searchHistoryId: null`). Tout le reste — collecte, fusion,
+   * barème carbone, tri — est identique : un invité n'a pas droit à un
+   * planificateur au rabais, il a droit au même sans la personnalisation qu'il
+   * n'a pas demandée.
+   *
+   * Écrire un historique pour un anonyme n'aurait d'ailleurs aucun destinataire
+   * (aucun écran ne pourrait le relire) et constituerait une collecte sans
+   * finalité — donc sans base légale (minimisation, C8).
+   *
    * @param dto Requête validée `{ from, to }` — sans `userId` depuis UF-402 (C4)
-   * @param userId Identité issue du JWT vérifié : seule source de l'identité (anti-IDOR, C4)
+   * @param userId Identité issue du JWT vérifié : seule source de l'identité
+   * (anti-IDOR, C4), ou `null` pour un visiteur non connecté (UF-801)
    * @returns Les itinéraires retenus, la clé de tri, l'état des trois sources et la ligne d'historique
    * @throws {BadRequestException} si une extrémité n'a pas de coordonnées
    */
-  async plan(dto: PlanRouteDto, userId: string): Promise<PlanRoutesResponseDto> {
+  async plan(dto: PlanRouteDto, userId: string | null): Promise<PlanRoutesResponseDto> {
     const from = toEndpoint(dto.from, 'départ');
     const to = toEndpoint(dto.to, 'arrivée');
 
     // Étape 3 du flux : les préférences viennent du compte du JWT, jamais du
-    // corps de la requête (anti-IDOR — C4).
-    const preferences = await this.users.getPreferences(userId);
+    // corps de la requête (anti-IDOR — C4). Sans compte, les défauts, et
+    // surtout **aucune requête en base** : interroger PostGIS avec un
+    // identifiant nul rendrait de toute façon ces mêmes défauts, en payant un
+    // aller-retour pour l'apprendre (C5).
+    // La copie n'est pas décorative : `DEFAULT_PREFERENCES` est un objet de
+    // module, partagé par tous les appels. `getPreferences` en rend déjà une
+    // copie ; rendre ici la référence ferait de ce chemin le seul par lequel
+    // un défaut global pourrait être modifié.
+    const preferences = userId
+      ? await this.users.getPreferences(userId)
+      : { ...DEFAULT_PREFERENCES, preferredModes: [...DEFAULT_PREFERENCES.preferredModes] };
 
     // Publié dans les deux sorties de la méthode (UF-602) : que la liste soit
     // pleine, courte ou vide, le client doit pouvoir dire *pourquoi* — un
@@ -84,7 +108,7 @@ export class RoutesService {
     // ont su répondre — un trajet reste à mémoriser même quand les trois se
     // taisent ; et son insertion se paie ainsi sous la latence de la source la
     // plus lente, au lieu de s'y ajouter (C5).
-    const recording = this.rememberSearch(userId, from, to);
+    const recording = userId ? this.rememberSearch(userId, from, to) : Promise.resolve(null);
 
     // Étapes 13-18 : les trois sources en parallèle (UF-305).
     const collected = await this.collector.collectAllSources(from, to, {
@@ -216,6 +240,12 @@ export class RoutesService {
    *
    * C11 : le journal ne porte ni libellé ni coordonnées — l'incident se
    * diagnostique sans exposer le déplacement de l'usager.
+   *
+   * **Non appelée pour un invité** (UF-801) : `plan` court-circuite en amont.
+   * La table rattache chaque ligne à un compte, et il n'y en a pas ici — mais
+   * la vraie raison est ailleurs : personne ne pourrait relire cet historique,
+   * et conserver un déplacement que nul ne consultera est une collecte sans
+   * finalité (C8).
    *
    * @returns L'identifiant de la ligne créée, ou `null` si l'écriture a échoué
    */

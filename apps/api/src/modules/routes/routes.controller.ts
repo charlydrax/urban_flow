@@ -10,7 +10,8 @@ import {
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
 
-import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { OptionalAuth } from '../../common/decorators/optional-auth.decorator';
+import { OptionalUser } from '../../common/decorators/optional-user.decorator';
 import { AuthenticatedUser } from '../../common/strategies/jwt.strategy';
 import { PLAN_THROTTLE_LIMIT, ThrottlePlan } from '../../common/throttling';
 import { PlanRoutesResponseDto } from './dto/itinerary.dto';
@@ -28,8 +29,17 @@ import { RoutesService } from './routes.service';
  * (C11). Voir `docs/source-diagnostics-endpoint.md` pour ce qu'il faisait et
  * comment le rejouer au besoin.
  *
- * Protégé par le guard JWT global : token absent, invalide ou expiré → `401`
- * (étape 2 du flux de référence — C4).
+ * **Ouvert aux visiteurs depuis UF-801.** Le guard JWT global s'y applique en
+ * régime facultatif (`@OptionalAuth()`) : un jeton valide renseigne l'identité
+ * et déclenche le parcours personnalisé, son absence est tolérée, un jeton
+ * rejeté reste un `401`. Comparer des itinéraires est le service que la
+ * collectivité rend à tout le monde ; exiger un compte pour y accéder revenait
+ * à faire payer en données personnelles une information publique (C8), et
+ * plaçait un formulaire d'inscription entre l'usager et son bus.
+ *
+ * Ce qui appartient à quelqu'un reste, lui, sous le régime par défaut :
+ * historique (UF-204), suivi carbone (UF-505) et profil (UF-107) répondent
+ * `401` sans jeton valide (C4).
  */
 @ApiTags('routes')
 @ApiBearerAuth()
@@ -51,8 +61,18 @@ export class RoutesController {
    * fautive, alors que ce sont nos sources qui manquent (C10).
    *
    * Endpoint **plafonné** (UF-604) : c'est le plus coûteux du système, et le
-   * seul qui amplifie une requête entrante en trois requêtes sortantes.
+   * seul qui amplifie une requête entrante en trois requêtes sortantes. Le
+   * plafond est compté par IP et non par compte : il couvrait déjà les appels
+   * anonymes avant qu'UF-801 ne les autorise, et n'a donc rien à rattraper.
+   *
+   * ## Invité et connecté : une seule différence
+   *
+   * Sans compte, les préférences appliquées sont celles par défaut et la
+   * recherche n'est pas mémorisée (`searchHistoryId: null`). Le calcul, les
+   * sources interrogées et l'empreinte publiée sont rigoureusement les mêmes :
+   * il n'existe pas de version au rabais du planificateur.
    */
+  @OptionalAuth()
   @ThrottlePlan()
   @Post('plan')
   @HttpCode(HttpStatus.OK)
@@ -67,8 +87,11 @@ export class RoutesController {
       'cinq, filtrés puis classés selon les préférences du profil (marche maximale, ' +
       'accessibilité PMR, priorité rapide ou écolo). Le champ `sources` rapporte laquelle a ' +
       'répondu : une liste sans option vélo et un opérateur injoignable ne se lisent pas pareil. ' +
-      'La recherche est enregistrée dans l’historique (UF-204) à chaque appel, et ' +
-      '`searchHistoryId` renvoie la ligne créée.',
+      'Accessible **sans compte** (UF-801) : un jeton valide personnalise le calcul ' +
+      'et mémorise la recherche, son absence donne le même service avec les préférences ' +
+      'par défaut et `searchHistoryId: null`. Pour un utilisateur connecté, la recherche est ' +
+      'enregistrée dans l’historique (UF-204) à chaque appel, et `searchHistoryId` renvoie ' +
+      'la ligne créée.',
   })
   @ApiOkResponse({
     type: PlanRoutesResponseDto,
@@ -77,7 +100,12 @@ export class RoutesController {
       'profil « rapide »), et état des trois sources. Renvoyé même quand toutes les sources ' +
       'ont échoué : la liste est alors vide et `sources` dit pourquoi.',
   })
-  @ApiUnauthorizedResponse({ description: 'JWT absent, invalide ou expiré.' })
+  @ApiUnauthorizedResponse({
+    description:
+      'JWT **présent mais invalide ou expiré**. Un appel sans aucun jeton est celui d’un ' +
+      'visiteur : il reçoit `200` (UF-801). Un cookie périmé, lui, doit être signalé — le ' +
+      'traiter en visite anonyme ferait perdre sa session à l’utilisateur en silence.',
+  })
   @ApiBadRequestResponse({
     description:
       'Corps invalide, ou extrémité sans coordonnées : le géocodage est fait par le client (C4).',
@@ -90,9 +118,10 @@ export class RoutesController {
   })
   plan(
     @Body() dto: PlanRouteDto,
-    @CurrentUser() user: AuthenticatedUser,
+    @OptionalUser() user: AuthenticatedUser | null,
   ): Promise<PlanRoutesResponseDto> {
-    // C4 : l'identité vient du JWT seul — le corps n'a plus de `userId` à opposer.
-    return this.routesService.plan(dto, user.userId);
+    // C4 : l'identité vient du JWT seul — le corps n'a plus de `userId` à
+    // opposer, et un invité n'en a aucun à faire valoir.
+    return this.routesService.plan(dto, user?.userId ?? null);
   }
 }

@@ -44,7 +44,7 @@ export type LogoutReason = 'auth-required' | 'session-expired' | 'signed-out' | 
 const AUTH_PATHS = ['/login', '/register'] as const;
 
 /**
- * Pages lisibles sans session mais qui restent lisibles **avec** (UF-603).
+ * Pages lisibles sans session mais qui restent lisibles **avec** (UF-603, UF-801).
  *
  * La politique de confidentialité en est le premier cas : elle doit être
  * consultable avant de créer un compte — c'est la condition d'un consentement
@@ -52,8 +52,18 @@ const AUTH_PATHS = ['/login', '/register'] as const;
  * qui vient y relire la durée de conservation de ses trajets. La distinction
  * avec `AUTH_PATHS` n'est donc pas cosmétique : confondre les deux rendrait la
  * page inaccessible à la moitié des gens qu'elle concerne.
+ *
+ * Le **planificateur** (`/`) l'a rejointe avec UF-801 : chercher et comparer
+ * des itinéraires est le service rendu à tous, et le réserver aux inscrits
+ * revenait à faire payer en données personnelles une information publique (C8).
+ * Un compte reste nécessaire pour ce qui appartient à quelqu'un — historique,
+ * bilan carbone, profil —, qui reste privé par défaut.
+ *
+ * ⚠️ `/` est comparé **à l'identique**, jamais en préfixe : `matchesAny`
+ * n'accepterait `/impact` que si la liste contenait la chaîne vide. Ajouter une
+ * page publique ici n'ouvre donc rien d'autre qu'elle-même.
  */
-const OPEN_PATHS = ['/confidentialite'] as const;
+const OPEN_PATHS = ['/', '/confidentialite'] as const;
 
 /**
  * Routes accessibles sans session. Tout le reste est privé par défaut :

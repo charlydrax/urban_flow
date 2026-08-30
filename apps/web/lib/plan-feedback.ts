@@ -176,6 +176,37 @@ export const CACHED_ROUTE_NOTICE: PlanNotice = {
 };
 
 /**
+ * Note affichée à un visiteur **non connecté** sur le planificateur (UF-801).
+ *
+ * Ton `info` et rôle `status` : rien n'est cassé, rien n'est refusé. C'est le
+ * pendant exact de la note « filtre PMR actif » — elle relie ce qui est à
+ * l'écran à un état du compte, pour qu'une absence ne se lise pas comme une
+ * panne.
+ *
+ * ## Ce que le message dit, et pourquoi il le dit ainsi
+ *
+ * Il annonce ce qui **manque** (l'historique, le bilan carbone) et non ce qui
+ * est permis : le visiteur voit déjà que la recherche fonctionne, il n'a pas
+ * besoin qu'on le lui confirme. Ce qu'il ne peut pas deviner, c'est que ses
+ * trajets ne sont conservés nulle part — et il vaut mieux qu'il l'apprenne
+ * avant de compter dessus qu'en revenant le lendemain.
+ *
+ * Formulé comme une information, jamais comme un péage : le planificateur
+ * fonctionne entièrement sans compte, et un bandeau qui laisserait entendre le
+ * contraire pousserait à créer un compte pour un service déjà rendu — une
+ * collecte de données obtenue par malentendu (C8).
+ *
+ * L'invitation à se connecter n'est pas dans ce texte : c'est un **lien**, posé
+ * par l'écran sous le message. Une phrase « connectez-vous » sans cible
+ * obligerait à repartir chercher le bouton dans l'en-tête (C7 — WCAG 2.4.4).
+ */
+export const GUEST_MODE_NOTICE: PlanNotice = {
+  role: 'status',
+  message:
+    'Vous utilisez UrbanFlow sans compte : vos recherches ne sont pas conservées et votre bilan carbone n’est pas suivi.',
+};
+
+/**
  * Nom lisible de chacune des trois sources (UF-305).
  *
  * « Transports en commun » et non « GTFS » : le bandeau de mode dégradé

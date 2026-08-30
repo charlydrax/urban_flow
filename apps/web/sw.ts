@@ -195,13 +195,19 @@ async function handleNavigation(request: Request): Promise<Response> {
 /**
  * Le shell hors-ligne ne doit être rafraîchi que par la vraie page d'accueil.
  *
- * Depuis UF-106, une navigation vers `/` sans session est **redirigée** vers
- * `/login` par le middleware. Sans ce filtre :
+ * Depuis UF-106, une navigation vers une page privée sans session est
+ * **redirigée** vers `/login` par le middleware. Sans ce filtre :
  *  - le shell hors-ligne deviendrait l'écran de connexion (l'app installée
  *    s'ouvrirait sur « Connectez-vous » même pour un compte connecté) ;
  *  - une réponse redirigée finirait en cache, or un service worker n'a pas le
  *    droit de répondre à une navigation avec une réponse `redirected` — le
  *    navigateur rejette l'affichage.
+ *
+ * UF-801 rend `/` public, si bien qu'un visiteur n'y est plus redirigé : le
+ * shell se remplit désormais dès la première visite, connectée ou non — l'app
+ * installable l'est vraiment pour tout le monde (C1). Les deux garde-fous
+ * restent en place : `redirected` reste interdit en cache quoi qu'il arrive, et
+ * seul `/` a le droit de fournir le shell.
  */
 function isCacheableShell(request: Request, response: Response): boolean {
   return response.ok && !response.redirected && new URL(request.url).pathname === '/';

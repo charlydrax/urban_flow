@@ -6,15 +6,48 @@
 (TC + mobilités douces), orchestré selon le diagramme de séquence du MVP
 (CLAUDE.md section 4).
 
-## Endpoints (protégés par le guard JWT global)
+## Endpoints
 
-| Méthode | Route              | Description                                            | Statut                      |
-| ------- | ------------------ | ------------------------------------------------------ | --------------------------- |
-| POST    | `/api/routes/plan` | Itinéraires multimodaux + CO₂, classés selon le profil | définitif (UF-402), le seul |
+| Méthode | Route              | Authentification       | Description                                            | Statut                      |
+| ------- | ------------------ | ---------------------- | ------------------------------------------------------ | --------------------------- |
+| POST    | `/api/routes/plan` | facultative (`UF-801`) | Itinéraires multimodaux + CO₂, classés selon le profil | définitif (UF-402), le seul |
 
 Contrat d'entrée : `{ from: {label, lat, lng}, to: {...} }` — **sans `userId`**.
 L'identité vient du JWT et de lui seul (anti-IDOR, C4) ; le `ValidationPipe`
 global rejette en `400` une requête qui en enverrait encore un.
+
+### Accès invité (UF-801)
+
+`POST /routes/plan` est le seul endpoint de l'API à porter `@OptionalAuth()`.
+Trois cas, et pas deux :
+
+| Requête                   | Réponse | `request.user` | Historique  |
+| ------------------------- | ------- | -------------- | ----------- |
+| jeton valide              | `200`   | renseigné      | ligne créée |
+| aucun jeton               | `200`   | vide           | `null`      |
+| jeton présent mais rejeté | `401`   | —              | —           |
+
+La troisième ligne est délibérée : un cookie expiré n'est pas l'absence de
+compte. Le tolérer ferait basculer un utilisateur en mode invité **en silence**
+— il continuerait à chercher des itinéraires en croyant son compte actif, sans
+historique, sans bilan carbone et sans écran de reconnexion. Côté PWA, le
+middleware efface ce cookie mort au passage, ce qui ramène le visiteur au
+premier cas.
+
+`@Public()` ne pouvait pas servir ici : il court-circuite le guard, donc la
+stratégie Passport n'est jamais jouée et **un utilisateur connecté arriverait
+anonyme** — il perdrait ses préférences et son historique sans qu'aucune erreur
+ne le signale. `jwt-auth.guard.spec.ts` fige la différence sur le même jeton.
+
+Pour un invité, deux choses seulement changent : les préférences appliquées sont
+`DEFAULT_PREFERENCES` (sans requête en base — il n'y a pas de profil à lire), et
+la recherche n'est pas mémorisée. Le calcul, les sources interrogées et
+l'empreinte publiée sont identiques. Écrire un historique pour un anonyme
+n'aurait d'ailleurs aucun lecteur : ce serait une collecte sans finalité (C8).
+
+Les routes qui portent des données personnelles restent, elles, sous le régime
+par défaut : `search-history` (UF-204), `carbon` (UF-505) et `users` (UF-107)
+répondent `401` sans jeton valide.
 
 Contrat de sortie : `{ itineraries, sortedBy, sources, appliedConstraints, searchHistoryId }`.
 
@@ -35,6 +68,7 @@ label seul donne un `400` explicite — pas une liste vide inexplicable.
 | 9. Tri selon la priorité du profil              | UF-401 | ✅   |
 | 20. Tri par empreinte croissante par défaut     | UF-503 | ✅   |
 | 7 et 18. Sauvegarde `search_history`            | UF-402 | ✅   |
+| 2. Vérification JWT — **facultative** ici       | UF-801 | ✅   |
 
 **Plus aucun itinéraire n'est simulé.** Une liste vide signifie désormais
 qu'aucune chaîne continue n'a pu être formée — et `sources` dit si c'est faute de
