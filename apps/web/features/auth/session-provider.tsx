@@ -84,6 +84,12 @@ export function SessionProvider({
   // verrou, chacun déclencherait sa propre redirection.
   const expiringRef = useRef(false);
 
+  // L'état de session est lu dans l'intercepteur 401, un rappel non réactif
+  // enregistré une fois pour toutes. Une ref évite de le réabonner à chaque
+  // connexion / déconnexion.
+  const userRef = useRef(user);
+  userRef.current = user;
+
   /** L'état serveur fait foi après chaque navigation / router.refresh(). */
   useEffect(() => {
     setUser(initialUser);
@@ -109,10 +115,20 @@ export function SessionProvider({
     [router],
   );
 
-  /** Branche l'intercepteur 401 du client API sur cette session. */
+  /**
+   * Branche l'intercepteur 401 du client API sur cette session.
+   *
+   * **Sans session, un 401 n'est pas une expiration** (UF-801). Depuis que le
+   * planificateur est ouvert aux visiteurs, l'application émet des requêtes
+   * pour des gens qui ne se sont jamais connectés : leur répondre « votre
+   * session a expiré » et les jeter sur `/login` transformerait l'accès invité
+   * en cul-de-sac, précisément sur l'écran qu'on vient d'ouvrir. Il n'y a rien
+   * à purger et rien à retrouver — le refus vient d'une route qui demande un
+   * compte, et c'est à l'écran concerné de le dire.
+   */
   useEffect(() => {
     return setUnauthorizedHandler(() => {
-      if (expiringRef.current) return;
+      if (expiringRef.current || !userRef.current) return;
       expiringRef.current = true;
       // Le cookie httpOnly survit au 401 : seule l'API peut l'effacer.
       void apiClient.logout().finally(() => endSession('session-expired'));

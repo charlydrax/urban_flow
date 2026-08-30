@@ -79,6 +79,14 @@ Diagramme de séquence du MVP — `POST /api/routes/plan {from, to, userId}` :
 > vérifié à l'étape 2, et de lui seul — accepter un identifiant de compte depuis
 > le corps de la requête est un défaut de conception (OWASP A01), même quand le
 > serveur l'ignore. Le diagramme reste la référence du flux, pas du contrat.
+>
+> ⚠️ **Écart assumé depuis UF-801** : à l'étape 2, le JWT est **facultatif sur
+> ce seul endpoint**. Un jeton valide fait le parcours du diagramme (étapes 3 et
+> 7 comprises) ; son absence donne le même calcul avec les préférences par
+> défaut, sans historique. Un jeton _présenté_ et invalide reste un 401.
+> Marie, le scénario de référence, est connectée — mais réserver la comparaison
+> d'itinéraires aux inscrits revenait à faire payer en données personnelles une
+> information publique (C8). Voir `apps/api/src/modules/routes/README.md`.
 
 1. Client PWA géolocalise (Geolocation API) et envoie la requête.
 2. API Gateway **vérifie le JWT** → 401 si invalide/expiré.

@@ -1,10 +1,13 @@
 'use client';
 
+import Link from 'next/link';
+
 import { LazyMap } from '../../components/map/lazy-map';
 import { toLngLat } from '../../lib/geolocation';
 import { DEFAULT_ZOOM, LYON_CENTER } from '../../lib/map-style';
 import {
   CACHED_ROUTE_NOTICE,
+  GUEST_MODE_NOTICE,
   PLAN_FAILURE_NOTICES,
   SOURCE_LABELS,
   describeAppliedConstraints,
@@ -77,7 +80,8 @@ export function PlannerScreen() {
   const { position } = location;
 
   const { status: sessionStatus } = useSession();
-  const history = useSearchHistory(sessionStatus === 'authenticated');
+  const isGuest = sessionStatus !== 'authenticated';
+  const history = useSearchHistory(!isGuest);
 
   // La recherche prévient l'historique dès que l'API confirme l'avoir écrite :
   // la liste des rappels remonte le trajet en tête sans un seul appel de plus.
@@ -145,6 +149,25 @@ export function PlannerScreen() {
           onSubmitTrip={routePlan.plan}
           isSearching={isSearching}
         />
+
+        {/*
+          Visiteur sans compte (UF-801) : le planificateur fonctionne
+          entièrement, seule la mémoire manque. La note est posée **avant** les
+          messages de recherche parce qu'elle qualifie l'écran entier et non un
+          résultat, et elle reste affichée en permanence : le visiteur doit
+          l'avoir sous les yeux au moment où il constate l'absence de trajets
+          récents, pas seulement à l'ouverture de la page.
+        */}
+        {isGuest && (
+          <PlanNotice tone="info" role={GUEST_MODE_NOTICE.role} message={GUEST_MODE_NOTICE.message}>
+            <p>
+              <Link href="/login" className="font-semibold underline underline-offset-2">
+                Connectez-vous
+              </Link>{' '}
+              pour retrouver vos trajets et suivre votre impact CO₂.
+            </p>
+          </PlanNotice>
+        )}
 
         {/*
           La session expirée n'est pas peinte comme une panne : la redirection

@@ -130,11 +130,27 @@ describe('isPublicPath', () => {
     expect(isPublicPath('/confidentialite')).toBe(true);
   });
 
+  it('marks the planner as public (UF-801 — usable without an account)', () => {
+    // Comparer des itinéraires est le service rendu à tous ; le réserver aux
+    // inscrits revenait à faire payer en données personnelles une information
+    // publique (C8).
+    expect(isPublicPath('/')).toBe(true);
+  });
+
   it('marks everything else as private by default', () => {
-    expect(isPublicPath('/')).toBe(false);
     expect(isPublicPath('/carbon')).toBe(false);
+    expect(isPublicPath('/impact')).toBe(false);
+    expect(isPublicPath('/profil')).toBe(false);
     // Piège classique : un préfixe ne suffit pas à rendre une route publique.
     expect(isPublicPath('/login-history')).toBe(false);
+  });
+
+  it('does not let the planner’s « / » open the whole application (UF-801)', () => {
+    // `matchesAny` teste `pathname === '/'` puis `startsWith('//')` : toute
+    // page interne commence par « / », et une comparaison en préfixe les
+    // rendrait donc TOUTES publiques d'un seul ajout à `OPEN_PATHS`.
+    expect(isPublicPath('/impact/2026')).toBe(false);
+    expect(isPublicPath('/profil/preferences')).toBe(false);
   });
 });
 

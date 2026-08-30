@@ -1,8 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PassportStrategy } from '@nestjs/passport';
-import { Request } from 'express';
-import { ExtractJwt, Strategy } from 'passport-jwt';
+import { Strategy } from 'passport-jwt';
+
+import { accessTokenExtractor } from '../access-token';
 
 /** Charge utile signée dans les access tokens UrbanFlow. */
 export interface JwtPayload {
@@ -21,9 +22,9 @@ export interface AuthenticatedUser {
 /**
  * Stratégie Passport de vérification des JWT.
  *
- * Le token est extrait en priorité depuis le cookie httpOnly `access_token`
- * (inaccessible au JavaScript → protège contre le vol par XSS — C11), avec
- * repli sur l'en-tête `Authorization: Bearer` (tests Swagger, clients API).
+ * Le token est extrait par `accessTokenExtractor` (cookie httpOnly `access_token`
+ * d'abord, en-tête `Authorization: Bearer` ensuite) — voir `common/access-token.ts`,
+ * qui sert aussi au guard facultatif d'UF-801.
  *
  * Couvre : C4 (signature vérifiée, expiration appliquée), C11 (cookie httpOnly).
  */
@@ -31,10 +32,7 @@ export interface AuthenticatedUser {
 export class JwtStrategy extends PassportStrategy(Strategy) {
   constructor(config: ConfigService) {
     super({
-      jwtFromRequest: ExtractJwt.fromExtractors([
-        (req: Request): string | null => (req.cookies?.access_token as string | undefined) ?? null,
-        ExtractJwt.fromAuthHeaderAsBearerToken(),
-      ]),
+      jwtFromRequest: accessTokenExtractor,
       ignoreExpiration: false,
       secretOrKey: config.getOrThrow<string>('JWT_SECRET'),
     });

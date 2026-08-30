@@ -508,4 +508,57 @@ describe('RoutesService', () => {
     expect(result.itineraries.length).toBeGreaterThan(0);
     expect(result.searchHistoryId).toBeNull();
   });
+  describe('visiteur non connecté (UF-801)', () => {
+    it('serves a guest without ever touching the profile table (C5)', async () => {
+      const result = await service.plan(dto(), null);
+
+      // Aucun compte, donc aucun profil à lire : interroger la base avec un
+      // identifiant nul coûterait un aller-retour pour se voir rendre les
+      // défauts qu'on connaît déjà.
+      expect(getPreferences).not.toHaveBeenCalled();
+      expect(result.itineraries.length).toBeGreaterThan(0);
+    });
+
+    it('applies the default preferences to a guest', async () => {
+      const result = await service.plan(dto(), null);
+
+      // Le défaut « écolo » vaut pour tout le monde : un invité obtient le même
+      // classement qu'un compte neuf, et la même absence de filtre PMR.
+      expect(result.sortedBy).toBe('carbonAsc');
+      expect(result.appliedConstraints).toEqual({ reducedMobility: false });
+    });
+
+    it('never records a guest search (C8 — minimisation)', async () => {
+      const result = await service.plan(dto(), null);
+
+      // Un historique anonyme n'aurait aucun lecteur : conserver un déplacement
+      // que personne ne pourra consulter est une collecte sans finalité.
+      expect(createSearchHistory).not.toHaveBeenCalled();
+      expect(result.searchHistoryId).toBeNull();
+    });
+
+    it('gives a guest the same calculation as a signed-in user, not a degraded one', async () => {
+      const guest = await service.plan(dto(), null);
+      const member = await service.plan(dto(), userId);
+
+      // Seule la mémoire diffère. Les itinéraires, leur ordre et leur empreinte
+      // sont ceux du même calcul : il n'existe pas de planificateur au rabais.
+      expect(guest.itineraries).toEqual(member.itineraries);
+      expect(guest.sortedBy).toBe(member.sortedBy);
+      expect(collectAllSources).toHaveBeenNthCalledWith(1, expect.anything(), expect.anything(), {
+        reducedMobility: false,
+      });
+    });
+
+    it('does not hand out the shared DEFAULT_PREFERENCES object', async () => {
+      // `DEFAULT_PREFERENCES` est un objet de module : si le service en rendait
+      // la référence, ce chemin serait le seul par lequel un défaut global
+      // pourrait être modifié — pour tous les invités suivants.
+      const snapshot = JSON.parse(JSON.stringify(DEFAULT_PREFERENCES)) as unknown;
+
+      await service.plan(dto(), null);
+
+      expect(DEFAULT_PREFERENCES).toEqual(snapshot);
+    });
+  });
 });

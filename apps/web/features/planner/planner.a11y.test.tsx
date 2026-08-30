@@ -2,7 +2,7 @@ import { TransportMode } from '@urbanflow/shared';
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 
-import { PLAN_FAILURE_NOTICES } from '../../lib/plan-feedback';
+import { GUEST_MODE_NOTICE, PLAN_FAILURE_NOTICES } from '../../lib/plan-feedback';
 import { expectNoA11yViolations } from '../../test/axe';
 import { ITINERARIES, itinerary } from '../../test/fixtures';
 import { CarbonBreakdown } from './carbon-breakdown';
@@ -120,4 +120,45 @@ describe('panneau de résultats — WCAG 2.1 AA', () => {
       await expectNoA11yViolations();
     },
   );
+
+  describe('note du visiteur sans compte (UF-801)', () => {
+    const renderGuestNotice = () =>
+      render(
+        <PlanNotice tone="info" role={GUEST_MODE_NOTICE.role} message={GUEST_MODE_NOTICE.message}>
+          <p>
+            <a href="/login">Connectez-vous</a> pour retrouver vos trajets et suivre votre impact
+            CO₂.
+          </p>
+        </PlanNotice>,
+      );
+
+    it('ne viole aucune règle AA, lien de connexion compris', async () => {
+      renderGuestNotice();
+      await expectNoA11yViolations();
+    });
+
+    it('n’interrompt pas la lecture en cours (WCAG 4.1.3)', () => {
+      renderGuestNotice();
+
+      // Rien n'est cassé et rien n'est refusé : couper la parole au lecteur
+      // d'écran ferait passer une information de contexte pour une alerte.
+      expect(GUEST_MODE_NOTICE.role).toBe('status');
+      expect(screen.getByRole('status')).toBeDefined();
+    });
+
+    it('offre une cible de connexion, plutôt qu’une injonction sans lien (WCAG 2.4.4)', () => {
+      renderGuestNotice();
+
+      const link = screen.getByRole('link', { name: /connectez-vous/i });
+      expect(link.getAttribute('href')).toBe('/login');
+    });
+
+    it('dit ce qui manque sans laisser croire que la recherche est bloquée', () => {
+      // Le planificateur fonctionne entièrement sans compte : un texte qui
+      // laisserait entendre le contraire pousserait à s'inscrire pour un
+      // service déjà rendu — une collecte obtenue par malentendu (C8).
+      expect(GUEST_MODE_NOTICE.message).toMatch(/pas conserv|pas suivi/i);
+      expect(GUEST_MODE_NOTICE.message).not.toMatch(/connectez-vous|inscri|obligatoire/i);
+    });
+  });
 });

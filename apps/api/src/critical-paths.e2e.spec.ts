@@ -355,13 +355,41 @@ describe('Parcours critiques (auth + plan) — UF-607', () => {
     expect(body.searchHistoryId).toBeDefined();
   });
 
-  it('parcours F2 : sans session, la planification est refusée (401) — étape 2 du flux', async () => {
+  it('parcours F2 : un visiteur sans compte obtient les mêmes itinéraires (UF-801)', async () => {
     const response = await fetch(`${baseUrl}/routes/plan`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ from: PART_DIEU, to: BELLECOUR }),
     });
 
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      itineraries: { carbonGrams: number }[];
+      searchHistoryId: string | null;
+    };
+
+    // Recette 1 du ticket : plus de 401, et un vrai résultat — pas une coquille
+    // vide qui laisserait croire que l'accès invité « marche » sans rien rendre.
+    expect(body.itineraries.length).toBeGreaterThan(0);
+    expect(body.itineraries[0].carbonGrams).toBeGreaterThanOrEqual(0);
+
+    // Rien n'est mémorisé : un historique anonyme n'aurait aucun lecteur (C8).
+    expect(body.searchHistoryId).toBeNull();
+  });
+
+  it('parcours F2 : un jeton présenté mais mort reste refusé (401) — étape 2 du flux', async () => {
+    const response = await fetch(`${baseUrl}/routes/plan`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Cookie: 'access_token=not.a.valid.jwt',
+      },
+      body: JSON.stringify({ from: PART_DIEU, to: BELLECOUR }),
+    });
+
+    // L'accès invité (UF-801) ne dispense pas de vérifier ce qu'on nous
+    // présente : une session morte doit se dire, sans quoi l'utilisateur
+    // continuerait de chercher des trajets en croyant son compte actif.
     expect(response.status).toBe(401);
   });
 
@@ -387,11 +415,15 @@ describe('Parcours critiques (auth + plan) — UF-607', () => {
   });
 
   it('joint un identifiant de corrélation à chaque réponse, erreurs comprises (UF-607)', async () => {
+    // Une requête refusée, pour exercer le filtre d'exceptions global : depuis
+    // UF-801, l'absence de session n'en produit plus sur cet endpoint — c'est
+    // le corps invalide (extrémité sans coordonnées) qui joue ce rôle.
     const response = await fetch(`${baseUrl}/routes/plan`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ from: PART_DIEU, to: BELLECOUR }),
+      body: JSON.stringify({ from: { label: 'Part-Dieu' }, to: BELLECOUR }),
     });
+    expect(response.ok).toBe(false);
     const body = (await response.json()) as { requestId?: string };
 
     // Le même identifiant dans l'en-tête et dans le corps : c'est ce que

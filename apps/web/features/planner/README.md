@@ -22,6 +22,7 @@ F2 », « 03 · Maquettes desktop → DESKTOP 2 : PLANIFICATEUR ».
 | `carbon-breakdown.tsx`            | Détail CO₂ de l'option retenue : segment, facteur, comparaison (UF-501)  |
 | `itinerary-skeleton.tsx`          | Esquisse du panneau pendant le calcul — réserve la place (UF-405)        |
 | `plan-notice.tsx`                 | Message d'état : vide, panne, session expirée, mode dégradé (UF-405)     |
+| `planner-screen.tsx` (note)       | Bandeau « sans compte » du visiteur + lien de connexion (UF-801)         |
 | `trip-fields.tsx`                 | Carte départ/arrivée de la maquette + bouton d'inversion                 |
 | `address-autocomplete.tsx`        | Champ d'adresse au motif ARIA « combobox » + liste de suggestions        |
 | `use-address-search.ts`           | Débounce 300 ms, annulation de la requête précédente, états de recherche |
@@ -1045,3 +1046,80 @@ Une réponse rejouée depuis un cache antérieur à ce ticket ne porte pas
 `appliedConstraints`. Le hook publie alors `null` — pas `{ reducedMobility: false }` :
 prêter « aucun filtre » à une réponse qui n'en sait rien masquerait un filtre
 peut-être bien actif (C10).
+
+## Accès invité (UF-801) — C2 / C7 / C8
+
+Le planificateur est **utilisable sans compte**. Chercher, comparer et lancer un
+itinéraire est le service que la collectivité rend à tout le monde ; le réserver
+aux inscrits revenait à faire payer en données personnelles une information
+publique (C8), et à placer un formulaire d'inscription entre l'usager et son bus.
+
+### Ce qui change, et ce qui ne change pas
+
+|                             | Visiteur            | Connecté           |
+| --------------------------- | ------------------- | ------------------ |
+| Recherche, carte, résultats | identiques          | identiques         |
+| Préférences appliquées      | défauts (« écolo ») | profil de mobilité |
+| Trajets récents             | absents             | UF-204             |
+| Suivi carbone               | absent              | UF-505             |
+
+Il n'existe pas de version au rabais du planificateur : les trois sources sont
+interrogées pareil et l'empreinte est calculée au même barème. Seule la
+**mémoire** manque, et c'est exactement ce que la note dit à l'écran.
+
+### Les trois verrous levés, et pourquoi ils n'ont pas été levés au même endroit
+
+1. **API** — `POST /routes/plan` passe en `@OptionalAuth()` (voir
+   `apps/api/src/modules/routes/README.md`). Un jeton valide renseigne toujours
+   l'identité ; c'est ce que `@Public()` n'aurait pas su faire.
+2. **Navigation** — `/` rejoint `OPEN_PATHS` dans `lib/session.ts`. Le
+   middleware ne détourne plus l'accueil vers `/login`, et `/impact` comme
+   `/profil` restent privés : le ticket ouvre une page nommée, il n'assouplit
+   pas la règle du « privé par défaut ».
+3. **Intercepteur 401** — `SessionProvider` ignore un 401 quand **aucune session
+   n'est connue**. Sans cela, la première réponse `401` d'une route privée
+   enverrait un visiteur qui ne s'est jamais connecté sur un écran de
+   reconnexion — un cul-de-sac sur l'écran qu'on vient d'ouvrir.
+
+### Le cookie mort, ou pourquoi le middleware efface quelque chose
+
+Avant UF-801, un cookie expiré n'allait jamais loin : la page suivante était
+privée, le middleware redirigeait vers `/login`, la reconnexion réécrivait le
+cookie. Maintenant que `/` est public, ce visiteur atteint l'écran — mais son
+navigateur continue de joindre le jeton mort à chaque appel, et l'API refuse un
+jeton **présenté** et invalide (délibérément : une session morte doit se dire).
+Il se retrouverait devant un planificateur ouvert qui refuse de calculer, sans
+rien à déconnecter pour en sortir.
+
+Le middleware efface donc ce cookie au passage. La requête suivante ne présente
+plus rien, et l'API la sert comme celle de n'importe quel visiteur.
+
+### La note à l'écran
+
+`GUEST_MODE_NOTICE` (`lib/plan-feedback.ts`), rendue par `PlanNotice` en ton
+`info` et rôle `status` : rien n'est cassé, rien n'est refusé, il n'y a aucune
+raison de couper la parole à un lecteur d'écran (C7 — WCAG 4.1.3).
+
+Elle annonce ce qui **manque** — les recherches ne sont pas conservées, le bilan
+carbone n'est pas suivi — et non ce qui est permis : le visiteur voit déjà que
+la recherche fonctionne. Ce qu'il ne peut pas deviner, c'est que ses trajets ne
+sont gardés nulle part, et il vaut mieux qu'il l'apprenne avant de compter
+dessus. Le message est une information, jamais un péage : laisser entendre qu'un
+compte est nécessaire pousserait à en créer un pour un service déjà rendu — une
+collecte obtenue par malentendu (C8).
+
+L'invitation à se connecter est un **lien** posé sous le message, pas une phrase
+dans le message : « connectez-vous » sans cible obligerait à repartir chercher
+le bouton dans l'en-tête (C7 — WCAG 2.4.4). Le lien « Itinéraires » de
+l'en-tête devient d'ailleurs visible aux visiteurs pour la même raison — sans
+lui, un visiteur parti lire la politique de confidentialité n'aurait aucun
+chemin de retour.
+
+### Recette
+
+| Recette du ticket                                 | Test                                                       |
+| ------------------------------------------------- | ---------------------------------------------------------- |
+| Un visiteur atteint le planificateur, plus de 401 | `middleware.test.ts`, `jwt-auth.guard.spec.ts`             |
+| Un connecté conserve son parcours complet         | `jwt-auth.guard.spec.ts`, `routes.service.spec.ts`         |
+| Historique / carbone / profil restent fermés      | `middleware.test.ts`, `session.test.ts`                    |
+| Pas de régression à la connexion                  | `routes.service.spec.ts` (invité ≡ connecté, sans mémoire) |

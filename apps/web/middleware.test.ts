@@ -14,6 +14,10 @@ import { middleware } from './middleware';
  * UF-603 y ajoute la politique de confidentialité, qui n'entre dans aucune des
  * deux cases habituelles : publique **sans** être un écran d'authentification.
  * C'est le cas que la version précédente du middleware traitait mal.
+ *
+ * UF-801 fait passer le planificateur (`/`) dans cette même catégorie. Les
+ * scénarios « page privée » sont donc rejoués sur `/impact`, qui, lui, reste
+ * privé : le ticket ouvre une page nommée, il n'assouplit pas la règle.
  */
 
 /** Fabrique un JWT de test (charge utile seule : le front ne vérifie pas la signature). */
@@ -46,27 +50,27 @@ function locationOf(response: Response): URL {
 
 describe('middleware — protection des routes (UF-106)', () => {
   it('redirects to /login when a private page is requested without a session', () => {
-    const response = middleware(requestFor('/'));
+    const response = middleware(requestFor('/impact'));
 
     expect(response.status).toBe(307);
     expect(locationOf(response).pathname).toBe('/login');
   });
 
   it('treats an expired token as no session at all', () => {
-    const response = middleware(requestFor('/', makeToken(-60)));
+    const response = middleware(requestFor('/impact', makeToken(-60)));
 
     expect(locationOf(response).pathname).toBe('/login');
     expect(locationOf(response).searchParams.get('reason')).toBe('auth-required');
   });
 
   it('remembers the requested page, query string included', () => {
-    const response = middleware(requestFor('/?from=Part-Dieu&to=Bellecour'));
+    const response = middleware(requestFor('/impact?days=30'));
 
-    expect(locationOf(response).searchParams.get('next')).toBe('/?from=Part-Dieu&to=Bellecour');
+    expect(locationOf(response).searchParams.get('next')).toBe('/impact?days=30');
   });
 
   it('lets a valid session reach the private page', () => {
-    const response = middleware(requestFor('/', makeToken(900)));
+    const response = middleware(requestFor('/impact', makeToken(900)));
 
     expect(response.headers.get('location')).toBeNull();
   });
@@ -80,6 +84,54 @@ describe('middleware — protection des routes (UF-106)', () => {
     const response = middleware(requestFor('/login', makeToken(900)));
 
     expect(locationOf(response).pathname).toBe('/');
+  });
+
+  describe('accès invité au planificateur (UF-801)', () => {
+    it('lets a visitor without an account reach the planner', () => {
+      const response = middleware(requestFor('/'));
+
+      // Chercher son bus ne demande pas de compte : c'est la recette 1 du ticket.
+      expect(response.headers.get('location')).toBeNull();
+    });
+
+    it('keeps the planner reachable while signed in', () => {
+      const response = middleware(requestFor('/', makeToken(900)));
+
+      // Publique ne veut pas dire « réservée aux anonymes » : `/` n'est pas un
+      // écran d'authentification, une session valide n'y est pas détournée.
+      expect(response.headers.get('location')).toBeNull();
+    });
+
+    it('keeps the personal screens closed to visitors', () => {
+      // Recette 3 : l'ouverture porte sur une page nommée, pas sur la règle.
+      for (const path of ['/impact', '/profil']) {
+        expect(locationOf(middleware(requestFor(path))).pathname).toBe('/login');
+      }
+    });
+
+    it('does not open a private page whose path merely starts like the planner', () => {
+      // `matchesAny` compare `/` à l'identique ; si un jour il tolérait le
+      // préfixe, toute l'application deviendrait publique d'un coup.
+      expect(locationOf(middleware(requestFor('/impact/details')))).toBeDefined();
+      expect(locationOf(middleware(requestFor('/impact/details'))).pathname).toBe('/login');
+    });
+
+    it('clears a dead session cookie instead of leaving it to poison API calls', () => {
+      const response = middleware(requestFor('/', makeToken(-60)));
+
+      // Sans cette purge, le navigateur continuerait de joindre un jeton expiré
+      // à `POST /routes/plan`, que l'API refuse (401) — un planificateur ouvert
+      // qui refuse de calculer, sans rien à déconnecter pour en sortir.
+      expect(response.headers.get('location')).toBeNull();
+      expect(response.headers.get('set-cookie')).toContain('access_token=');
+      expect(response.headers.get('set-cookie')).toContain('Path=/');
+    });
+
+    it('leaves a valid session cookie untouched', () => {
+      const response = middleware(requestFor('/', makeToken(900)));
+
+      expect(response.headers.get('set-cookie')).toBeNull();
+    });
   });
 
   describe('politique de confidentialité (UF-603)', () => {
@@ -111,11 +163,15 @@ describe('middleware — en-tête Content-Security-Policy (UF-604)', () => {
   });
 
   it('la pose aussi sur la redirection vers /login', () => {
-    expect(cspOf(middleware(requestFor('/')))).toContain("frame-ancestors 'none'");
+    expect(cspOf(middleware(requestFor('/impact')))).toContain("frame-ancestors 'none'");
   });
 
   it('la pose sur la redirection inverse (connecté arrivant sur /login)', () => {
     expect(cspOf(middleware(requestFor('/login', makeToken(900))))).toContain("script-src 'self'");
+  });
+
+  it('la pose sur le planificateur ouvert aux visiteurs (UF-801)', () => {
+    expect(cspOf(middleware(requestFor('/')))).toContain("default-src 'self'");
   });
 
   it('la pose sur une page publique comme la politique de confidentialité', () => {
