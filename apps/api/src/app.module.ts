@@ -2,10 +2,11 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_FILTER, APP_GUARD } from '@nestjs/core';
 import { ScheduleModule } from '@nestjs/schedule';
-import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
+import { ThrottlerModule } from '@nestjs/throttler';
 
 import { AppController } from './app.controller';
 import { GlobalExceptionFilter } from './common/filters/global-exception.filter';
+import { IpThrottlerGuard } from './common/guards/ip-throttler.guard';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { THROTTLER_OPTIONS } from './common/throttling';
 import { validateEnv } from './config/env.validation';
@@ -31,6 +32,8 @@ import { PrismaModule } from './prisma/prisma.module';
  * - Le guard de limitation de débit est déclaré **avant** le guard JWT : une
  *   rafale de requêtes anonymes doit être coupée au plus tôt, sans payer la
  *   vérification de signature ni la moindre requête en base (UF-604 — C4).
+ *   Il compte par IP, en regroupant l'IPv6 au réseau /64 (UF-802) : voir
+ *   `common/guards/ip-throttler.guard.ts`.
  * - `ScheduleModule` alimente la purge de rétention d'UF-603 : c'est la seule
  *   tâche périodique de l'API, et elle existe parce que la limitation de la
  *   conservation (C8) ne peut pas dépendre d'une action de l'utilisateur.
@@ -57,7 +60,7 @@ import { PrismaModule } from './prisma/prisma.module';
   controllers: [AppController],
   providers: [
     // L'ordre compte : les guards globaux s'exécutent dans l'ordre de déclaration.
-    { provide: APP_GUARD, useClass: ThrottlerGuard },
+    { provide: APP_GUARD, useClass: IpThrottlerGuard },
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_FILTER, useClass: GlobalExceptionFilter },
   ],

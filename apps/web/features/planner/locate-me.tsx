@@ -5,7 +5,23 @@ import { useEffect, useRef } from 'react';
 
 import { Button } from '../../components/ui/button';
 import { formatAccuracy, formatCoordinates } from '../../lib/geolocation';
-import type { UserLocationState } from './use-user-location';
+import type { ConsentScope, UserLocationState } from './use-user-location';
+
+/**
+ * Troisième question du consentement éclairé — « et ensuite ? » — répondue
+ * selon l'endroit où l'accord est réellement consigné (UF-802 — C8).
+ *
+ * Servir la phrase « révocable depuis votre profil » à un visiteur sans compte
+ * serait faux sur les deux points : rien n'est enregistré côté serveur, et il
+ * n'a pas de profil où aller. Un consentement n'est éclairé que s'il décrit ce
+ * qui se passe vraiment.
+ */
+const CONSENT_RECORD_NOTICE: Record<ConsentScope, string> = {
+  account:
+    'Votre accord est enregistré avec sa date et reste révocable à tout moment depuis votre profil.',
+  device:
+    'Vous n’êtes pas connecté : votre position sert au calcul en cours et n’est enregistrée nulle part. Votre accord est mémorisé sur cet appareil seulement, et le bouton « Effacer ma position » l’oublie.',
+};
 
 /**
  * Panneau de consentement RGPD (C8), affiché **avant** toute demande de position.
@@ -16,16 +32,20 @@ import type { UserLocationState } from './use-user-location';
  * pas qu'un contenu vient d'apparaître (C7 — WCAG 4.1.3).
  *
  * Le contenu répond aux trois questions du consentement éclairé : quelle donnée,
- * pour quoi faire, et comment revenir en arrière.
+ * pour quoi faire, et comment revenir en arrière — cette dernière dépendant de
+ * `scope`, car un invité et un titulaire de compte ne révoquent pas au même
+ * endroit (voir `CONSENT_RECORD_NOTICE`).
  */
 function ConsentPanel({
   onGrant,
   onDecline,
   busy,
+  scope,
 }: {
   onGrant: () => void;
   onDecline: () => void;
   busy: boolean;
+  scope: ConsentScope;
 }) {
   const headingRef = useRef<HTMLParagraphElement | null>(null);
 
@@ -50,8 +70,8 @@ function ConsentPanel({
       </p>
       <p className="text-xs text-ink-700">
         UrbanFlow lira les coordonnées fournies par votre navigateur pour pré-remplir votre point de
-        départ et recentrer la carte. Elles ne servent qu’au calcul de vos itinéraires. Votre accord
-        est enregistré avec sa date et reste révocable à tout moment depuis votre profil.
+        départ et recentrer la carte. Elles ne servent qu’au calcul de vos itinéraires.{' '}
+        {CONSENT_RECORD_NOTICE[scope]}
       </p>
       {/* UF-603 : « éclairé » suppose que le détail soit atteignable au moment
           du choix, pas seulement quelque part dans le pied de page (C8). */}
@@ -85,7 +105,7 @@ function ConsentPanel({
  * elle n'est jamais visible uniquement sur la carte.
  */
 export function LocateMe({ location }: { location: UserLocationState }) {
-  const { status, position, message, busy } = location;
+  const { status, position, message, busy, consentScope } = location;
 
   return (
     <div className="flex flex-col gap-2">
@@ -105,6 +125,7 @@ export function LocateMe({ location }: { location: UserLocationState }) {
           onGrant={location.grantConsent}
           onDecline={location.declineConsent}
           busy={busy}
+          scope={consentScope}
         />
       )}
 

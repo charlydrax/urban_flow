@@ -93,11 +93,57 @@ Configuration et justification des seuils : [`common/throttling.ts`](../apps/api
 | ------------------------------------ | ----------- | --------------------------------------------------------------------------------------------------------------- |
 | Tous les endpoints                   | 120 req/min | Très au-dessus d'un usage humain, assez bas pour couper un moissonnage ou une boucle de retry emballée          |
 | `POST /auth/login`, `/auth/register` | 5 req/min   | Un dictionnaire passe de milliers d'essais/minute à cinq ; cinq fautes de frappe en une minute n'arrivent pas   |
-| `POST /routes/plan`                  | 20 req/min  | Chaque appel relaie **trois** requêtes sortantes : le plafond protège aussi les quotas de nos fournisseurs (C5) |
+| `POST /routes/plan`                  | 60 req/min  | Chaque appel relaie **trois** requêtes sortantes : le plafond protège aussi les quotas de nos fournisseurs (C5) |
+
+### Le plafond du planificateur est passé de 20 à 60 (UF-802)
+
+Le seuil de 20 datait de l'époque où `/routes/plan` exigeait un compte : derrière une IP,
+il y avait **une** personne connectée. UF-801 a ouvert l'endpoint aux visiteurs, ce qui
+change la nature du compteur sans changer sa valeur — une IP publique n'est plus une
+personne, c'est un **point de sortie partagé** : wifi d'établissement, réseau
+d'entreprise, et surtout CGNAT des opérateurs mobiles, où des milliers d'abonnés sortent
+derrière la même IPv4. Vingt calculs par minute à se partager, c'était le premier arrivé
+qui consommait le quota des autres.
+
+Une recherche = **un** appel (le tri, le filtre PMR et l'ouverture du détail ne rappellent
+rien). Soixante laissent donc coexister une dizaine d'usagers simultanés derrière la même
+sortie, tout en bornant l'amplification à 180 requêtes sortantes/minute et par IP. Le
+seuil reste sous le plafond global de 120 : le planificateur ne devient pas le chemin le
+plus permissif de l'API.
+
+### La clé de comptage regroupe l'IPv6 au /64 (UF-802)
+
+`@nestjs/throttler` compte `req.ip` tel quel. En IPv4, une adresse ≈ un point de sortie :
+c'est la bonne maille. En IPv6, **non** — le moindre abonné se voit déléguer un bloc /64
+(18 milliards de milliards d'adresses) et en change gratuitement à chaque requête
+(RFC 4941). Compté à l'adresse près, un client IPv6 se donnait donc un compteur neuf à
+volonté : le plafond de l'endpoint public le plus coûteux du système était contournable
+sans rien à prouver (OWASP A04 « Insecure Design »).
+
+`IpThrottlerGuard` (`common/guards/ip-throttler.guard.ts`) redéfinit la clé via la
+fonction pure `throttleTracker` :
+
+| Adresse de la requête | Clé du compteur     |
+| --------------------- | ------------------- |
+| `203.0.113.7`         | `203.0.113.7`       |
+| `::ffff:203.0.113.7`  | `203.0.113.7`       |
+| `2001:db8:1:2:a::9`   | `2001:db8:1:2::/64` |
+
+Le /64 est le plus petit bloc qui corresponde à **un** abonné : le regroupement ne
+mutualise rien qui n'appartienne déjà à la même personne. Une adresse illisible est
+comptée entière plutôt que versée dans un compartiment commun ; une requête sans IP
+lisible tombe dans une clé unique — en cas de doute, on plafonne plus fort, on n'ouvre
+pas une voie sans compteur.
 
 Deux choix de conception à assumer en soutenance :
 
-**Le compteur est indexé sur l'IP, pas sur l'e-mail visé.** Compter par e-mail ouvrirait
+**Le compteur est indexé sur l'IP, pas sur le compte.** C'est la seule identité qu'une
+requête anonyme possède, et depuis UF-801 la majorité des appels au planificateur n'en ont
+pas d'autre : compter par utilisateur laisserait l'accès invité entièrement hors compteur,
+c'est-à-dire sans plafond. C'est aussi ce qui permet au guard de débit de rester **avant**
+le guard JWT — une rafale est coupée sans payer la moindre vérification de signature.
+
+**Sur le login, le compteur est indexé sur l'IP, pas sur l'e-mail visé.** Compter par e-mail ouvrirait
 un déni de service ciblé : n'importe qui bloquerait le compte d'un tiers en enchaînant
 des tentatives sur son adresse. Le prix à payer, c'est qu'une attaque distribuée sur un
 large parc d'IP passe sous le radar — l'argon2 du `AuthService` reste la seconde ligne.

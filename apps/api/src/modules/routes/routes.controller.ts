@@ -60,10 +60,18 @@ export class RoutesController {
    * `500` : un code d'erreur ferait croire à l'usager que sa requête est
    * fautive, alors que ce sont nos sources qui manquent (C10).
    *
-   * Endpoint **plafonné** (UF-604) : c'est le plus coûteux du système, et le
-   * seul qui amplifie une requête entrante en trois requêtes sortantes. Le
-   * plafond est compté par IP et non par compte : il couvrait déjà les appels
-   * anonymes avant qu'UF-801 ne les autorise, et n'a donc rien à rattraper.
+   * Endpoint **plafonné** (UF-604, révisé par UF-802) : c'est le plus coûteux du
+   * système, et le seul qui amplifie une requête entrante en trois requêtes
+   * sortantes. Le plafond est compté **par IP** et non par compte — c'est la
+   * seule identité qu'une requête d'invité possède, et compter par utilisateur
+   * laisserait donc l'accès public entièrement hors compteur.
+   *
+   * UF-802 en a tiré les deux conséquences qu'UF-801 avait laissées ouvertes :
+   * le seuil est passé de 20 à 60 calculs/minute, parce qu'une IP publique
+   * n'est plus une personne mais un point de sortie partagé (CGNAT mobile, wifi
+   * d'établissement) ; et les adresses IPv6 sont regroupées par réseau /64,
+   * sans quoi un client s'offrait un compteur neuf à chaque requête en changeant
+   * d'adresse dans son propre bloc. Voir `common/throttling.ts`.
    *
    * ## Invité et connecté : une seule différence
    *
