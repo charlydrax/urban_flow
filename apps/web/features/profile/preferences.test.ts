@@ -3,7 +3,6 @@ import { describe, expect, it } from 'vitest';
 
 import {
   buildProfilePatch,
-  initialsFromEmail,
   MODE_OPTIONS,
   type ProfileDraft,
   toDraft,
@@ -143,15 +142,5 @@ describe('buildProfilePatch', () => {
     expect(buildProfilePatch(draftOf(), draft)).toEqual({
       preferences: { preferredModes: [TransportMode.WALK] },
     });
-  });
-});
-
-describe('initialsFromEmail', () => {
-  it('builds initials from a first.last address', () => {
-    expect(initialsFromEmail('marie.dupont@email.fr')).toBe('MD');
-  });
-
-  it('falls back to the first two letters of the local part', () => {
-    expect(initialsFromEmail('marie@email.fr')).toBe('MA');
   });
 });

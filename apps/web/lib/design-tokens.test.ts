@@ -63,4 +63,30 @@ describe('design tokens — contrastes WCAG 2.1 AA (C7)', () => {
       expect(contrastRatio(text, background), `ton « ${tone} »`).toBeGreaterThanOrEqual(4.5);
     }
   });
+
+  /**
+   * UF-803 : le rail de navigation desktop inverse le fond — du texte de 13,5 px
+   * sur Ink 900. Aucun des couples vérifiés plus haut ne dit quoi que ce soit de
+   * celui-là, et c'est précisément là que la planche Figma se trompe : elle pose
+   * du **blanc sur Vert 500** pour l'entrée active (3.08:1), sous le seuil du
+   * texte courant. Ce test fige l'écart assumé — pastille en Vert 700 — et
+   * empêche qu'un retour à la valeur de la planche passe inaperçu.
+   */
+  describe('rail de navigation sombre (UF-803)', () => {
+    it('texte au repos sur Ink 900 ≥ 4.5:1', () => {
+      expect(contrastRatio(c.railInk, c.ink)).toBeGreaterThanOrEqual(4.5);
+    });
+
+    it('entrée active : blanc sur Vert 700 ≥ 4.5:1 (texte courant)', () => {
+      expect(contrastRatio('#ffffff', c.primaryDark)).toBeGreaterThanOrEqual(4.5);
+    });
+
+    it('la pastille active se détache du rail ≥ 3:1 (WCAG 1.4.11)', () => {
+      expect(contrastRatio(c.primaryDark, c.ink)).toBeGreaterThanOrEqual(3);
+    });
+
+    it('la valeur de la planche — blanc sur Vert 500 — échouerait, d’où l’écart', () => {
+      expect(contrastRatio('#ffffff', c.primary)).toBeLessThan(4.5);
+    });
+  });
 });

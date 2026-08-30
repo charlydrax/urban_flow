@@ -1,14 +1,16 @@
 {
   "_comment": "Poids gzip (JS + CSS) transféré au premier chargement, en octets. Généré par `npm run eco:budget -- --update` (UF-605). Toute hausse doit être justifiée dans docs/eco-conception.md.",
-  "measuredAt": "2026-08-29",
+  "measuredAt": "2026-08-30",
   "routes": {
-    "/": 132816,
-    "/profil": 123554,
-    "/impact": 122398,
-    "/login": 121828,
-    "/register": 121369,
-    "/_not-found": 118743,
-    "/confidentialite": 117916,
-    "/dev/ui": 117876
+    "/": 135593,
+    "/profil": 125711,
+    "/impact": 124702,
+    "/register": 123340,
+    "/login": 121896,
+    "/error": 121326,
+    "/global-error": 120944,
+    "/_not-found": 120465,
+    "/confidentialite": 119638,
+    "/dev/ui": 119598
   }
 }

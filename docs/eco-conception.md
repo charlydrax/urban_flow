@@ -94,21 +94,24 @@ curl -s -o /dev/null -w '%{size_download}\n' \
 
 ### 3.1 Poids des pages (gzip, premier chargement, cache vide)
 
+Mesures du 30/08/2026, après la refonte de navigation d'UF-803 (§4.3).
+
 | Route               |       JS |    CSS |        Total |
 | ------------------- | -------: | -----: | -----------: |
-| `/` (planificateur) | 122,8 ko | 6,9 ko | **129,7 ko** |
-| `/profil`           | 113,7 ko | 6,9 ko |     120,7 ko |
-| `/impact`           | 112,6 ko | 6,9 ko |     119,5 ko |
-| `/login`            | 112,0 ko | 6,9 ko |     119,0 ko |
-| `/register`         | 111,6 ko | 6,9 ko |     118,5 ko |
-| `/confidentialite`  | 108,2 ko | 6,9 ko |     115,2 ko |
+| `/` (planificateur) | 125,1 ko | 7,4 ko | **132,4 ko** |
+| `/profil`           | 115,4 ko | 7,4 ko |     122,8 ko |
+| `/impact`           | 114,4 ko | 7,4 ko |     121,8 ko |
+| `/register`         | 113,1 ko | 7,4 ko |     120,4 ko |
+| `/login`            | 111,7 ko | 7,4 ko |     119,0 ko |
+| `/confidentialite`  | 109,5 ko | 7,4 ko |     116,8 ko |
 
-**Lecture** : environ **108 ko de socle commun** (React 19 + runtime Next.js),
-identique sur toutes les pages, et **7 à 22 ko de code applicatif** par écran.
+**Lecture** : environ **109 ko de socle commun** (React 19 + runtime Next.js et,
+depuis UF-803, la navigation elle-même), identique sur toutes les pages, et **7 à
+22 ko de code applicatif** par écran.
 Le socle est le plancher du framework : il n'est pas réductible sans changer de
 framework, ce qui n'est pas une décision de ticket.
 
-Le fait que la page la plus lourde du produit reste **sous les 130 ko** tient à un
+Le fait que la page la plus lourde du produit reste **sous les 135 ko** tient à un
 choix antérieur qui vaut d'être souligné : **MapLibre (~250 ko gzip) n'est dans
 aucune de ces lignes**. Il est chargé dynamiquement (`apps/web/components/map/lazy-map.tsx`),
 et sa feuille de style l'accompagne dans le même morceau — d'où un CSS partagé de
@@ -219,6 +222,40 @@ avec la route et l'écart.
 Tolérance de 512 octets au-dessus du budget : un build n'est pas parfaitement
 déterministe, et un garde-fou qui crie au loup sur du bruit finit ignoré — le
 pire sort possible pour un garde-fou.
+
+#### Ce que le budget a effectivement attrapé (UF-803)
+
+La refonte de la navigation a été la première hausse à passer devant ce
+garde-fou, et il a servi deux fois plutôt qu'une.
+
+**Le défaut qu'il a révélé : +3,5 ko sur huit routes, dont sept ne s'en
+servaient pas.** Le rail de navigation affiche les initiales du compte connecté,
+et appelait pour cela `initialsFromEmail` — une fonction de six lignes, mais
+logée dans `features/profile/preferences.ts`. Or ce module importe
+`RoutePriority` et `TransportMode` depuis `@urbanflow/shared` : des
+**énumérations**, donc des valeurs d'exécution, pas des types effacés à la
+compilation. Comme le rail est monté par le layout racine, tout cela est parti
+dans le lot commun — la politique de confidentialité payait les libellés du
+formulaire de profil.
+
+La correction tient en un module feuille sans aucun import
+([`apps/web/lib/initials.ts`](../apps/web/lib/initials.ts)) : **−1,8 ko sur
+toutes les routes**. La leçon est plus large que le cas : _ce qu'un composant de
+la coque importe est payé par chaque page, y compris celles qui ne l'affichent
+jamais._ Une fonction utilitaire partagée entre une feature et la coque doit
+vivre dans `lib/`, pas dans la feature.
+
+Deuxième passe, même logique : `MobileBrandBar` n'a ni état ni gestionnaire
+d'événement. Sortie du module `'use client'` d'`AppNav`, elle redevient un Server
+Component — son balisage est rendu une fois côté serveur au lieu d'être
+réexécuté dans le navigateur.
+
+**La hausse résiduelle, elle, est assumée : +1,7 ko gzip de socle commun**
+(+1,5 %). Elle achète une navigation réellement plus riche que l'en-tête qu'elle
+remplace — quatre pictogrammes SVG, deux agencements (onglets / rail) et le bloc
+de compte du rail — pour un coût inférieur à celui du seul détour d'import
+corrigé ci-dessus. Les budgets ont été réajustés en conséquence
+(`npm run eco:budget -- --update`).
 
 ---
 

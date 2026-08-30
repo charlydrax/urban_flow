@@ -2,7 +2,8 @@ import type { Metadata, Viewport } from 'next';
 import { Bricolage_Grotesque, JetBrains_Mono, Plus_Jakarta_Sans } from 'next/font/google';
 import Link from 'next/link';
 
-import { SiteHeader } from '../components/layout/site-header';
+import { AppNav } from '../components/layout/app-nav';
+import { MobileBrandBar } from '../components/layout/mobile-brand-bar';
 import { OfflineBanner } from '../components/offline/offline-banner';
 import { ServiceWorkerRegister } from '../components/service-worker-register';
 import { SessionProvider } from '../features/auth/session-provider';
@@ -57,12 +58,21 @@ export const viewport: Viewport = {
  * Couvre :
  * - C7 (WCAG 2.1 AA) : `lang="fr"`, lien d'évitement, landmarks header/nav/main/footer,
  *   focus visible (globals.css), contrastes AA (vérifiés par lib/design-tokens.test.ts).
- * - C2 : mobile-first (navigation repliable, viewport configuré).
+ * - C2 : mobile-first (barre d'onglets basse / rail desktop, viewport configuré).
  * - C1/C10 : manifest lié, enregistrement du service worker, et indicateur
  *   global « mode hors-ligne » (UF-601).
  * - C4/C11 (UF-106) : l'état de session est résolu **côté serveur** depuis le
  *   cookie httpOnly et diffusé par `SessionProvider` — aucun token en JS, et
  *   pas de flash « déconnecté » au chargement.
+ *
+ * ## Deux colonnes à partir de `lg` (UF-803)
+ *
+ * La coque passe d'une colonne unique à un **duo rail + contenu** au-delà de
+ * 1024 px : `<body>` devient une rangée flex, `AppNav` en occupe la première
+ * piste (230 px, cf. planche « 03 · Maquettes desktop ») et tout le reste — barre
+ * de marque mobile, bandeau hors-ligne, contenu, pied de page — vit dans la
+ * seconde. Sous `lg`, la rangée redevient une colonne et `AppNav` se replie en
+ * barre d'onglets fixée en bas de l'écran.
  */
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const user = await getServerSession();
@@ -78,51 +88,76 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         une page courte — bilan carbone vide, écran de chargement — le pied de
         page remontait donc au milieu de la fenêtre, sous une bande de fond
         vide. Il est désormais poussé en bas.
+
+        `lg:flex-row` (UF-803) bascule la même coque en deux pistes au-delà de
+        1024 px — rail sombre, puis contenu. La colonne intérieure reprend le
+        `flex-col` : c'est elle qui pousse maintenant le pied de page en bas.
       */}
-      <body className="flex min-h-dvh flex-col bg-surface font-sans text-ink antialiased">
+      <body className="flex min-h-dvh flex-col bg-surface font-sans text-ink antialiased lg:flex-row">
         <SessionProvider initialUser={user}>
           <a href="#contenu" className="skip-link">
             Aller au contenu principal
           </a>
 
-          <SiteHeader />
+          {/*
+            La navigation est placée **avant** le contenu dans le DOM : c'est
+            l'ordre attendu à la tabulation et à la lecture d'écran, quelle que
+            soit la position visuelle qu'en donne le CSS (barre du bas sur
+            mobile, colonne de gauche sur desktop) — C7, WCAG 1.3.2 / 2.4.3.
+            Le lien d'évitement, lui, la précède : c'est sa raison d'être.
+          */}
+          <AppNav />
 
           {/*
-            Indicateur global de perte de connexion (UF-601, C10) : entre
-            l'en-tête et le contenu, donc visible dès le premier coup d'oeil sur
-            n'importe quelle page, sans recouvrir la navigation.
+            Colonne de contenu. `min-w-0` : sans plancher à zéro, une grille ou
+            un tableau large de la page repousserait la piste au-delà de la
+            fenêtre à côté du rail (le défaut corrigé par UF-606, §1.1).
+
+            `pb-…` réserve la hauteur de la barre d'onglets, qui est en
+            `position: fixed` et ne pousse donc rien : sans cette réserve, le
+            pied de page et le dernier bouton de chaque écran passeraient
+            dessous. La réserve disparaît à `lg`, où le rail est dans le flux.
           */}
-          <OfflineBanner />
+          <div className="flex w-full min-w-0 flex-1 flex-col pb-[calc(4.5rem+env(safe-area-inset-bottom))] lg:pb-0">
+            <MobileBrandBar />
 
-          {/*
-            `max-w-7xl` (1280 px) et non plus `max-w-5xl` (1024 px) — UF-606, C2.
+            {/*
+              Indicateur global de perte de connexion (UF-601, C10) : en tête de
+              la colonne de contenu, donc visible dès le premier coup d'oeil sur
+              n'importe quelle page, sans recouvrir la navigation.
+            */}
+            <OfflineBanner />
 
-            Les maquettes « 03 · MAQUETTES DESKTOP » sont dessinées à 1440 px et
-            posent le planificateur en vue scindée, carte large à droite. Bridée
-            à 1024 px, la carte tombait à ~470 px sur un écran de 1440 : plus
-            étroite que sur la maquette, alors que c'est l'écran de démonstration.
+            {/*
+              `max-w-7xl` (1280 px) et non plus `max-w-5xl` (1024 px) — UF-606, C2.
 
-            Ce plafond est celui des **pages larges** (planificateur, tableau de
-            bord carbone). Les pages de lecture et de formulaire — politique de
-            confidentialité, profil — reposent leur propre plafond, plus étroit :
-            une ligne de texte de 1280 px de long ne se lit pas (C7).
-          */}
-          <main id="contenu" className="mx-auto w-full max-w-7xl flex-1 px-4 py-6">
-            {children}
-          </main>
+              Les maquettes « 03 · MAQUETTES DESKTOP » sont dessinées à 1440 px et
+              posent le planificateur en vue scindée, carte large à droite. Bridée
+              à 1024 px, la carte tombait à ~470 px sur un écran de 1440 : plus
+              étroite que sur la maquette, alors que c'est l'écran de démonstration.
 
-          <footer className="border-t border-ink-200 bg-white">
-            <div className="mx-auto max-w-7xl px-4 py-4 text-sm">
-              <p>UrbanFlow Mobility — prototype T6 CDSD. </p>
-              {/* UF-603 : la politique de confidentialité est joignable depuis
-                  n'importe quelle page, connecté ou non — c'est la condition
-                  d'un consentement éclairé (C8). Elle pointait sur `/` en
-                  attendant l'écran, livré par ce ticket. */}
-              <Link href="/confidentialite" className="underline underline-offset-4">
-                Politique de confidentialité (RGPD)
-              </Link>
-            </div>
-          </footer>
+              Ce plafond est celui des **pages larges** (planificateur, tableau de
+              bord carbone). Les pages de lecture et de formulaire — politique de
+              confidentialité, profil — reposent leur propre plafond, plus étroit :
+              une ligne de texte de 1280 px de long ne se lit pas (C7).
+            */}
+            <main id="contenu" className="mx-auto w-full max-w-7xl flex-1 px-4 py-6">
+              {children}
+            </main>
+
+            <footer className="border-t border-ink-200 bg-white">
+              <div className="mx-auto max-w-7xl px-4 py-4 text-sm">
+                <p>UrbanFlow Mobility — prototype T6 CDSD. </p>
+                {/* UF-603 : la politique de confidentialité est joignable depuis
+                    n'importe quelle page, connecté ou non — c'est la condition
+                    d'un consentement éclairé (C8). Elle pointait sur `/` en
+                    attendant l'écran, livré par ce ticket. */}
+                <Link href="/confidentialite" className="underline underline-offset-4">
+                  Politique de confidentialité (RGPD)
+                </Link>
+              </div>
+            </footer>
+          </div>
 
           <ServiceWorkerRegister />
         </SessionProvider>
