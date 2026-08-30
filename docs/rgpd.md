@@ -61,16 +61,48 @@ pas les textes :
 3. **L'accord est horodaté côté serveur.** `PATCH /api/users/me` pose
    `users.consent_at` avec l'horloge du serveur, jamais celle du poste client.
 
-Corollaire assumé : **si l'API est injoignable, on ne géolocalise pas.** Sans
-possibilité de tracer le consentement, la collecte n'a pas lieu. L'application reste
-utilisable — la saisie manuelle d'une adresse ne dépend d'aucun consentement.
+Corollaire assumé : **si l'API est injoignable, on ne géolocalise pas un utilisateur
+connecté.** Sans possibilité de tracer le consentement, la collecte n'a pas lieu.
+L'application reste utilisable — la saisie manuelle d'une adresse ne dépend d'aucun
+consentement.
 
 La révocation efface la date (`consent_at = NULL`) : il ne reste pas de trace d'un
 consentement retiré. À l'inverse, ré-enregistrer ses préférences ne réécrit **pas**
 la date du consentement initial, qui fait foi.
 
+### Le cas du visiteur sans compte (UF-802)
+
+Depuis qu'UF-801 a ouvert le planificateur à tous, la moitié des personnes qui cliquent
+sur « Me localiser » n'ont ni compte, ni ligne en base où poser une date. Les trois temps
+ci-dessus restent identiques ; seul le **troisième** change de support : l'accord est
+mémorisé dans le `localStorage` de l'appareil, et nulle part ailleurs.
+
+Ce n'est pas un affaiblissement, c'est ce que la minimisation impose. Les deux autres
+issues étaient pires :
+
+| Option                                     | Pourquoi elle est écartée / retenue                                                   |
+| ------------------------------------------ | ------------------------------------------------------------------------------------- |
+| Exiger un compte pour se localiser         | Ré-enferme l'invité derrière l'inscription qu'UF-801 venait de retirer                |
+| Créer un identifiant serveur pour l'invité | Collecter **plus** de données pour tracer un accord de ne rien collecter (art. 5-1-c) |
+| **Mémoriser l'accord sur l'appareil**      | ✅ Retenue : la donnée reste chez la personne concernée                               |
+
+Il n'y a d'ailleurs rien à opposer côté serveur : la position d'un invité sert au calcul
+en cours et **n'est écrite nulle part** (`searchHistoryId: null` — aucune ligne
+`search_history` n'est créée sans compte).
+
+**Retrait** (art. 7-3, aussi simple que l'accord) : le bouton « Effacer ma position »
+oublie l'accord mémorisé, en plus de la position affichée. Un invité n'a pas d'écran de
+profil où aller le révoquer ; c'est donc ici que le retrait doit être possible. Pour un
+compte, le même bouton n'efface que l'écran — la révocation reste au profil, annoncée
+comme telle.
+
+Le panneau de consentement dit ce qui est vrai dans chaque cas : promettre à un visiteur
+une révocation « depuis votre profil » serait faux sur les deux points, et un
+consentement décrivant mal ce qui se passe n'est pas éclairé.
+
 Implémentation : [`use-user-location.ts`](../apps/web/features/planner/use-user-location.ts),
 [`locate-me.tsx`](../apps/web/features/planner/locate-me.tsx),
+[`geolocation-consent.ts`](../apps/web/lib/geolocation-consent.ts),
 [`users.service.ts`](../apps/api/src/modules/users/users.service.ts).
 
 ---

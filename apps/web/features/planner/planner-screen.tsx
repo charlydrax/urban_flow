@@ -76,11 +76,15 @@ const LOCATED_ZOOM = 15;
  * Server Component, et MapLibre continue d'arriver en chargement différé.
  */
 export function PlannerScreen() {
-  const location = useUserLocation();
-  const { position } = location;
-
   const { status: sessionStatus } = useSession();
   const isGuest = sessionStatus !== 'authenticated';
+
+  // La session est lue AVANT la géolocalisation : depuis UF-802, « Me
+  // localiser » n'emprunte pas le même chemin selon qu'il y a un compte ou non
+  // (accord lu côté API, ou sur l'appareil — voir `useUserLocation`).
+  const location = useUserLocation(isGuest);
+  const { position } = location;
+
   const history = useSearchHistory(!isGuest);
 
   // La recherche prévient l'historique dès que l'API confirme l'avoir écrite :

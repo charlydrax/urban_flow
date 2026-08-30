@@ -11,33 +11,34 @@ F2 », « 03 · Maquettes desktop → DESKTOP 2 : PLANIFICATEUR ».
 
 ## Fichiers
 
-| Fichier                           | Rôle                                                                     |
-| --------------------------------- | ------------------------------------------------------------------------ |
-| `planner-screen.tsx`              | Frontière client : partage position, itinéraires et historique           |
-| `planner-form.tsx`                | État du trajet, géolocalisation → départ, inversion, soumission          |
-| `use-route-plan.ts`               | Appel `POST /routes/plan`, état de la recherche, sélection (UF-403)      |
-| `itinerary-list.tsx`              | Panneau de résultats — groupe radio de cartes comparables (UF-404)       |
-| `itinerary-card.tsx`              | Carte d'un itinéraire : durée, séquence de modes, CO₂, horaires (UF-404) |
-| `itinerary-sort-toggle.tsx`       | Sélecteur de tri « Écologique / Rapide » du panneau (UF-503)             |
-| `carbon-breakdown.tsx`            | Détail CO₂ de l'option retenue : segment, facteur, comparaison (UF-501)  |
-| `itinerary-skeleton.tsx`          | Esquisse du panneau pendant le calcul — réserve la place (UF-405)        |
-| `plan-notice.tsx`                 | Message d'état : vide, panne, session expirée, mode dégradé (UF-405)     |
-| `planner-screen.tsx` (note)       | Bandeau « sans compte » du visiteur + lien de connexion (UF-801)         |
-| `trip-fields.tsx`                 | Carte départ/arrivée de la maquette + bouton d'inversion                 |
-| `address-autocomplete.tsx`        | Champ d'adresse au motif ARIA « combobox » + liste de suggestions        |
-| `use-address-search.ts`           | Débounce 300 ms, annulation de la requête précédente, états de recherche |
-| `locate-me.tsx`                   | Bouton « Me localiser », panneau de consentement, comptes rendus         |
-| `use-user-location.ts`            | Machine à états du parcours (consentement → permission → position)       |
-| `recent-searches.tsx`             | Trajets récents recliquables affichés sous les champs (UF-204)           |
-| `use-search-history.ts`           | Lecture unique de l'historique, entretenue localement ensuite (UF-204)   |
-| `../../lib/itinerary-cards.ts`    | Itinéraire → séquence de modes, horaires, phrase lue (pur, testé)        |
-| `../../lib/carbon-breakdown.ts`   | Détail carbone publié → lignes, barres, phrase lue (pur, testé)          |
-| `../../lib/carbon-badge.ts`       | Empreinte publiée → pastille, niveau, comparaison voiture (pur, testé)   |
-| `../../lib/plan-feedback.ts`      | Erreur ou état des sources → message et rôle ARIA (pur, testé)           |
-| `../../lib/route-map-layers.ts`   | Itinéraires → GeoJSON, emprise, repères, légende (pur, testé)            |
-| `../../lib/geocoding.ts`          | Appels BAN normalisés : recherche, géocodage inverse (pur, testé)        |
-| `../../lib/geolocation.ts`        | Appel `navigator.geolocation` normalisé + formats (pur, testé)           |
-| `../../lib/format-search-date.ts` | Libellés « aujourd'hui, 09:12 » / « hier » / date courte (pur, testé)    |
+| Fichier                            | Rôle                                                                     |
+| ---------------------------------- | ------------------------------------------------------------------------ |
+| `planner-screen.tsx`               | Frontière client : partage position, itinéraires et historique           |
+| `planner-form.tsx`                 | État du trajet, géolocalisation → départ, inversion, soumission          |
+| `use-route-plan.ts`                | Appel `POST /routes/plan`, état de la recherche, sélection (UF-403)      |
+| `itinerary-list.tsx`               | Panneau de résultats — groupe radio de cartes comparables (UF-404)       |
+| `itinerary-card.tsx`               | Carte d'un itinéraire : durée, séquence de modes, CO₂, horaires (UF-404) |
+| `itinerary-sort-toggle.tsx`        | Sélecteur de tri « Écologique / Rapide » du panneau (UF-503)             |
+| `carbon-breakdown.tsx`             | Détail CO₂ de l'option retenue : segment, facteur, comparaison (UF-501)  |
+| `itinerary-skeleton.tsx`           | Esquisse du panneau pendant le calcul — réserve la place (UF-405)        |
+| `plan-notice.tsx`                  | Message d'état : vide, panne, session expirée, mode dégradé (UF-405)     |
+| `planner-screen.tsx` (note)        | Bandeau « sans compte » du visiteur + lien de connexion (UF-801)         |
+| `trip-fields.tsx`                  | Carte départ/arrivée de la maquette + bouton d'inversion                 |
+| `address-autocomplete.tsx`         | Champ d'adresse au motif ARIA « combobox » + liste de suggestions        |
+| `use-address-search.ts`            | Débounce 300 ms, annulation de la requête précédente, états de recherche |
+| `locate-me.tsx`                    | Bouton « Me localiser », panneau de consentement, comptes rendus         |
+| `use-user-location.ts`             | Machine à états du parcours (consentement → permission → position)       |
+| `../../lib/geolocation-consent.ts` | Accord d'un invité mémorisé sur l'appareil (UF-802, pur, testé)          |
+| `recent-searches.tsx`              | Trajets récents recliquables affichés sous les champs (UF-204)           |
+| `use-search-history.ts`            | Lecture unique de l'historique, entretenue localement ensuite (UF-204)   |
+| `../../lib/itinerary-cards.ts`     | Itinéraire → séquence de modes, horaires, phrase lue (pur, testé)        |
+| `../../lib/carbon-breakdown.ts`    | Détail carbone publié → lignes, barres, phrase lue (pur, testé)          |
+| `../../lib/carbon-badge.ts`        | Empreinte publiée → pastille, niveau, comparaison voiture (pur, testé)   |
+| `../../lib/plan-feedback.ts`       | Erreur ou état des sources → message et rôle ARIA (pur, testé)           |
+| `../../lib/route-map-layers.ts`    | Itinéraires → GeoJSON, emprise, repères, légende (pur, testé)            |
+| `../../lib/geocoding.ts`           | Appels BAN normalisés : recherche, géocodage inverse (pur, testé)        |
+| `../../lib/geolocation.ts`         | Appel `navigator.geolocation` normalisé + formats (pur, testé)           |
+| `../../lib/format-search-date.ts`  | Libellés « aujourd'hui, 09:12 » / « hier » / date courte (pur, testé)    |
 
 ## Recherche d'adresses (UF-203) — C5 / C9 / C7
 
@@ -162,14 +163,16 @@ qui refuserait la frappe libre, et un formulaire qui accepterait « chez moi » 
 clic « Me localiser »
       │
       ├─ consentement déjà enregistré ? ──oui──┐
-      │            (GET /users/me)             │
+      │   connecté → GET /users/me             │
+      │   invité   → localStorage (UF-802)     │
       │                                        │
       └─non→ panneau de consentement           │
                  │            │                │
             « Non merci »  « Autoriser »       │
                  │            │                │
-                 │      PATCH /users/me        │
-                 │   {geolocationConsent:true} │
+                 │   connecté → PATCH /users/me│
+                 │            {geolocationConsent:true}
+                 │   invité   → localStorage   │
                  │            │                │
                  ▼            ▼                ▼
           saisie manuelle    navigator.geolocation.getCurrentPosition()
@@ -181,20 +184,52 @@ clic « Me localiser »
      + départ pré-rempli        manuelle           manuelle
 ```
 
+### Invité et connecté : deux façons de consigner l'accord (UF-802)
+
+`getProfile()` ouvrait le parcours **quelle que soit** la personne. Sur un
+visiteur sans compte, cet appel répond `401` : « Me localiser » échouait donc
+systématiquement, et précisément sur l'écran qu'UF-801 venait d'ouvrir à tous.
+La géolocalisation est une capacité du navigateur — elle n'a jamais eu besoin
+d'un profil pour fonctionner, seulement d'un accord.
+
+|                                 | Connecté                               | Invité                             |
+| ------------------------------- | -------------------------------------- | ---------------------------------- |
+| Lecture de l'accord             | `GET /users/me`                        | `localStorage` de l'appareil       |
+| Écriture de l'accord            | `PATCH /users/me` (horodatage serveur) | `localStorage`                     |
+| Appels réseau pour se localiser | 1 à 2                                  | **aucun** (C5)                     |
+| Révocation                      | écran Profil (UF-107)                  | « Effacer ma position », sur place |
+
+Pourquoi l'appareil et pas la base : un invité n'a ni identifiant ni ligne où
+poser une date. Lui en créer un reviendrait à **collecter plus de données pour
+tracer un accord de ne rien collecter** — l'inverse de la minimisation (C8). Et
+il n'y a rien à opposer côté serveur, puisque la position d'un invité sert au
+calcul en cours et n'est écrite nulle part (`searchHistoryId: null`).
+
+Le panneau de consentement dit donc les choses différemment selon le cas
+(`CONSENT_RECORD_NOTICE` dans `locate-me.tsx`) : promettre à un visiteur une
+révocation « depuis votre profil » serait faux sur les deux points.
+
+Pour un invité, « Effacer ma position » **retire aussi l'accord** de l'appareil :
+c'est son seul chemin de retrait, et le retrait doit être aussi simple que
+l'accord (RGPD art. 7-3). Pour un compte, le même bouton n'efface que l'écran —
+révoquer en douce derrière un libellé qui n'annonce que la position serait une
+surprise, pas une garantie.
+
 ### Deux consentements, à ne pas confondre
 
-|                           | Qui le détient                          | Ce qu'il prouve                                           | Où le retirer          |
-| ------------------------- | --------------------------------------- | --------------------------------------------------------- | ---------------------- |
-| **Consentement RGPD**     | notre base (`User.consentAt`, horodaté) | l'utilisateur a accepté que l'app **utilise** sa position | écran Profil (UF-107)  |
-| **Permission navigateur** | le navigateur                           | l'utilisateur laisse le site **lire** le capteur          | réglages du navigateur |
+|                           | Qui le détient                                               | Ce qu'il prouve                                           | Où le retirer                            |
+| ------------------------- | ------------------------------------------------------------ | --------------------------------------------------------- | ---------------------------------------- |
+| **Consentement RGPD**     | notre base (`User.consentAt`) — ou l'appareil pour un invité | l'utilisateur a accepté que l'app **utilise** sa position | écran Profil, ou « Effacer ma position » |
+| **Permission navigateur** | le navigateur                                                | l'utilisateur laisse le site **lire** le capteur          | réglages du navigateur                   |
 
 Le premier est **traçable et opposable** (recette 4 du ticket) : c'est le serveur
 qui horodate, pas l'horloge du poste client. Le second est un verrou technique
 qu'on ne contrôle pas. Les deux sont exigés avant toute lecture de position.
 
-Conséquence assumée : **si l'API est injoignable, on ne géolocalise pas** — sans
-trace de consentement, pas de collecte. L'écran le dit et renvoie vers la saisie
-manuelle.
+Conséquence assumée : **si l'API est injoignable, on ne géolocalise pas un
+utilisateur connecté** — sans trace de consentement, pas de collecte. L'écran le
+dit et renvoie vers la saisie manuelle. Un invité, lui, n'a rien à demander à
+l'API : son parcours reste entier hors ligne.
 
 ### Ce que le code ne fait pas, volontairement
 
@@ -320,7 +355,7 @@ clic (WCAG 2.4.4). La zone cliquable fait 44 px de haut (WCAG 2.5.5).
 ## Tests
 
 ```bash
-cd apps/web && npm run test    # lib/geolocation.test.ts + lib/geocoding.test.ts
+cd apps/web && npm run test    # lib/geolocation*.test.ts + lib/geocoding.test.ts
 ```
 
 `geolocation.test.ts` couvre la normalisation des trois cas d'échec GPS,
@@ -353,8 +388,22 @@ avec les segments (c'est de là que viennent « Part-Dieu → Saxe » et « Bus 
 la division par un total nul d'un itinéraire tout-marche, et le silence complet
 quand l'itinéraire ne porte pas de détail.
 
-Les tests de composants (jsdom + Testing Library) restent à ajouter. La logique
-d'UF-403 a été poussée dans un module **pur** (`lib/route-map-layers.ts`)
+`geolocation-consent.test.ts` (UF-802) couvre l'accord d'un invité : mémorisé
+sur l'appareil, relu sans réseau, retirable, et **jamais supposé** quand le
+stockage est indisponible (rendu serveur, navigation privée, politique
+d'entreprise) — dans ce cas on redemande, on n'ouvre pas la géolocalisation. Le
+stockage y est injecté : le module reste pur, donc testé en environnement `node`.
+
+`use-user-location.test.tsx` (UF-802) est le premier test de **hook** du module,
+et il est en `.tsx` pour tomber dans la suite jsdom (`vitest.config.ts`).
+Il démontre les recettes 1 et 2 du ticket : en invité, `getProfile` n'est
+**jamais** appelé — le défaut corrigé était un défaut de parcours, pas
+d'affichage — et l'accord ne quitte pas l'appareil ; en connecté, le parcours
+passe toujours par l'API et l'horodatage serveur, et « Effacer ma position » ne
+révoque rien.
+
+Les autres tests de composants (jsdom + Testing Library) restent à ajouter. La
+logique d'UF-403 a été poussée dans un module **pur** (`lib/route-map-layers.ts`)
 précisément pour être couverte sans eux ; ce qui reste dans les composants et les
 hooks est de l'orchestration React et des appels MapLibre.
 
