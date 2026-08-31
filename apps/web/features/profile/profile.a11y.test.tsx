@@ -34,6 +34,7 @@ const PROFILE: UserProfile = {
     priority: RoutePriority.GREENEST,
     maxWalkMinutes: 15,
     reducedMobility: false,
+    monthlyCarbonGoalGrams: null,
   },
 };
 

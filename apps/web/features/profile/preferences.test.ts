@@ -28,6 +28,7 @@ const profile: UserProfile = {
     preferredModes: [TransportMode.WALK, TransportMode.METRO],
     priority: RoutePriority.GREENEST,
     reducedMobility: false,
+    monthlyCarbonGoalGrams: null,
     maxWalkMinutes: 15,
   },
 };

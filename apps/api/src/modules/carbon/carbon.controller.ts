@@ -14,6 +14,7 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { AuthenticatedUser } from '../../common/strategies/jwt.strategy';
 import { CarbonService } from './carbon.service';
 import { CarbonSummaryDto, CarbonSummaryQueryDto } from './dto/carbon-summary.dto';
+import { CarbonTripsPageDto } from './dto/carbon-trips.dto';
 
 /**
  * Contrôleur du suivi carbone personnel (fonctionnalité au choix retenue).
@@ -54,5 +55,29 @@ export class CarbonController {
     @Query() query: CarbonSummaryQueryDto,
   ): Promise<CarbonSummaryDto> {
     return this.carbonService.getSummary(user.userId, query.days ?? DEFAULT_CARBON_SUMMARY_DAYS);
+  }
+
+  /**
+   * Trajets valorisés de la période — le tableau « Détail par trajet » de la
+   * planche (UF-805), et la matière de l'export.
+   *
+   * Endpoint distinct de `/summary` plutôt qu'un champ de plus dans son corps :
+   * les deux n'ont ni la même taille ni la même durée de vie utile. Le résumé
+   * tient en quelques centaines d'octets et se recharge à chaque changement de
+   * période ; la liste des trajets peut peser cent fois plus et n'est demandée
+   * que lorsque l'usager déplie le tableau (C5/C10).
+   *
+   * Même périmètre de lecture que partout ici : le compte vient du JWT, et
+   * aucun identifiant n'est accepté (C4 / OWASP A01).
+   */
+  @Get('trips')
+  @ApiOperation({ summary: 'Trajets valorisés du compte connecté sur les N derniers jours' })
+  @ApiOkResponse({ type: CarbonTripsPageDto })
+  @ApiBadRequestResponse({ description: '`days` hors de la liste autorisée (7, 30 ou 90).' })
+  listTrips(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: CarbonSummaryQueryDto,
+  ): Promise<CarbonTripsPageDto> {
+    return this.carbonService.listTrips(user.userId, query.days ?? DEFAULT_CARBON_SUMMARY_DAYS);
   }
 }

@@ -96,6 +96,20 @@ est son auteur.
 à la lecture. Le barème est explicitement provisoire ; un bilan personnel dont
 les mois passés se réécriraient à chaque affinage ne serait pas un historique.
 
+**Depuis UF-805, l'appel dépose aussi la ventilation par mode** du trajet retenu
+(`trip_mode_footprints`, module `carbon`) : une ligne par mode emprunté, avec sa
+distance cumulée et son empreinte. Sans elle, la répartition par mode et la
+colonne « Distance » du tableau par trajet de la planche restaient
+incalculables — `search_history` ne conserve que deux points, et la distance à
+vol d'oiseau n'est pas celle du trajet réel.
+
+Les deux écritures sont dans **une seule transaction**, et la seconde n'est
+atteinte que si l'`UPDATE` filtré sur `(id, user_id)` a bien touché une ligne :
+l'effacement des ventilations ne porte que sur `search_history_id`, sans filtre
+de propriétaire, et c'est cet ordre qui empêche d'effacer la ventilation d'un
+trajet d'autrui en devinant son UUID (OWASP A01). Un second choix sur la même
+recherche **remplace** la ventilation au lieu de s'y ajouter.
+
 **L'UUID vient du chemin, donc du client** : `ParseUUIDPipe` refuse en `400` ce
 qui n'est pas un identifiant avant que la valeur n'atteigne le SQL, et le `WHERE`
 porte sur le **couple** `(id, user_id)` — viser la ligne d'un autre compte ne met

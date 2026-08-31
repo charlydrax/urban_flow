@@ -49,6 +49,7 @@ interface FakeProfile {
   priority: string;
   reducedMobility: boolean;
   maxWalkMinutes: number;
+  monthlyCarbonGoalGrams: number | null;
   updatedAt: Date;
 }
 
@@ -257,6 +258,9 @@ describe('UsersController — profil de mobilité (UF-107) et effacement (UF-603
           priority: 'GREENEST',
           reducedMobility: false,
           maxWalkMinutes: 15,
+          // UF-805 : un compte neuf n'a pas d'objectif carbone, et `null` dit
+          // exactement cela — « pas encore choisi », pas « objectif à zéro ».
+          monthlyCarbonGoalGrams: null,
         },
       });
     });
@@ -291,9 +295,41 @@ describe('UsersController — profil de mobilité (UF-107) et effacement (UF-603
         priority: 'FASTEST',
         reducedMobility: true,
         maxWalkMinutes: 30,
+        monthlyCarbonGoalGrams: null,
       });
     });
 
+    /**
+     * UF-805 — l'objectif carbone a **trois** états, et le troisième est celui
+     * qu'on oublie : le retirer. Un objectif qu'on ne pourrait qu'augmenter
+     * indéfiniment ne serait pas retirable, or « je ne me fixe plus de budget »
+     * n'est pas « mon budget est très grand ».
+     */
+    it('sets, replaces and clears the monthly carbon goal (UF-805)', async () => {
+      const read = async (): Promise<number | null> => {
+        const body = (await (await getProfile(MARIE)).json()) as {
+          preferences: { monthlyCarbonGoalGrams: number | null };
+        };
+        return body.preferences.monthlyCarbonGoalGrams;
+      };
+
+      await patchProfile(MARIE, { preferences: { monthlyCarbonGoalGrams: 16_000 } });
+      expect(await read()).toBe(16_000);
+
+      // Un PATCH qui ne parle pas de l'objectif ne doit pas l'effacer :
+      // c'est toute la sémantique partielle de la méthode.
+      await patchProfile(MARIE, { preferences: { maxWalkMinutes: 20 } });
+      expect(await read()).toBe(16_000);
+
+      await patchProfile(MARIE, { preferences: { monthlyCarbonGoalGrams: null } });
+      expect(await read()).toBeNull();
+    });
+
+    it('rejects a carbon goal below the accepted floor (C4)', async () => {
+      const res = await patchProfile(MARIE, { preferences: { monthlyCarbonGoalGrams: 10 } });
+
+      expect(res.status).toBe(400);
+    });
     it('records and revokes the geolocation consent (C8)', async () => {
       const granted = (await (await patchProfile(MARIE, { geolocationConsent: true })).json()) as {
         geolocationConsentAt: string | null;

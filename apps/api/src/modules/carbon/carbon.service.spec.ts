@@ -1,4 +1,5 @@
 import { Test } from '@nestjs/testing';
+import { CARBON_TRIPS_MAX } from '@urbanflow/shared';
 
 import { TransportMode } from '../../common/enums/transport-mode.enum';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -22,6 +23,8 @@ import { CAR_REFERENCE_GRAMS_PER_KM, segmentCarbonGrams } from './emission-facto
 describe('CarbonService', () => {
   let service: CarbonService;
   let queryRaw: jest.Mock;
+  let findProfile: jest.Mock;
+  let findModeFootprints: jest.Mock;
 
   /** Segment d'essai — seuls le mode et la distance entrent dans le calcul. */
   const segment = (
@@ -43,9 +46,21 @@ describe('CarbonService', () => {
     // de vérifier séparément le texte de la requête et ses paramètres — et de
     // prouver qu'aucune donnée client n'y est concaténée (C4 / OWASP A03).
     queryRaw = jest.fn().mockResolvedValue([]);
+    findProfile = jest.fn().mockResolvedValue(null);
+    findModeFootprints = jest.fn().mockResolvedValue([]);
+
+    // Depuis UF-805, `getSummary` lit aussi la ventilation par mode (second
+    // appel à `$queryRaw`) et l'objectif du profil ; `listTrips` lit en plus
+    // `trip_mode_footprints` par le client typé. Les assertions historiques
+    // portent sur `calls[0]`, qui reste la requête d'agrégat des tranches.
+    const prismaMock = {
+      $queryRaw: queryRaw,
+      mobilityProfile: { findUnique: findProfile },
+      tripModeFootprint: { findMany: findModeFootprints },
+    };
 
     const moduleRef = await Test.createTestingModule({
-      providers: [CarbonService, { provide: PrismaService, useValue: { $queryRaw: queryRaw } }],
+      providers: [CarbonService, { provide: PrismaService, useValue: prismaMock }],
     }).compile();
 
     service = moduleRef.get(CarbonService);
@@ -320,6 +335,235 @@ describe('CarbonService', () => {
       const summary = await service.getSummary('user-1', 30, now);
 
       expect(summary.unpricedTripsCount).toBe(2);
+    });
+  });
+
+  /**
+   * UF-805 — les deux blocs de la planche que UF-505 avait laissés de côté :
+   * la répartition par mode et l'objectif carbone.
+   */
+  describe('getSummary — répartition par mode et objectif (UF-805)', () => {
+    const now = new Date('2026-08-28T12:00:00.000Z');
+
+    /** Texte SQL reconstitué (fragments du template, sans les valeurs liées). */
+    const sqlOf = (call: unknown[]): string => (call[0] as string[]).join('?');
+
+    /** Valeurs effectivement liées par PostgreSQL, dans l'ordre du template. */
+    const paramsOf = (call: unknown[]): unknown[] => call.slice(1);
+
+    /** Une tranche telle que la rend l'agrégat SQL des périodes. */
+    const bucketRow = (bucket: number, overrides: Record<string, number> = {}) => ({
+      bucket,
+      emittedGrams: 0,
+      carEquivalentGrams: 0,
+      tripsCount: 0,
+      unpricedCount: 0,
+      ...overrides,
+    });
+
+    /** Une ligne de l'agrégat par mode. */
+    const modeRow = (mode: TransportMode, grams: number, distanceMeters = 1_000) => ({
+      mode,
+      distanceMeters,
+      grams,
+      tripsCount: 1,
+    });
+
+    it('reads the mode breakdown from the trip footprints, scoped to the JWT user', async () => {
+      await service.getSummary('user-1', 30, now);
+
+      // Second appel du `Promise.all` : l'agrégat par mode.
+      const [, modeCall] = queryRaw.mock.calls;
+      const sql = sqlOf(modeCall);
+
+      expect(sql).toContain('trip_mode_footprints');
+      // La jointure est ce qui apporte le propriétaire : sans elle, la table des
+      // ventilations n'a aucune colonne permettant de filtrer par compte (C4).
+      expect(sql).toContain('JOIN search_history');
+      expect(sql).toContain('h.user_id =');
+      expect(paramsOf(modeCall)).toContain('user-1');
+    });
+
+    it('counts a mode once per trip, not once per segment', async () => {
+      await service.getSummary('user-1', 30, now);
+
+      // Deux tronçons de bus sur un même trajet, c'est UN trajet en bus. La
+      // table portant une ligne par mode et par trajet, seul le `DISTINCT`
+      // empêche de compter deux fois un usager qui a changé de ligne.
+      const [, modeCall] = queryRaw.mock.calls;
+      expect(sqlOf(modeCall)).toContain('COUNT(DISTINCT f.search_history_id)');
+    });
+
+    it('aggregates the modes over the displayed window, not the comparison one', async () => {
+      const summary = await service.getSummary('user-1', 30, now);
+      const [, modeCall] = queryRaw.mock.calls;
+      const bounds = paramsOf(modeCall);
+
+      // La borne basse de l'agrégat par mode est celle du bandeau vert : deux
+      // blocs du même écran ne peuvent pas couvrir deux fenêtres différentes.
+      expect(bounds).toContainEqual(new Date(summary.current.from));
+      expect(bounds).not.toContainEqual(new Date(summary.previous.from));
+    });
+
+    it('publishes the breakdown as the database ordered it', async () => {
+      queryRaw
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([
+          modeRow(TransportMode.BUS, 5_900),
+          modeRow(TransportMode.METRO, 3_800),
+        ]);
+
+      const summary = await service.getSummary('user-1', 30, now);
+
+      expect(summary.modeBreakdown.map((row) => row.mode)).toEqual([
+        TransportMode.BUS,
+        TransportMode.METRO,
+      ]);
+    });
+
+    it('publishes no goal for an account that has not set one', async () => {
+      const summary = await service.getSummary('user-1', 30, now);
+
+      // `null` et non un objectif à zéro : l'écran doit proposer d'en définir
+      // un, pas annoncer un dépassement à un compte neuf.
+      expect(summary.goal).toBeNull();
+    });
+
+    it('prorates the monthly goal to the displayed window', async () => {
+      findProfile.mockResolvedValue({ monthlyCarbonGoalGrams: 16_000 });
+
+      const month = await service.getSummary('user-1', 30, now);
+      const week = await service.getSummary('user-1', 7, now);
+
+      expect(month.goal?.periodGrams).toBe(16_000);
+      // 16 000 g sur 30 jours, ramenés à 7 : une règle de trois, arrondie.
+      expect(week.goal?.periodGrams).toBe(Math.round((16_000 * 7) / 30));
+      // Le budget mensuel reste publié tel quel : c'est lui que l'usager a
+      // choisi, et lui que le formulaire doit réafficher.
+      expect(week.goal?.monthlyGrams).toBe(16_000);
+    });
+
+    it('lets the used share exceed 100 % so an overrun reads as one', async () => {
+      findProfile.mockResolvedValue({ monthlyCarbonGoalGrams: 10_000 });
+      queryRaw
+        .mockResolvedValueOnce([bucketRow(4, { emittedGrams: 12_800 })])
+        .mockResolvedValue([]);
+
+      const summary = await service.getSummary('user-1', 30, now);
+
+      // Borner à 100 ferait lire un dépassement de 28 % comme un objectif tout
+      // juste tenu — exactement l'inverse de ce que la page doit dire.
+      expect(summary.goal?.usedPercent).toBe(128);
+    });
+
+    it('ignores a goal set to zero rather than declaring a permanent overrun', async () => {
+      findProfile.mockResolvedValue({ monthlyCarbonGoalGrams: 0 });
+
+      const summary = await service.getSummary('user-1', 30, now);
+
+      expect(summary.goal).toBeNull();
+    });
+  });
+
+  /** UF-805 — le tableau « Détail par trajet » de la planche, et sa matière d'export. */
+  describe('listTrips', () => {
+    const now = new Date('2026-08-28T12:00:00.000Z');
+
+    const tripRow = (id: string, overrides: Record<string, unknown> = {}) => ({
+      id,
+      createdAt: new Date('2026-08-27T08:00:00.000Z'),
+      fromLabel: 'République',
+      toLabel: 'Bellecour',
+      selectedSummary: 'Marche + Métro B',
+      emittedGrams: 204,
+      carEquivalentGrams: 1_112,
+      ...overrides,
+    });
+
+    const footprint = (
+      searchHistoryId: string,
+      mode: TransportMode,
+      grams: number,
+      distanceMeters: number,
+    ) => ({ searchHistoryId, mode, grams, distanceMeters });
+
+    it('lists only the trips of the JWT user, and only the valued ones', async () => {
+      queryRaw.mockResolvedValue([]);
+
+      await service.listTrips('user-1', 30, now);
+
+      const [call] = queryRaw.mock.calls;
+      const sql = (call[0] as string[]).join('?');
+      expect(sql).toContain('WHERE user_id =');
+      // Une recherche abandonnée est dénombrée par `getSummary`, pas listée ici :
+      // le tableau décrit des trajets, pas des intentions sans suite.
+      expect(sql).toContain('carbon_grams IS NOT NULL');
+      expect(call.slice(1)).toContain('user-1');
+    });
+
+    it('attaches each trip its own mode breakdown', async () => {
+      queryRaw.mockResolvedValue([tripRow('trip-1'), tripRow('trip-2')]);
+      findModeFootprints.mockResolvedValue([
+        footprint('trip-1', TransportMode.METRO, 200, 5_100),
+        footprint('trip-1', TransportMode.WALK, 0, 600),
+        footprint('trip-2', TransportMode.BIKE, 6, 2_800),
+      ]);
+
+      const { trips } = await service.listTrips('user-1', 30, now);
+
+      expect(trips[0]?.modes.map((row) => row.mode)).toEqual([
+        TransportMode.METRO,
+        TransportMode.WALK,
+      ]);
+      expect(trips[1]?.modes.map((row) => row.mode)).toEqual([TransportMode.BIKE]);
+    });
+
+    it('derives the distance from the modes rather than storing it twice', async () => {
+      queryRaw.mockResolvedValue([tripRow('trip-1')]);
+      findModeFootprints.mockResolvedValue([
+        footprint('trip-1', TransportMode.METRO, 200, 5_100),
+        footprint('trip-1', TransportMode.WALK, 0, 600),
+      ]);
+
+      const { trips } = await service.listTrips('user-1', 30, now);
+
+      expect(trips[0]?.distanceMeters).toBe(5_700);
+    });
+
+    it('leaves a pre-UF-805 trip without a distance rather than inventing one', async () => {
+      queryRaw.mockResolvedValue([tripRow('legacy')]);
+      findModeFootprints.mockResolvedValue([]);
+
+      const { trips } = await service.listTrips('user-1', 30, now);
+
+      // Zéro mètre est faux, mais c'est un zéro que l'écran sait reconnaître et
+      // afficher comme « inconnue » — inventer une distance serait pire.
+      expect(trips[0]?.distanceMeters).toBe(0);
+      expect(trips[0]?.emittedGrams).toBe(204);
+    });
+
+    it('never announces a negative saving on a trip', async () => {
+      queryRaw.mockResolvedValue([
+        tripRow('trip-1', { emittedGrams: 900, carEquivalentGrams: 400 }),
+      ]);
+
+      const { trips } = await service.listTrips('user-1', 30, now);
+
+      expect(trips[0]?.avoidedGrams).toBe(0);
+    });
+
+    it('says so when the period held more trips than it serves', async () => {
+      queryRaw.mockResolvedValue(
+        Array.from({ length: CARBON_TRIPS_MAX + 1 }, (_, index) => tripRow(`trip-${index}`)),
+      );
+      findModeFootprints.mockResolvedValue([]);
+
+      const { trips, truncated } = await service.listTrips('user-1', 30, now);
+
+      // L'export se construit sur cette liste : un relevé tronqué qui ne le
+      // dirait pas serait un faux relevé.
+      expect(trips).toHaveLength(CARBON_TRIPS_MAX);
+      expect(truncated).toBe(true);
     });
   });
 });

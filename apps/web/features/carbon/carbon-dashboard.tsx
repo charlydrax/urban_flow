@@ -4,16 +4,20 @@ import { CARBON_SUMMARY_DAYS, type CarbonSummaryDays } from '@urbanflow/shared';
 
 import { carEquivalentKm, changeSummary } from '../../lib/carbon-summary';
 import { formatCarbon } from '../../lib/format-carbon';
+import { CarbonGoalCard } from './carbon-goal-card';
 import { ImpactComparison } from './impact-comparison';
 import { ImpactTrend } from './impact-trend';
+import { ModeBreakdown } from './mode-breakdown';
+import { TripTable } from './trip-table';
 import { useCarbonSummary } from './use-carbon-summary';
 
 /** Libellé du sélecteur de période — « 7 jours », « 30 jours »… */
 const periodLabel = (days: CarbonSummaryDays): string => `${days} jours`;
 
 /**
- * Page « Mon impact » (UF-505) — le suivi carbone personnel, d'après la maquette
- * Figma « 8. EMPREINTE CARBONE » (mobile) et « DESKTOP 3 » (large).
+ * Page « Mon impact » (UF-505, complétée par UF-805) — le suivi carbone
+ * personnel, d'après la maquette Figma « 8. EMPREINTE CARBONE » (mobile) et
+ * « DESKTOP 3 : EMPREINTE CARBONE » (large).
  *
  * ```
  * Mon impact                              [7j] [30j] [90j]
@@ -22,17 +26,23 @@ const periodLabel = (days: CarbonSummaryDays): string => `${days} jours`;
  * │  ≈ 285 km de voiture évités                          │
  * └──────────────────────────────────────────────────────┘
  * [CO₂ émis 13,5 kg] [Évolution −20 %] [Trajets 12]
- * ┌── Vos trajets vs tout en voiture ──┐ ┌── Évolution ──┐
+ * ┌── Vos trajets vs tout en voiture ──┐ ┌── Évolution ──────┐
+ * ┌── Émissions par mode ─────────────┐ ┌── 🎯 Objectif ────┐
+ * ┌── Détail par trajet ─────────────────────[📤 Exporter]──┐
  * ```
  *
- * ## Deux visualisations, pas plus
+ * ## Ce que UF-805 a ajouté, et pourquoi ce n'était pas là avant
  *
- * Le ticket demande de rester sobre. La comparaison au tout-voiture porte la
- * proposition de valeur (« qu'est-ce que mes choix ont évité ? ») et le
- * graphique porte la recette « au moins un indicateur d'évolution ». La
- * répartition par mode de la maquette est délibérément absente : elle
- * supposerait de stocker le détail par segment de chaque trajet retenu, donc une
- * table de plus — c'est un ticket, pas une case à cocher.
+ * UF-505 s'était arrêté à deux visualisations et l'assumait : la répartition
+ * par mode « supposerait de stocker le détail par segment de chaque trajet
+ * retenu, donc une table de plus — c'est un ticket, pas une case à cocher ».
+ * C'était ce ticket-ci. La table existe (`trip_mode_footprints`), et avec elle
+ * les trois blocs manquants de la planche : la **répartition par mode**,
+ * l'**objectif** carbone et le **détail par trajet** avec son export.
+ *
+ * Aucun d'eux ne calcule quoi que ce soit : l'API publie des totaux déjà
+ * agrégés par la base, et les composants n'en tirent que des largeurs de barre
+ * (C5).
  *
  * ## Ce qui est compté, et ce qui est dit
  *
@@ -41,21 +51,31 @@ const periodLabel = (days: CarbonSummaryDays): string => `${days} jours`;
  * sans cette phrase, quelqu'un qui cherche beaucoup et choisit peu verrait un
  * total bas sans pouvoir comprendre pourquoi, et conclurait à une panne.
  *
+ * ⚠️ « Retenu » n'est pas encore « réalisé ». Distinguer l'itinéraire
+ * sélectionné du trajet effectivement parcouru est l'objet d'UF-807, qui
+ * s'appuiera sur l'arrivée effective du mode navigation (UF-806) — aucun des
+ * deux n'existe à ce jour. Tout ce qui est ajouté ici lit `search_history` par
+ * l'API et **rien d'autre** : le jour où le filtre « réalisé » y sera posé, ces
+ * blocs suivront sans être retouchés.
+ *
  * ## Un compte neuf n'est pas une erreur
  *
  * Un bilan vide affiche des zéros **et** la marche à suivre pour le remplir,
  * jamais un message d'échec. À l'inverse, une lecture qui échoue le dit : « 0 g
  * CO₂ » affiché à la place d'une réponse manquante serait un faux bilan, ce qui
- * est pire qu'un message d'erreur.
+ * est pire qu'un message d'erreur. Même règle pour l'objectif : ne pas en avoir
+ * fixé n'est pas en avoir un à zéro, et l'écran propose alors d'en définir un.
  *
- * Couvre : C2 (indicateurs empilés sur mobile, en grille à partir de `sm`),
- * C5 (une lecture par période, aucun rafraîchissement automatique), C7 (le
- * sélecteur est un groupe de boutons radio, chaque proportion visuelle est
- * doublée d'un texte), C8 (les données affichées sont celles du seul compte
+ * Couvre : C2 (indicateurs empilés sur mobile, en grille à partir de `sm`, le
+ * tableau par trajet défilant dans son propre conteneur), C5 (une lecture par
+ * période, les trajets seulement à la demande, aucun rafraîchissement
+ * automatique), C7 (le sélecteur est un groupe de boutons radio, chaque
+ * proportion visuelle est doublée d'un texte, le détail est un vrai tableau),
+ * C8 (les données affichées — et exportées — sont celles du seul compte
  * connecté).
  */
 export function CarbonDashboard() {
-  const { status, summary, days, setDays } = useCarbonSummary();
+  const { status, summary, days, setDays, reload } = useCarbonSummary();
 
   return (
     <div className="flex flex-col gap-4">
@@ -163,6 +183,22 @@ export function CarbonDashboard() {
             <ImpactComparison totals={summary.current} />
             <ImpactTrend buckets={summary.buckets} />
           </div>
+
+          {/*
+            Les trois blocs ajoutés par UF-805, dans l'ordre de la planche :
+            répartition par mode, objectif, puis détail par trajet. Sur mobile
+            ils s'empilent ; à partir de `lg`, la répartition et l'objectif se
+            partagent la largeur comme sur la maquette desktop (C2).
+          */}
+          <div className="grid gap-4 lg:grid-cols-2">
+            <ModeBreakdown
+              modeBreakdown={summary.modeBreakdown}
+              emittedGrams={summary.current.emittedGrams}
+            />
+            <CarbonGoalCard goal={summary.goal} days={days} onSaved={reload} />
+          </div>
+
+          <TripTable days={days} />
 
           {summary.current.tripsCount === 0 && (
             <p className="rounded-lg bg-tint-green px-4 py-3 text-sm text-primary-dark">
