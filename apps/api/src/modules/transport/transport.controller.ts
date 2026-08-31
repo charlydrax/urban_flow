@@ -9,6 +9,7 @@ import {
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
 
+import { OptionalAuth } from '../../common/decorators/optional-auth.decorator';
 import { CyclePathsService } from './cycle-paths/cycle-paths.service';
 import { CycleSegmentsQueryDto, CycleSegmentsResponseDto } from './dto/cycle-segments.dto';
 import { NearbyStationsQueryDto, NearbyStationsResponseDto } from './dto/nearby-stations.dto';
@@ -21,6 +22,28 @@ import { TransportService, TransportSourceStatus } from './transport.service';
  * d'un mode dégradé côté client (C10), les stations de véhicules en
  * libre-service à proximité d'un point (UF-303), et les tronçons cyclables
  * issus de notre propre base PostGIS (UF-304).
+ *
+ * ## Deux endpoints ouverts aux visiteurs (UF-804)
+ *
+ * `GET /transport/status` et `GET /transport/stations/nearby` passent en
+ * authentification **facultative**, pour la même raison qui a ouvert
+ * `POST /routes/plan` (UF-801) : ils rendent une donnée publique — l'état de
+ * nos sources et le nombre de vélos à une borne — identique pour tout le monde,
+ * et ils alimentent désormais les deux cartes temps réel de l'écran de
+ * résultats, lui-même accessible sans compte. Les laisser sous le régime par
+ * défaut aurait donné un écran à deux vitesses : le visiteur aurait vu ses
+ * itinéraires, et deux cartes en erreur 401 sous elles.
+ *
+ * `@OptionalAuth()` plutôt que `@Public()` : un jeton périmé doit rester un
+ * `401`, sans quoi une session morte deviendrait une visite anonyme en silence
+ * (voir la docstring du décorateur).
+ *
+ * `GET /transport/cycle-paths/nearby` **reste protégé** : aucun écran ne le
+ * consomme, et ouvrir une route sans consommateur serait élargir la surface
+ * d'attaque sans contrepartie (C4). Ce n'est pas pour autant du code mort — le
+ * service qu'il expose est appelé à chaque planification, c'est l'endpoint HTTP
+ * qui n'a pas d'appelant. Voir le tableau « Qui consomme quoi » du README du
+ * module.
  */
 @ApiTags('transport')
 @ApiBearerAuth()
@@ -38,6 +61,7 @@ export class TransportController {
    * État des sources de données transport.
    * Les deux sources sont réellement sondées depuis UF-303.
    */
+  @OptionalAuth()
   @Get('status')
   @ApiOperation({
     summary: 'État des sources GTFS/GBFS',
@@ -63,6 +87,7 @@ export class TransportController {
    * que *sa* requête est fautive, alors que c'est une source amont qui manque
    * (C10).
    */
+  @OptionalAuth()
   @Get('stations/nearby')
   @ApiOperation({
     summary: 'Stations de véhicules en libre-service à proximité',

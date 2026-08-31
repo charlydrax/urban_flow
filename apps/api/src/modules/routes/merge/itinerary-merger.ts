@@ -139,6 +139,31 @@ export interface MergePreferences {
   reducedMobility: boolean;
   /** Durée de marche maximale acceptée **par segment**, en minutes — filtre dur. */
   maxWalkMinutes: number;
+  /**
+   * Modes retenus par l'usager **pour cette recherche** (UF-804) — filtre dur.
+   *
+   * `undefined` quand il n'a rien décoché : la fusion se comporte alors
+   * exactement comme avant le ticket. À ne pas confondre avec un tableau vide,
+   * qui est une demande explicite (« rien d'autre que la marche »).
+   *
+   * Pourquoi dur, alors que `preferredModes` ne l'est pas : les deux ne disent
+   * pas la même chose. Le profil énonce un goût durable, qu'on n'oppose pas à
+   * quelqu'un le jour où seul un bus circule ; le sélecteur de l'écran énonce
+   * une contrainte du moment, et une contrainte qui n'exclut rien n'en est pas
+   * une. Un usager qui décoche « Métro » et voit trois métros arriver n'a plus
+   * aucune raison de croire ce que l'écran lui montre.
+   */
+  selectedModes?: TransportMode[];
+  /**
+   * Taille du groupe (UF-804) — exigée des **bornes** en libre-service.
+   *
+   * N'agit que là : la capacité d'un métro ou d'un bus ne se lit pas dans un
+   * GTFS, et prétendre la modéliser reviendrait à inventer une donnée. Une
+   * borne, elle, publie le nombre exact de véhicules louables — c'est une
+   * information vraie, et la seule que la taille du groupe permette d'exploiter
+   * honnêtement.
+   */
+  travellers: number;
 }
 
 /** Résultat de la fusion : les propositions retenues, et l'ordre dans lequel elles le sont. */
@@ -219,7 +244,7 @@ export function mergeIntoItineraries(
   const candidates = [
     ...buildTransitCandidates(journeys, from, to),
     ...asList(buildBikeTransitCandidate(journeys, sources, cycleSegments, from, to, prefs)),
-    ...asList(buildBikeOnlyCandidate(sources, cycleSegments, from, to)),
+    ...asList(buildBikeOnlyCandidate(sources, cycleSegments, from, to, prefs.travellers)),
     ...asList(buildWalkOnlyCandidate(from, to)),
   ];
 
@@ -354,11 +379,12 @@ function buildBikeOnlyCandidate(
   cycleSegments: readonly CycleSegment[],
   from: MergeEndpoint,
   to: MergeEndpoint,
+  travellers: number,
 ): Candidate | null {
   if (distanceMeters(from, to) < BIKE_MIN_TRIP_METERS) return null;
 
-  const pickup = nearestRentingStation(stationsAt(sources, 'origin'), from);
-  const dropoff = nearestReturningStation(stationsAt(sources, 'destination'), to);
+  const pickup = nearestRentingStation(stationsAt(sources, 'origin'), from, travellers);
+  const dropoff = nearestReturningStation(stationsAt(sources, 'destination'), to, travellers);
   if (!pickup || !dropoff || pickup.id === dropoff.id) return null;
 
   const steps = compactSteps([
@@ -433,8 +459,8 @@ function buildBikeTransitCandidate(
 
     const feeder =
       side === 'access'
-        ? buildAccessFeeder(steps[firstTransit], sources, cycleSegments, from)
-        : buildEgressFeeder(steps[lastTransit], sources, cycleSegments, to);
+        ? buildAccessFeeder(steps[firstTransit], sources, cycleSegments, from, prefs.travellers)
+        : buildEgressFeeder(steps[lastTransit], sources, cycleSegments, to, prefs.travellers);
     if (!feeder) continue;
 
     const merged =
@@ -473,10 +499,16 @@ function buildAccessFeeder(
   sources: CollectedSources,
   cycleSegments: readonly CycleSegment[],
   from: MergeEndpoint,
+  travellers: number,
 ): Step[] | null {
   const stations = stationsAt(sources, 'origin');
-  const pickup = nearestRentingStation(stations, from);
-  const dropoff = nearestReturningStation(stations, boarding.fromPoint, STATION_TO_STOP_MAX_METERS);
+  const pickup = nearestRentingStation(stations, from, travellers);
+  const dropoff = nearestReturningStation(
+    stations,
+    boarding.fromPoint,
+    travellers,
+    STATION_TO_STOP_MAX_METERS,
+  );
   if (!pickup || !dropoff || pickup.id === dropoff.id) return null;
 
   return compactSteps([
@@ -492,10 +524,16 @@ function buildEgressFeeder(
   sources: CollectedSources,
   cycleSegments: readonly CycleSegment[],
   to: MergeEndpoint,
+  travellers: number,
 ): Step[] | null {
   const stations = stationsAt(sources, 'destination');
-  const pickup = nearestRentingStation(stations, alighting.toPoint, STATION_TO_STOP_MAX_METERS);
-  const dropoff = nearestReturningStation(stations, to);
+  const pickup = nearestRentingStation(
+    stations,
+    alighting.toPoint,
+    travellers,
+    STATION_TO_STOP_MAX_METERS,
+  );
+  const dropoff = nearestReturningStation(stations, to, travellers);
   if (!pickup || !dropoff || pickup.id === dropoff.id) return null;
 
   return compactSteps([
@@ -529,38 +567,65 @@ function buildWalkOnlyCandidate(from: MergeEndpoint, to: MergeEndpoint): Candida
 
 // ------------------------------------------------------------ stations Vélo'v
 
-/** Une borne qui loue effectivement au moins un vélo à cet instant. */
-function canRentBike(station: SharedMobilityStation): boolean {
+/**
+ * Une borne qui loue effectivement assez de vélos pour le groupe (UF-804).
+ *
+ * `travellers` vaut 1 dans le cas courant, et la règle est alors exactement
+ * celle d'avant le ticket. Au-delà, elle devient une exigence de comptage : une
+ * borne qui affiche deux vélos ne dessert pas un groupe de quatre, et la
+ * proposer serait une réponse fausse qui ne se découvre qu'une fois sur place.
+ *
+ * Le repli sur `vehiclesAvailable` quand l'opérateur ne ventile pas sa flotte
+ * est conservé — c'est le seul compte dont on dispose alors.
+ */
+function canRentBike(station: SharedMobilityStation, travellers: number): boolean {
   if (!station.renting) return false;
-  if (station.vehicles.length === 0) return station.vehiclesAvailable > 0;
-  return station.vehicles.some(
-    (vehicle) => vehicle.mode === TransportMode.BIKE && vehicle.count > 0,
-  );
+  if (station.vehicles.length === 0) return station.vehiclesAvailable >= travellers;
+
+  const bikes = station.vehicles
+    .filter((vehicle) => vehicle.mode === TransportMode.BIKE)
+    .reduce((total, vehicle) => total + vehicle.count, 0);
+  return bikes >= travellers;
 }
 
-/** Une borne qui accepte les retours et a de la place — sinon le trajet ne finit pas. */
-function canReturnBike(station: SharedMobilityStation): boolean {
+/**
+ * Une borne qui accepte les retours et a la place pour tout le groupe — sinon
+ * le trajet ne finit pas, ou pas pour tout le monde.
+ */
+function canReturnBike(station: SharedMobilityStation, travellers: number): boolean {
   // `docksAvailable` à `null` signifie « non publié », pas « aucune place » :
   // écarter la station reviendrait à punir l'opérateur pour un champ manquant.
-  return station.returning && (station.docksAvailable === null || station.docksAvailable > 0);
+  return (
+    station.returning && (station.docksAvailable === null || station.docksAvailable >= travellers)
+  );
 }
 
 /** Borne louante la plus proche d'un point, dans un rayon optionnel. */
 function nearestRentingStation(
   stations: readonly SharedMobilityStation[],
   point: LatLng,
+  travellers: number,
   maxMeters?: number,
 ): SharedMobilityStation | null {
-  return nearestStation(stations.filter(canRentBike), point, maxMeters);
+  return nearestStation(
+    stations.filter((station) => canRentBike(station, travellers)),
+    point,
+    maxMeters,
+  );
 }
 
 /** Borne acceptant les retours la plus proche d'un point, dans un rayon optionnel. */
 function nearestReturningStation(
   stations: readonly SharedMobilityStation[],
   point: LatLng,
+  travellers: number,
   maxMeters?: number,
 ): SharedMobilityStation | null {
-  return nearestStation(stations.filter(canReturnBike), point, maxMeters);
+  return nearestStation(
+    stations.filter((station) => canReturnBike(station, travellers)),
+    point,
+    maxMeters,
+  );
 }
 
 /**
@@ -708,10 +773,41 @@ function compactSteps(steps: readonly Step[]): Step[] {
  * `preferredModes`, en revanche, n'exclut rien : un profil « métro et vélo » ne
  * doit pas se retrouver sans réponse le jour où seul un bus circule. Il agit à
  * l'étape suivante, sur la sélection.
+ *
+ * **UF-804 en ajoute un troisième** : `selectedModes`, le sélecteur de modes de
+ * l'écran. Il est éliminatoire là où `preferredModes` ne l'est pas, parce qu'il
+ * ne dit pas la même chose — voir {@link MergePreferences.selectedModes}.
  */
 function satisfies(candidate: Candidate, prefs: MergePreferences): boolean {
   if (prefs.reducedMobility && !candidate.accessible) return false;
+  if (!usesOnlySelectedModes(candidate, prefs.selectedModes)) return false;
   return longestWalkMinutes(candidate.steps) <= prefs.maxWalkMinutes;
+}
+
+/**
+ * Le candidat n'emprunte-t-il que des modes retenus par l'usager (UF-804) ?
+ *
+ * La marche est **toujours** admise, qu'elle figure ou non dans la sélection :
+ * tout itinéraire commence et finit à pied, et l'exclure ne laisserait aucune
+ * proposition constructible — pas même la marche seule. Décocher « Marche » ne
+ * peut donc pas vouloir dire « ne pas marcher » ; cela veut dire « pas de
+ * marche **seule** », ce que le candidat de la famille `walk` porte à lui seul
+ * et que le filtre ci-dessous écarte bien, puisque tous ses modes sont WALK.
+ *
+ * @param selected `undefined` quand l'usager n'a rien décoché — aucun filtre
+ */
+function usesOnlySelectedModes(
+  candidate: Candidate,
+  selected: readonly TransportMode[] | undefined,
+): boolean {
+  if (!selected) return true;
+
+  const walkOnly = candidate.steps.every((step) => step.mode === TransportMode.WALK);
+  if (walkOnly) return selected.includes(TransportMode.WALK);
+
+  return candidate.steps.every(
+    (step) => step.mode === TransportMode.WALK || selected.includes(step.mode),
+  );
 }
 
 /**

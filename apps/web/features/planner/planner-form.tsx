@@ -7,10 +7,14 @@ import type { Place, SearchHistoryEntry, SearchHistoryPlace } from '@urbanflow/s
 import { Button } from '../../components/ui/button';
 import { reverseGeocode, type GeocodedPlace } from '../../lib/geocoding';
 import { formatPositionLabel } from '../../lib/geolocation';
+import { DEFAULT_TRIP_OPTIONS, type TripOptions } from '../../lib/trip-options';
 import { EMPTY_TRIP_POINT, type TripPoint } from './address-autocomplete';
+import { EcoModeBanner } from './eco-mode-banner';
 import { LocateMe } from './locate-me';
+import { ModeSelector } from './mode-selector';
 import { RecentSearches } from './recent-searches';
 import { TripFields } from './trip-fields';
+import { TripOptionsChips } from './trip-options-chips';
 import type { SearchHistoryState } from './use-search-history';
 import type { UserLocationState } from './use-user-location';
 
@@ -99,15 +103,36 @@ export function PlannerForm({
   history,
   onSubmitTrip,
   isSearching = false,
+  ecoModeActive,
+  isGuest,
 }: {
   location: UserLocationState;
   history: SearchHistoryState;
-  onSubmitTrip: (from: Place, to: Place) => void;
+  onSubmitTrip: (from: Place, to: Place, options: TripOptions) => void;
   isSearching?: boolean;
+  ecoModeActive: boolean;
+  isGuest: boolean;
 }) {
   const [from, setFrom] = useState<TripPoint>(EMPTY_TRIP_POINT);
   const [to, setTo] = useState<TripPoint>(EMPTY_TRIP_POINT);
   const [formError, setFormError] = useState<string | null>(null);
+
+  /*
+    Les options de recherche (UF-804) vivent ici, et pas dans `PlannerScreen`.
+
+    Le critère est celui déjà appliqué à la position et aux résultats : l'état
+    monte au plus petit ancêtre commun de ses consommateurs. Or l'heure, le
+    nombre de voyageurs et les modes ne sont lus que par ce formulaire et par la
+    requête qu'il déclenche — la carte n'en fait rien, le panneau de résultats
+    non plus. Les remonter d'un cran obligerait l'écran à porter un état qu'il
+    ne consulte jamais, et à le repasser en descendant.
+
+    Ils ne sont **pas** persistés (ni `localStorage`, ni profil) : une heure de
+    départ mémorisée d'une session à l'autre serait périmée à coup sûr, et une
+    sélection de modes oubliée expliquerait silencieusement des résultats
+    surprenants des semaines plus tard.
+  */
+  const [options, setOptions] = useState<TripOptions>(DEFAULT_TRIP_OPTIONS);
 
   const { position } = location;
 
@@ -187,7 +212,11 @@ export function PlannerForm({
     // Étape 1 du flux : les deux extrémités résolues partent vers l'écran hôte,
     // qui appellera `POST /routes/plan`. L'étape 18 (écriture de l'historique)
     // est faite par l'API depuis UF-402 — le formulaire n'y touche plus.
-    onSubmitTrip(toPlace(from.place), toPlace(to.place));
+    //
+    // Les options partent **avec** le trajet, et non par un chemin séparé : ce
+    // sont les paramètres de la même question, et les envoyer à part ouvrirait
+    // la possibilité qu'une recherche parte avec les options de la précédente.
+    onSubmitTrip(toPlace(from.place), toPlace(to.place), options);
   };
 
   return (
@@ -220,6 +249,23 @@ export function PlannerForm({
       {/* Les rappels sont posés juste sous les champs qu'ils remplissent : c'est
           ce voisinage qui rend le raccourci lisible (maquette « PLANIFICATEUR F2 »). */}
       <RecentSearches entries={history.entries} onSelect={handleRecentSelect} />
+
+      {/*
+        L'ordre suit la planche, et il n'est pas indifférent : chips, modes,
+        bandeau éco, bouton. On règle le **quand** et le **avec qui** juste sous
+        le trajet, puis le **comment**, puis on lit ce que le tri fera — le
+        bandeau est ainsi la dernière chose vue avant de lancer la recherche,
+        c'est-à-dire au moment où il informe le mieux.
+
+        Les trois modifient les options, jamais le trajet : changer d'heure ne
+        périme pas la saisie d'adresse, et `resetOutcome` n'a donc rien à faire
+        ici — le message d'erreur de soumission porte sur les extrémités.
+      */}
+      <TripOptionsChips options={options} onChange={setOptions} />
+
+      <ModeSelector options={options} onChange={setOptions} />
+
+      <EcoModeBanner active={ecoModeActive} isGuest={isGuest} />
 
       {formError && (
         <p role="alert" className="text-xs font-semibold text-error">

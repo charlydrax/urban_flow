@@ -561,4 +561,64 @@ describe('RoutesService', () => {
       expect(DEFAULT_PREFERENCES).toEqual(snapshot);
     });
   });
+
+  // ------------------------------- UF-804 : options de recherche de l'écran
+
+  describe('options de recherche du planificateur (UF-804)', () => {
+    it('descend l’heure de départ demandée jusqu’à la collecte', async () => {
+      await service.plan(dto({ departAt: '2026-09-01T08:30:00+02:00' }), userId);
+
+      expect(collectAllSources).toHaveBeenCalledWith(expect.anything(), expect.anything(), {
+        reducedMobility: false,
+        departureAt: '2026-09-01T08:30:00+02:00',
+      });
+    });
+
+    it('n’envoie aucune date quand la chip est restée sur « Maintenant »', async () => {
+      // Le connecteur a son propre défaut (« maintenant ») : le redoubler ici
+      // ferait figer l'instant au moment où le service construit sa requête,
+      // et non au moment où le moteur la traite.
+      await service.plan(dto(), userId);
+
+      expect(collectAllSources).toHaveBeenCalledWith(expect.anything(), expect.anything(), {
+        reducedMobility: false,
+      });
+    });
+
+    it('publie les modes écartés, jamais la marche', async () => {
+      const result = await service.plan(
+        dto({ modes: [TransportMode.WALK, TransportMode.BIKE, TransportMode.METRO] }),
+        userId,
+      );
+
+      expect(result.appliedConstraints.excludedModes).toEqual(
+        expect.arrayContaining([TransportMode.BUS, TransportMode.TRAM, TransportMode.SCOOTER]),
+      );
+      // La marche reste praticable quoi qu'il arrive (`usesOnlySelectedModes`) :
+      // l'annoncer exclue serait une contrainte affichée qui n'agit pas.
+      expect(result.appliedConstraints.excludedModes).not.toContain(TransportMode.WALK);
+    });
+
+    it('ne publie aucune exclusion quand tous les modes sont cochés', async () => {
+      const result = await service.plan(dto({ modes: Object.values(TransportMode) }), userId);
+
+      expect(result.appliedConstraints.excludedModes).toBeUndefined();
+    });
+
+    it('ne publie la taille du groupe que lorsqu’elle contraint', async () => {
+      const alone = await service.plan(dto({ travellers: 1 }), userId);
+      const group = await service.plan(dto({ travellers: 4 }), userId);
+
+      // Un voyageur seul n'a rien retiré : l'annoncer ferait chercher une
+      // explication là où il n'y en a pas.
+      expect(alone.appliedConstraints.travellers).toBeUndefined();
+      expect(group.appliedConstraints.travellers).toBe(4);
+    });
+
+    it('laisse `appliedConstraints` intact quand l’écran n’envoie aucune option', async () => {
+      const result = await service.plan(dto(), userId);
+
+      expect(result.appliedConstraints).toEqual({ reducedMobility: false });
+    });
+  });
 });

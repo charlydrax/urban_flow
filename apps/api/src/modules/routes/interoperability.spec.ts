@@ -194,6 +194,7 @@ describe('interopérabilité des formats publiés (C9)', () => {
     priority: RoutePriority.GREENEST,
     reducedMobility: false,
     maxWalkMinutes: 20,
+    travellers: 1,
   };
 
   const place = (name: string, lat: number, lng: number, stopId?: string) => ({

@@ -1,6 +1,8 @@
 'use client';
 
+import type { Place } from '@urbanflow/shared';
 import Link from 'next/link';
+import { useCallback, useState } from 'react';
 
 import { LazyMap } from '../../components/map/lazy-map';
 import { toLngLat } from '../../lib/geolocation';
@@ -14,12 +16,16 @@ import {
   describeDegradedSources,
   describeEmptyResult,
 } from '../../lib/plan-feedback';
+import { departureCard, stationCard } from '../../lib/realtime-cards';
+import { describeSearchOptions, isEcoModeActive, type TripOptions } from '../../lib/trip-options';
 import { useSession } from '../auth/session-provider';
 import { CarbonBreakdown } from './carbon-breakdown';
 import { ItineraryList } from './itinerary-list';
 import { ItinerarySkeleton } from './itinerary-skeleton';
 import { PlanNotice } from './plan-notice';
 import { PlannerForm } from './planner-form';
+import { RealtimeCards } from './realtime-cards';
+import { useRealtimeContext } from './use-realtime-context';
 import { useRoutePlan } from './use-route-plan';
 import { useSearchHistory } from './use-search-history';
 import { useUserLocation } from './use-user-location';
@@ -91,6 +97,35 @@ export function PlannerScreen() {
   // la liste des rappels remonte le trajet en tête sans un seul appel de plus.
   const routePlan = useRoutePlan(history.noteRecorded);
 
+  /*
+    Départ de la **dernière recherche lancée** (UF-804), et non position de
+    l'usager : les deux cartes temps réel annoncent « autour de votre départ »,
+    et un trajet peut parfaitement commencer ailleurs qu'où l'on se trouve —
+    c'est même le cas dès qu'on prépare un déplacement depuis chez soi.
+
+    Retenu ici plutôt que dans `useRoutePlan` : le hook publie ce que le serveur
+    a répondu, pas ce qu'on lui a demandé. Y ajouter la question fausserait sa
+    frontière, alors que l'écran, lui, la connaît déjà — c'est lui qui la pose.
+  */
+  const [origin, setOrigin] = useState<Place | null>(null);
+
+  // `plan` est extrait plutôt que lu sur `routePlan` dans le corps du rappel :
+  // c'est une fonction d'identité stable (`useCallback` à dépendances vides),
+  // mais la règle `exhaustive-deps` ne le voit pas à travers l'objet et
+  // exigerait `routePlan` entier — donc un rappel recréé à chaque réponse, et
+  // un formulaire rendu à nouveau pour rien (C5).
+  const { plan } = routePlan;
+
+  const handleSubmitTrip = useCallback(
+    (from: Place, to: Place, options: TripOptions) => {
+      setOrigin(from);
+      plan(from, to, options);
+    },
+    [plan],
+  );
+
+  const realtime = useRealtimeContext(origin);
+
   const isSearching = routePlan.status === 'loading';
   const isEmptyResult = routePlan.status === 'ready' && routePlan.itineraries.length === 0;
 
@@ -130,6 +165,25 @@ export function PlannerScreen() {
     routePlan.itineraries.find((itinerary) => itinerary.id === routePlan.selectedId) ?? null;
 
   /*
+    Les deux cartes temps réel (UF-804) sont **dérivées**, jamais stockées :
+    elles changent dès que l'usager retient une autre option, et les tenir en
+    état obligerait à les resynchroniser à chaque clic. Une carte absente —
+    aucune borne louante, ou une option sans transport en commun — sort d'ici
+    en `null` et n'occupe alors aucune place à l'écran.
+  */
+  const realtimeCards = [
+    stationCard(realtime.stations, realtime.statuses),
+    departureCard(selectedItinerary, realtime.statuses),
+  ].filter((card) => card !== null);
+
+  // Contraintes que l'usager vient de poser lui-même (UF-804) : elles se
+  // défont à l'endroit où elles ont été posées, quelques lignes plus haut. Le
+  // filtre PMR (UF-602), lui, se règle dans le profil — les deux messages
+  // coexistent parce qu'ils n'appellent pas la même action.
+  const searchOptionsNotice =
+    routePlan.status === 'ready' ? describeSearchOptions(routePlan.appliedConstraints) : null;
+
+  /*
     `min-w-0` sur les DEUX colonnes, et pas seulement sur la grille (UF-606, C2).
 
     Un élément de grille a un `min-width: auto` implicite : sa piste ne descend
@@ -150,8 +204,10 @@ export function PlannerScreen() {
         <PlannerForm
           location={location}
           history={history}
-          onSubmitTrip={routePlan.plan}
+          onSubmitTrip={handleSubmitTrip}
           isSearching={isSearching}
+          ecoModeActive={isEcoModeActive(routePlan.sortedBy)}
+          isGuest={isGuest}
         />
 
         {/*
@@ -222,6 +278,16 @@ export function PlannerScreen() {
         )}
 
         {/*
+          Options de recherche restrictives (UF-804) : ton `info` pour la même
+          raison que le filtre PMR — un mode décoché fait exactement ce qu'on
+          lui demande. La note est posée sous celle du profil parce qu'elle est
+          plus facile à défaire : le réglage est à l'écran, deux blocs plus haut.
+        */}
+        {searchOptionsNotice && (
+          <PlanNotice tone="info" role="status" message={searchOptionsNotice} />
+        )}
+
+        {/*
           Mode dégradé (C10) : une source absente sur trois n'empêche pas de se
           déplacer avec les autres. La note est discrète et ne bloque rien —
           elle est posée **au-dessus** de la liste, parce qu'elle qualifie ce
@@ -253,6 +319,15 @@ export function PlannerScreen() {
               ferait changer la sélection à chaque ouverture du détail.
             */}
             {selectedItinerary && <CarbonBreakdown itinerary={selectedItinerary} />}
+
+            {/*
+              Les deux encarts « données F3 » ferment la colonne, comme sur la
+              planche : ils complètent le choix qui vient d'être fait, ils ne le
+              précèdent pas. Les poser au-dessus de la liste ferait lire une
+              disponibilité de bornes avant d'avoir vu les itinéraires qu'elle
+              sert à comparer.
+            */}
+            <RealtimeCards cards={realtimeCards} />
           </>
         )}
       </div>

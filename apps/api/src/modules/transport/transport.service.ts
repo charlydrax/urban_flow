@@ -1,20 +1,15 @@
 import { Injectable } from '@nestjs/common';
+import type { TransportSourceStatus } from '@urbanflow/shared';
 
 import { toNetworkDateTime } from './otp/service-date';
 import { SharedMobilityService } from './shared-mobility.service';
 import { TransitService } from './transit.service';
 
-/** État de disponibilité d'une source de données transport. */
-export interface TransportSourceStatus {
-  /** Nom de la source (gtfs | gbfs). */
-  source: 'gtfs' | 'gbfs';
-  /** Disponibilité de la source ('mock' tant que la source n'est pas branchée). */
-  status: 'ok' | 'degraded' | 'down' | 'mock';
-  /** Horodatage de la dernière vérification. */
-  checkedAt: string;
-  /** Précision lisible sur l'état constaté (période GTFS couverte, cause de panne). */
-  detail?: string;
-}
+// `TransportSourceStatus` a été remonté dans `@urbanflow/shared` par UF-804 :
+// les deux cartes temps réel de l'écran de résultats le consomment désormais,
+// et un contrat lu des deux côtés n'a pas à être décrit deux fois (C9). Il est
+// ré-exporté ici pour que les imports existants (contrôleur, tests) tiennent.
+export type { TransportSourceStatus };
 
 /**
  * Au-delà de ce délai sans nouvelle publication, le flux temps réel est déclaré

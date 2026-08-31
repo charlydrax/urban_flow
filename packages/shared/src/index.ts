@@ -9,6 +9,7 @@ export * from './route';
 export * from './search-history';
 export * from './transit';
 export * from './shared-mobility';
+export * from './transport-status';
 export * from './cycle-path';
 export * from './auth';
 export * from './user';

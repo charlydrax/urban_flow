@@ -18,7 +18,12 @@ F2 », « 03 · Maquettes desktop → DESKTOP 2 : PLANIFICATEUR ».
 | `use-route-plan.ts`                | Appel `POST /routes/plan`, état de la recherche, sélection (UF-403)      |
 | `itinerary-list.tsx`               | Panneau de résultats — groupe radio de cartes comparables (UF-404)       |
 | `itinerary-card.tsx`               | Carte d'un itinéraire : durée, séquence de modes, CO₂, horaires (UF-404) |
-| `itinerary-sort-toggle.tsx`        | Sélecteur de tri « Écologique / Rapide » du panneau (UF-503)             |
+| `itinerary-filters.tsx`            | Bandeau « Tous / Rapide / Écolo / Économe » du panneau (UF-503, UF-804)  |
+| `trip-options-chips.tsx`           | Chips « heure de départ » et « voyageurs » (UF-804)                      |
+| `mode-selector.tsx`                | Grille des six modes de transport retenus pour la recherche (UF-804)     |
+| `eco-mode-banner.tsx`              | Bandeau « mode éco » — annonce le tri que le serveur applique (UF-804)   |
+| `realtime-cards.tsx`               | Les deux encarts « données F3 » du bas de la planche (UF-804)            |
+| `use-realtime-context.ts`          | Bornes proches + état des sources, une fois par recherche (UF-804)       |
 | `carbon-breakdown.tsx`             | Détail CO₂ de l'option retenue : segment, facteur, comparaison (UF-501)  |
 | `itinerary-skeleton.tsx`           | Esquisse du panneau pendant le calcul — réserve la place (UF-405)        |
 | `plan-notice.tsx`                  | Message d'état : vide, panne, session expirée, mode dégradé (UF-405)     |
@@ -39,6 +44,64 @@ F2 », « 03 · Maquettes desktop → DESKTOP 2 : PLANIFICATEUR ».
 | `../../lib/geocoding.ts`           | Appels BAN normalisés : recherche, géocodage inverse (pur, testé)        |
 | `../../lib/geolocation.ts`         | Appel `navigator.geolocation` normalisé + formats (pur, testé)           |
 | `../../lib/format-search-date.ts`  | Libellés « aujourd'hui, 09:12 » / « hier » / date courte (pur, testé)    |
+| `../../lib/trip-options.ts`        | Options d'écran → corps de requête, catalogue des modes (pur, testé)     |
+| `../../lib/realtime-cards.ts`      | Bornes + état des sources → les deux encarts F3 (pur, testé)             |
+
+## Options de recherche et cartes temps réel (UF-804)
+
+Mise en conformité des deux écrans centraux avec la planche Figma. Quatre
+ajouts, et une règle qui les gouverne tous : **un contrôle affiché doit changer
+quelque chose de vérifiable**.
+
+### Ce que chaque contrôle fait réellement
+
+| Contrôle                 | Envoyé au serveur | Effet mesurable                                                          |
+| ------------------------ | ----------------- | ------------------------------------------------------------------------ |
+| Chip « heure de départ » | `departAt`        | l'heure interrogée dans le moteur GTFS                                   |
+| Chip « voyageurs »       | `travellers`      | une borne doit avoir assez de vélos **et** de places pour tout le groupe |
+| Sélecteur de modes       | `modes`           | filtre dur : un mode décoché ne revient dans aucun itinéraire            |
+| Bandeau « mode éco »     | _rien_            | il **annonce** ; c'est la priorité du profil (F1) qui décide             |
+| Bandeau de filtres (×4)  | _rien_            | retri en mémoire des itinéraires déjà reçus — zéro requête (C5)          |
+
+La frontière est nette et se lit à l'écran : **au-dessus de la liste on demande,
+en dessous on relit**. C'est ce qui permet aux quatre pastilles de ne coûter
+aucun appel réseau tout en portant le mot « filtre » de la planche.
+
+### Absent ≠ valeur par défaut
+
+`toPlanOptions` n'ajoute au corps que les champs qui **contraignent**. Un écran
+qu'on n'a pas touché envoie `{ from, to }` — exactement la requête d'avant le
+ticket. Sans cette règle, ouvrir la page ferait publier au serveur un
+`excludedModes` complet, et l'écran annoncerait un filtre que personne n'a posé.
+
+### Les deux cartes temps réel, et ce qu'elles n'affirment pas
+
+| Carte           | Source                           | Fraîcheur      | Ce qui est affiché          |
+| --------------- | -------------------------------- | -------------- | --------------------------- |
+| Station         | `GET /transport/stations/nearby` | **temps réel** | « 7 véhicules disponibles » |
+| Prochain départ | horaire GTFS de l'option retenue | **théorique**  | « départ à 09:47 »          |
+
+La planche écrit « passe dans 4 min » sous une étiquette « GTFS-RT ». Nous
+n'avons pas de GTFS temps réel — le flux officiel TCL est fermé (401) et la
+source branchée est un miroir statique daté (`docs/otp-gtfs.md`). Un décompte
+affirmerait qu'on suit le véhicule, ce que nous ne faisons pas : la carte affiche
+donc une **heure**, et dit d'où elle vient. Le suivi réellement continu est le
+sujet d'UF-806.
+
+`GET /transport/status` alimente la ligne de provenance des deux cartes : un flux
+GBFS figé nuance la disponibilité affichée sans la cacher (C10).
+
+### Écarts assumés par rapport à la planche
+
+| Planche                                      | Ici                                         | Pourquoi                                                                                                                  |
+| -------------------------------------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| Chips en badges statiques                    | `datetime-local` et `<select>` natifs       | clavier, lecteur d'écran et sélecteur système gratuits ; un menu maison coûtait un piège à focus et du bundle (C5)        |
+| Filtre « Économe » adossé à un prix          | adossé au **nombre de titres de transport** | aucune de nos sources ne publie de tarif ; inventer une grille afficherait un chiffre faux à côté de mesures (C9)         |
+| Prix par itinéraire (« 1,90 € »)             | absent                                      | même raison — le périmètre du projet ne comporte pas d'intégration billettique                                            |
+| Tuile de mode en couleur vive, texte compris | bordure et fond teintés, texte Ink 900      | vert 500 sur vert 50 donne 3.1:1 à 12 px, sous le seuil AA de 4.5:1 (C7 — WCAG 1.4.3)                                     |
+| « Recommandé IA » sur la première carte      | badges « Choix vert » / « Le plus rapide »  | aucune IA ne classe ces options : c'est un tri sur des valeurs publiées, et le dire autrement serait un argument de vente |
+| Points de gamification (« +45 pts »)         | absent                                      | la fonctionnalité au choix retenue est l'empreinte carbone (CLAUDE.md §3) — pas de compteur sans jeu derrière             |
+| Vue par défaut « Écologique » (UF-503)       | vue par défaut « Tous »                     | l'ancien défaut dupliquait le tri serveur : juste pour un profil « écolo », mensonger pour un profil « rapide »           |
 
 ## Recherche d'adresses (UF-203) — C5 / C9 / C7
 

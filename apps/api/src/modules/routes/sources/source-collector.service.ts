@@ -30,6 +30,16 @@ export interface RouteEndpoint {
 export interface CollectPreferences {
   /** Ne retenir que les trajets praticables en fauteuil roulant (C12). */
   reducedMobility: boolean;
+  /**
+   * Instant de départ demandé (ISO 8601) — chip « heure » du planificateur
+   * (UF-804). Absent : maintenant.
+   *
+   * Ne descend qu'à **une** des trois sources, et c'est voulu : seul le moteur
+   * GTFS rend un résultat qui dépend de l'heure. Une borne Vélo'v et un tronçon
+   * cyclable répondent la même chose à 8 h et à 22 h — leur passer une date
+   * n'ajouterait qu'un paramètre que personne ne lit.
+   */
+  departureAt?: string;
 }
 
 /**
@@ -222,6 +232,9 @@ export class SourceCollectorService {
       // C12 : la préférence PMR du profil devient une contrainte de calcul, pas
       // un filtre appliqué après coup sur des trajets impraticables.
       wheelchair: prefs.reducedMobility,
+      // UF-804 : l'heure de départ demandée par l'usager. Omise, le connecteur
+      // part de maintenant — son propre défaut, qu'on ne redouble pas ici.
+      ...(prefs.departureAt ? { departureAt: prefs.departureAt } : {}),
     });
   }
 

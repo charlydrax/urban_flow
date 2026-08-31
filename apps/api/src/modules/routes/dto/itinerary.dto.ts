@@ -256,6 +256,35 @@ export class AppliedRouteConstraintsDto implements AppliedRouteConstraints {
       'candidat non accessible : c’est un filtre dur, pas un critère de classement.',
   })
   reducedMobility!: boolean;
+
+  /**
+   * Modes que le sélecteur de l'écran a écartés de cette recherche (UF-804).
+   * Absent quand l'usager n'a rien décoché — pas « tableau vide » : le client
+   * doit pouvoir distinguer « aucune exclusion » d'une réponse rejouée depuis
+   * un cache antérieur au ticket.
+   */
+  @ApiPropertyOptional({
+    isArray: true,
+    enum: TransportMode,
+    example: [TransportMode.SCOOTER],
+    description:
+      'Modes décochés par l’usager pour cette recherche (UF-804). Filtre dur : un itinéraire ' +
+      'qui les emprunte n’est pas proposé. Absent quand rien n’a été décoché.',
+  })
+  excludedModes?: TransportMode[];
+
+  /**
+   * Taille du groupe exigée des bornes en libre-service (UF-804) — absente
+   * quand la recherche portait sur un seul voyageur, donc quand la contrainte
+   * n'a rien retiré.
+   */
+  @ApiPropertyOptional({
+    example: 3,
+    description:
+      'Nombre de véhicules exigé d’une borne pour qu’elle serve à un itinéraire partagé. ' +
+      'Absent pour un voyageur seul.',
+  })
+  travellers?: number;
 }
 
 /**

@@ -41,6 +41,9 @@ describe('mergeIntoItineraries', () => {
     priority: RoutePriority.GREENEST,
     reducedMobility: false,
     maxWalkMinutes: 15,
+    // UF-804 : le voyageur seul est le cas courant, et la valeur pour laquelle
+    // la fusion se comporte exactement comme avant le ticket.
+    travellers: 1,
   };
 
   const prefs = (overrides: Partial<MergePreferences> = {}): MergePreferences => ({
@@ -694,6 +697,160 @@ describe('mergeIntoItineraries', () => {
     // L'heure de départ est celle du métro moins la durée du rabattement — la
     // même arithmétique que la durée totale annoncée par ailleurs.
     expect(Date.parse(feeder?.departureAt ?? '')).toBe(boarding - leadMinutes * 60_000);
+  });
+
+  // --------------------------------------- UF-804 : sélecteur de modes et groupe
+
+  describe('sélecteur de modes de l’écran (UF-804)', () => {
+    /** Tous les modes cochés : c'est l'état initial du sélecteur, aucune exclusion. */
+    const ALL_MODES = Object.values(TransportMode);
+
+    it('n’exclut rien quand l’usager n’a rien décoché (`selectedModes` absent)', () => {
+      const withoutSelector = mergeIntoItineraries(sources(), PART_DIEU, BELLECOUR, prefs());
+      const withEverything = mergeIntoItineraries(
+        sources(),
+        PART_DIEU,
+        BELLECOUR,
+        prefs({ selectedModes: ALL_MODES }),
+      );
+
+      // Le champ absent et le champ complet doivent donner le même résultat :
+      // sinon, ouvrir l'écran changerait la réponse sans que personne n'ait
+      // touché à une case.
+      expect(withoutSelector.itineraries.map((i) => i.summary)).toEqual(
+        withEverything.itineraries.map((i) => i.summary),
+      );
+      expect(withoutSelector.itineraries.length).toBeGreaterThan(0);
+    });
+
+    it('écarte les itinéraires qui empruntent un mode décoché — filtre dur', () => {
+      const result = mergeIntoItineraries(
+        sources(),
+        PART_DIEU,
+        BELLECOUR,
+        prefs({ selectedModes: [TransportMode.WALK, TransportMode.BIKE] }),
+      );
+
+      const modes = result.itineraries.flatMap((itinerary) =>
+        itinerary.segments.map((segment) => segment.mode),
+      );
+      expect(modes).not.toContain(TransportMode.METRO);
+      expect(modes.length).toBeGreaterThan(0);
+    });
+
+    it('garde la marche praticable même quand elle n’est pas cochée', () => {
+      // Décocher « Marche » ne peut pas vouloir dire « ne pas marcher » : tout
+      // itinéraire multimodal commence et finit à pied. Le seul candidat que
+      // cela retire, c'est la marche **seule**.
+      const result = mergeIntoItineraries(
+        sources(),
+        PART_DIEU,
+        BELLECOUR,
+        prefs({ selectedModes: [TransportMode.BIKE] }),
+      );
+
+      expect(result.itineraries.length).toBeGreaterThan(0);
+      const hasWalkStep = result.itineraries.some((itinerary) =>
+        itinerary.segments.some((segment) => segment.mode === TransportMode.WALK),
+      );
+      expect(hasWalkStep).toBe(true);
+    });
+
+    it('retire la marche seule quand « Marche » est décochée', () => {
+      const shortTrip = sources({
+        journeys: [shortJourney('transit-1', 'B')],
+        destinationStations: [GUILLOTIERE_STATION],
+      });
+
+      const withWalk = mergeIntoItineraries(
+        shortTrip,
+        PART_DIEU,
+        GUILLOTIERE,
+        prefs({ maxWalkMinutes: 30, selectedModes: [TransportMode.WALK, TransportMode.METRO] }),
+      );
+      const withoutWalk = mergeIntoItineraries(
+        shortTrip,
+        PART_DIEU,
+        GUILLOTIERE,
+        prefs({ maxWalkMinutes: 30, selectedModes: [TransportMode.METRO] }),
+      );
+
+      const walkOnly = (result: ReturnType<typeof mergeIntoItineraries>) =>
+        result.itineraries.filter((itinerary) =>
+          itinerary.segments.every((segment) => segment.mode === TransportMode.WALK),
+        );
+
+      expect(walkOnly(withWalk)).toHaveLength(1);
+      expect(walkOnly(withoutWalk)).toHaveLength(0);
+    });
+
+    it('rend une liste vide plutôt qu’une proposition non demandée', () => {
+      // Un filtre dur peut tout retirer, et c'est le comportement attendu :
+      // « rien ne correspond » se dit à l'écran (UF-405), il ne se contourne
+      // pas en servant ce que l'usager vient d'exclure.
+      const result = mergeIntoItineraries(
+        sources({ originStations: [], destinationStations: [] }),
+        PART_DIEU,
+        BELLECOUR,
+        prefs({ selectedModes: [TransportMode.TRAM] }),
+      );
+
+      expect(result.itineraries).toHaveLength(0);
+    });
+  });
+
+  describe('taille du groupe (UF-804)', () => {
+    /** Borne au départ qui n'a qu'un vélo — suffisante pour un, pas pour trois. */
+    const ONE_BIKE = station({
+      id: '1001',
+      name: 'PART-DIEU / VILLETTE',
+      lat: 45.7604,
+      lng: 4.8598,
+      vehiclesAvailable: 1,
+      vehicles: [{ mode: TransportMode.BIKE, electric: false, count: 1 }],
+    });
+
+    const bikeFamilies = (travellers: number) =>
+      mergeIntoItineraries(
+        sources({ originStations: [ONE_BIKE], destinationStations: [BELLECOUR_STATION] }),
+        PART_DIEU,
+        BELLECOUR,
+        prefs({ travellers }),
+      ).itineraries.filter((itinerary) =>
+        itinerary.segments.some((segment) => segment.mode === TransportMode.BIKE),
+      );
+
+    it('propose le vélo partagé au voyageur seul', () => {
+      expect(bikeFamilies(1).length).toBeGreaterThan(0);
+    });
+
+    it('ne propose pas une borne qui n’a pas assez de vélos pour le groupe', () => {
+      // Proposer un Vélo'v à trois depuis une borne qui n'en a qu'un est une
+      // réponse fausse — et elle ne se découvre qu'une fois sur place (C10).
+      expect(bikeFamilies(3)).toHaveLength(0);
+    });
+
+    it('exige aussi assez de places pour rendre les vélos', () => {
+      const tightDropoff = station({
+        id: '2001',
+        name: 'BELLECOUR / RÉPUBLIQUE',
+        lat: 45.758,
+        lng: 4.8325,
+        docksAvailable: 1,
+      });
+
+      const result = mergeIntoItineraries(
+        sources({ originStations: [VILLETTE], destinationStations: [tightDropoff] }),
+        PART_DIEU,
+        BELLECOUR,
+        prefs({ travellers: 3 }),
+      );
+
+      const bike = result.itineraries.filter((itinerary) =>
+        itinerary.segments.some((segment) => segment.mode === TransportMode.BIKE),
+      );
+      expect(bike).toHaveLength(0);
+    });
   });
 });
 
