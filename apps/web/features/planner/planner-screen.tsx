@@ -19,6 +19,10 @@ import {
 import { departureCard, stationCard } from '../../lib/realtime-cards';
 import { describeSearchOptions, isEcoModeActive, type TripOptions } from '../../lib/trip-options';
 import { useSession } from '../auth/session-provider';
+import { NavigationScreen } from '../navigation/navigation-screen';
+import { NavigationSheet } from '../navigation/navigation-sheet';
+import { StartNavigation } from '../navigation/start-navigation';
+import { useNavigation } from '../navigation/use-navigation';
 import { CarbonBreakdown } from './carbon-breakdown';
 import { ItineraryList } from './itinerary-list';
 import { ItinerarySkeleton } from './itinerary-skeleton';
@@ -126,6 +130,15 @@ export function PlannerScreen() {
 
   const realtime = useRealtimeContext(origin);
 
+  /*
+    Guidage (UF-806). Le contrôleur vit ici parce que c'est ici que se trouvent
+    les deux choses dont il a besoin, et qu'il n'a aucune raison d'aller
+    chercher ailleurs : l'itinéraire retenu et le parcours de consentement à la
+    géolocalisation. Le monter plus haut aurait rendu un guidage disponible sur
+    des écrans qui n'ont pas d'itinéraire à suivre.
+  */
+  const navigation = useNavigation(location);
+
   const isSearching = routePlan.status === 'loading';
   const isEmptyResult = routePlan.status === 'ready' && routePlan.itineraries.length === 0;
 
@@ -198,6 +211,33 @@ export function PlannerScreen() {
     Ce n'est pas un détail cosmétique : c'est ce qui rend le `truncate` effectif.
     Tant que la piste s'élargissait, l'ellipse ne se déclenchait jamais.
   */
+  /*
+    En guidage, l'écran de navigation **remplace** le planificateur au lieu de
+    s'ajouter dessous : la maquette « 6. NAVIGATION » est un plein cadre, et
+    laisser le formulaire et la liste défiler sous la carte inviterait à lancer
+    une autre recherche pendant qu'on suit un trajet.
+
+    Le planificateur n'est pas démonté pour autant — il reprend exactement où il
+    en était à la sortie du guidage : mêmes résultats, même sélection, sans un
+    seul appel réseau de plus (C5/C10).
+  */
+  if (navigation.state.phase !== 'idle') {
+    return (
+      <NavigationScreen state={navigation.state}>
+        {(following, followAgain) => (
+          <NavigationSheet
+            state={navigation.state}
+            following={following}
+            onFollowAgain={followAgain}
+            onPause={navigation.pause}
+            onResume={navigation.resume}
+            onStop={navigation.stop}
+          />
+        )}
+      </NavigationScreen>
+    );
+  }
+
   return (
     <div className="grid gap-6 md:grid-cols-[minmax(0,360px)_minmax(0,1fr)]">
       <div className="flex min-w-0 flex-col gap-4">
@@ -318,6 +358,20 @@ export function PlannerScreen() {
               `<label>` de bouton radio, et y imbriquer un `<summary>` cliquable
               ferait changer la sélection à chaque ouverture du détail.
             */}
+            {/*
+              « Démarrer » avant le détail carbone : c'est l'action qui suit le
+              choix qu'on vient de faire, alors que le détail est une
+              justification qu'on ouvre si on la veut. La reléguer sous un bloc
+              dépliable ferait chercher le maillon principal du parcours.
+            */}
+            {selectedItinerary && (
+              <StartNavigation
+                itinerary={selectedItinerary}
+                awaitingConsent={navigation.awaitingConsent}
+                onStart={navigation.start}
+              />
+            )}
+
             {selectedItinerary && <CarbonBreakdown itinerary={selectedItinerary} />}
 
             {/*
