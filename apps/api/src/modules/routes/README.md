@@ -16,6 +16,41 @@ Contrat d'entrée : `{ from: {label, lat, lng}, to: {...} }` — **sans `userId`
 L'identité vient du JWT et de lui seul (anti-IDOR, C4) ; le `ValidationPipe`
 global rejette en `400` une requête qui en enverrait encore un.
 
+### Options de recherche (UF-804)
+
+Trois champs **facultatifs** s'ajoutent au corps depuis UF-804, alimentés par
+les chips et le sélecteur de modes du planificateur :
+
+| Champ        | Type              | Absent = …         | Effet réel                                                                   |
+| ------------ | ----------------- | ------------------ | ---------------------------------------------------------------------------- |
+| `departAt`   | ISO 8601          | maintenant         | descend au **seul** moteur GTFS — les deux autres sources sont hors horloge  |
+| `travellers` | entier 1→8        | 1                  | exigence de disponibilité sur les **bornes** en libre-service                |
+| `modes`      | `TransportMode[]` | aucune restriction | **filtre dur** : un itinéraire qui emprunte un mode absent n'est pas proposé |
+
+Trois précisions qui expliquent la forme du contrat :
+
+- **absent ≠ valeur par défaut.** Un écran qu'on n'a pas touché envoie
+  `{ from, to }` et rien d'autre — donc exactement la requête d'avant le ticket.
+  C'est ce qui garantit qu'UF-804 n'a rien changé pour qui ne s'en sert pas, et
+  que le serveur ne publie pas un filtre que personne n'a posé.
+- **`modes` n'est pas `preferredModes`.** Le profil de mobilité (F1) énonce un
+  goût durable, qui départage à qualité égale sans jamais exclure ; le sélecteur
+  de l'écran énonce une contrainte du moment, et une contrainte qui n'exclut
+  rien n'en est pas une. La marche reste admise dans tous les cas — l'exclure ne
+  laisserait aucune proposition constructible.
+- **`travellers` n'agit que sur les mobilités partagées.** Une borne publie le
+  nombre exact de véhicules louables ; la capacité d'un métro ne se lit dans
+  aucun GTFS. Prétendre la modéliser reviendrait à inventer une donnée (C9).
+  L'empreinte publiée reste celle d'**un** voyageur : la multiplier par la
+  taille du groupe changerait la signification du chiffre d'une recherche à
+  l'autre.
+
+`appliedConstraints` s'étend en conséquence : `excludedModes` (les modes
+écartés, jamais la marche) et `travellers` (seulement au-delà de 1). Comme
+`reducedMobility` avant eux, ils ne sont publiés que lorsqu'ils ont
+**effectivement retiré** des options — une contrainte inerte annoncée comme
+active ferait chercher une explication là où il n'y en a pas.
+
 ### Accès invité (UF-801)
 
 `POST /routes/plan` est le seul endpoint de l'API à porter `@OptionalAuth()`.
@@ -69,6 +104,7 @@ label seul donne un `400` explicite — pas une liste vide inexplicable.
 | 20. Tri par empreinte croissante par défaut     | UF-503 | ✅   |
 | 7 et 18. Sauvegarde `search_history`            | UF-402 | ✅   |
 | 2. Vérification JWT — **facultative** ici       | UF-801 | ✅   |
+| Options de recherche (heure, groupe, modes)     | UF-804 | ✅   |
 
 **Plus aucun itinéraire n'est simulé.** Une liste vide signifie désormais
 qu'aucune chaîne continue n'a pu être formée — et `sources` dit si c'est faute de

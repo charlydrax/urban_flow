@@ -17,13 +17,38 @@ du chemin critique (C5/C10), et c'est ce qui rend `ST_DWithin` pertinent.
 
 Consommé par le Service Itinéraire (module `routes`) via des appels parallèles (C10).
 
-## Endpoints (protégés par le guard JWT global)
+## Endpoints
 
-| Méthode | Route                               | Description                                  |
-| ------- | ----------------------------------- | -------------------------------------------- |
-| GET     | `/api/transport/status`             | État des deux sources GTFS/GBFS              |
-| GET     | `/api/transport/stations/nearby`    | Stations en libre-service autour d'un point  |
-| GET     | `/api/transport/cycle-paths/nearby` | Tronçons cyclables/piétons autour d'un point |
+| Méthode | Route                               | Description                                  | Auth                 |
+| ------- | ----------------------------------- | -------------------------------------------- | -------------------- |
+| GET     | `/api/transport/status`             | État des deux sources GTFS/GBFS              | facultative (UF-804) |
+| GET     | `/api/transport/stations/nearby`    | Stations en libre-service autour d'un point  | facultative (UF-804) |
+| GET     | `/api/transport/cycle-paths/nearby` | Tronçons cyclables/piétons autour d'un point | requise (guard JWT)  |
+
+### Qui consomme quoi (UF-804)
+
+Le ticket #93 demandait de « rebrancher le module transport (3 endpoints livrés
+sans consommateur front) ou de clarifier son statut ». État après ce ticket :
+
+| Route                 | Consommateur                                                     | Statut                       |
+| --------------------- | ---------------------------------------------------------------- | ---------------------------- |
+| `/status`             | ligne de provenance des deux cartes temps réel (`RealtimeCards`) | **branché**                  |
+| `/stations/nearby`    | carte « station en libre-service » du panneau de résultats       | **branché**                  |
+| `/cycle-paths/nearby` | _aucun_ — voir ci-dessous                                        | **volontairement inutilisé** |
+
+`/cycle-paths/nearby` n'est **pas** du code mort : le service qu'il expose
+(`CyclePathsService`) est appelé à chaque planification, comme troisième branche
+du `Promise.all` de la collecte (UF-305). C'est l'**endpoint HTTP** qui n'a pas
+de consommateur, et il est conservé pour deux raisons — la recette d'UF-304 s'y
+rejoue directement, et le dossier projet s'en sert pour montrer `ST_DWithin` à
+l'œuvre en soutenance. Il reste donc sous le régime d'authentification par
+défaut : ouvrir une route que personne n'appelle élargirait la surface d'attaque
+sans contrepartie (C4).
+
+Les deux autres sont passés en `@OptionalAuth()` parce qu'ils alimentent
+désormais un écran ouvert aux visiteurs (UF-801) et rendent une donnée publique,
+identique pour tout le monde. Un jeton **présenté et invalide** reste un `401` :
+une session morte ne doit pas devenir une visite anonyme en silence.
 
 ## Connecteur transports en commun (UF-302)
 

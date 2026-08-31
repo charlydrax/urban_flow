@@ -206,3 +206,13 @@ confidentialité   …                 OK
 
 Aucun débordement horizontal, aucune cible sous le seuil AA, aucun écart de
 validité HTML sur les six écrans clés.
+
+> **Rejoué à UF-804**, après l'ajout du sélecteur de modes et du bandeau de
+> filtres : même verdict. L'audit a d'ailleurs servi à ce ticket comme il avait
+> servi à celui-ci — il a rejeté la première version du sélecteur, dont les six
+> cases `sr-only` se présentaient comme six cibles de 1 × 1 px parce qu'elles
+> étaient **frères** de leur étiquette et non dedans. Le motif `peer` du reste
+> du produit est correct pour un contrôle isolé ; il ne l'est pas quand la
+> vraie cible tactile est l'étiquette, puisqu'on ne peut alors plus la trouver
+> en remontant depuis la case. Les deux composants d'UF-804 imbriquent donc
+> leur contrôle (`mode-selector.tsx`, `itinerary-filters.tsx`).

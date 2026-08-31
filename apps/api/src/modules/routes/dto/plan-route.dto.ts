@@ -1,12 +1,26 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import type { Place, PlanRouteRequest } from '@urbanflow/shared';
+import {
+  MAX_TRAVELLERS,
+  MIN_TRAVELLERS,
+  TransportMode,
+  type Place,
+  type PlanRouteRequest,
+} from '@urbanflow/shared';
 import { Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
+  ArrayUnique,
+  IsArray,
+  IsEnum,
+  IsISO8601,
+  IsInt,
   IsLatitude,
   IsLongitude,
   IsOptional,
   IsString,
+  Max,
   MaxLength,
+  Min,
   MinLength,
   ValidateNested,
 } from 'class-validator';
@@ -66,4 +80,67 @@ export class PlanRouteDto implements PlanRouteRequest {
   @ValidateNested()
   @Type(() => PlaceDto)
   to!: PlaceDto;
+
+  /**
+   * Instant de départ souhaité (ISO 8601) — chip « heure » du planificateur (UF-804).
+   *
+   * Facultatif, et c'est le cas courant : absent, le moteur GTFS part de
+   * maintenant, comme il le faisait avant ce ticket. Une chaîne illisible est
+   * refusée ici en `400` plutôt que d'atteindre le connecteur : le message
+   * d'erreur y désigne alors le champ fautif, ce qu'un `Invalid Date` remonté
+   * de trois couches plus bas ne fait pas (C10).
+   */
+  @ApiPropertyOptional({
+    example: '2026-09-01T08:30:00+02:00',
+    description: 'Départ souhaité. Absent = maintenant.',
+  })
+  @IsOptional()
+  @IsISO8601({ strict: true })
+  departAt?: string;
+
+  /**
+   * Nombre de voyageurs — chip « voyageurs » du planificateur (UF-804).
+   *
+   * Borné des deux côtés (C4) : la borne haute évite qu'un entier arbitraire
+   * ne serve à vider systématiquement les options de mobilité partagée, la
+   * borne basse qu'un `0` ou un négatif ne désactive silencieusement la
+   * contrainte de disponibilité.
+   */
+  @ApiPropertyOptional({
+    example: 1,
+    minimum: MIN_TRAVELLERS,
+    maximum: MAX_TRAVELLERS,
+    description: 'Taille du groupe. Absent = 1.',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(MIN_TRAVELLERS)
+  @Max(MAX_TRAVELLERS)
+  travellers?: number;
+
+  /**
+   * Modes retenus pour cette recherche — sélecteur de modes du planificateur
+   * (UF-804).
+   *
+   * Absent, la recherche est celle d'avant le ticket : aucune exclusion. Un
+   * tableau **vide** est en revanche une demande explicite — « rien d'autre que
+   * la marche » — et non l'absence de filtre ; le `ValidationPipe` ne les
+   * confond pas, et le service non plus.
+   *
+   * `ArrayUnique` n'est pas de la coquetterie : un même mode répété n'ajoute
+   * rien et allongerait le message d'`appliedConstraints` renvoyé au client.
+   */
+  @ApiPropertyOptional({
+    isArray: true,
+    enum: TransportMode,
+    example: [TransportMode.WALK, TransportMode.BIKE, TransportMode.BUS],
+    description: 'Modes acceptés. Absent = tous. La marche est toujours admise.',
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(Object.keys(TransportMode).length)
+  @ArrayUnique()
+  @IsEnum(TransportMode, { each: true })
+  modes?: TransportMode[];
 }

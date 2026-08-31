@@ -27,7 +27,64 @@ export interface Place {
 export interface PlanRouteRequest {
   from: Place;
   to: Place;
+  /**
+   * Instant de départ souhaité (ISO 8601 avec fuseau) — UF-804.
+   *
+   * Absent = « maintenant », ce qui reste le cas de très loin le plus fréquent :
+   * la chip du planificateur s'ouvre dessus. Le champ ne descend que jusqu'au
+   * moteur GTFS, seule source dont le résultat dépende de l'heure — un vélo en
+   * libre-service et un tronçon cyclable sont les mêmes à 8 h et à 22 h.
+   */
+  departAt?: string;
+  /**
+   * Nombre de voyageurs du groupe — UF-804, entre {@link MIN_TRAVELLERS} et
+   * {@link MAX_TRAVELLERS}, `1` par défaut.
+   *
+   * Ce n'est **pas** un champ décoratif : il devient une exigence de
+   * disponibilité sur les mobilités partagées. Proposer un Vélo'v à quatre
+   * personnes depuis une borne qui n'en a qu'un est une réponse fausse, et
+   * elle ne se découvre qu'une fois sur place — là où l'usager ne peut plus
+   * rien en faire (C10).
+   *
+   * Il ne touche ni aux transports en commun (la capacité d'un métro ne se
+   * modélise pas depuis un GTFS) ni à l'empreinte publiée, qui reste celle
+   * d'**un** voyageur : multiplier les grammes par la taille du groupe
+   * changerait la signification du chiffre d'une recherche à l'autre.
+   */
+  travellers?: number;
+  /**
+   * Modes retenus par l'usager pour **cette** recherche — UF-804.
+   *
+   * Absent = aucune restriction : les préférences du profil (F1) s'appliquent
+   * alors seules, telles qu'elles l'ont toujours fait. Présent, c'est un
+   * **filtre dur** : un itinéraire qui emprunte un mode décoché n'est pas
+   * proposé.
+   *
+   * La différence avec `preferredModes` du profil est délibérée. Le profil dit
+   * un goût durable, qui départage à qualité égale ; le sélecteur de l'écran
+   * dit une contrainte du moment (« pas de métro aujourd'hui »), et une
+   * contrainte qui n'exclut rien n'est pas une contrainte.
+   *
+   * {@link TransportMode.WALK} est toujours accepté, qu'il figure ou non dans
+   * la liste : tout itinéraire commence et finit à pied, et l'exclure ne
+   * laisserait aucune proposition constructible.
+   */
+  modes?: TransportMode[];
 }
+
+/** Plus petit groupe possible : le voyageur seul, et le défaut du planificateur. */
+export const MIN_TRAVELLERS = 1;
+
+/**
+ * Plus grand groupe accepté par le planificateur.
+ *
+ * Huit, parce que c'est l'ordre de grandeur au-delà duquel une borne Vélo'v ne
+ * répond plus jamais à la demande (la plus grande station du réseau en compte
+ * une trentaine, rarement toutes louables) : accepter des valeurs plus hautes
+ * offrirait surtout un moyen de vider systématiquement les résultats. Borner
+ * ferme aussi la porte à un entier géant envoyé pour voir (C4).
+ */
+export const MAX_TRAVELLERS = 8;
 
 /** Tracé GeoJSON LineString [lng, lat] pour l'affichage MapLibre (format standard — C9). */
 export interface LineStringGeometry {
@@ -202,6 +259,29 @@ export interface AppliedRouteConstraints {
    * (`itinerary-merger.ts`). Ce n'est donc pas une préférence de classement.
    */
   reducedMobility: boolean;
+  /**
+   * Modes que le **sélecteur de l'écran** a écartés de cette recherche (UF-804).
+   *
+   * Absent quand l'usager n'a rien décoché — et non « tableau vide » : le
+   * client doit pouvoir distinguer « aucune exclusion » d'« une réponse d'un
+   * cache antérieur au ticket », exactement comme pour `appliedConstraints`
+   * lui-même.
+   *
+   * Publié parce qu'une liste courte, ou vide, ne dit pas d'elle-même si le
+   * réseau ne propose rien ou si un mode décoché a écarté ce qu'il proposait.
+   * C'est le même raisonnement que `reducedMobility`, appliqué à une contrainte
+   * que l'usager vient de poser lui-même — et qu'il peut donc défaire.
+   */
+  excludedModes?: TransportMode[];
+  /**
+   * Taille du groupe exigée des bornes en libre-service (UF-804).
+   *
+   * Absent quand la recherche portait sur un seul voyageur, c'est-à-dire quand
+   * la contrainte n'a rien retiré. Au-delà, elle en retire beaucoup : c'est ce
+   * qui explique une liste sans option vélo dans un quartier pourtant bien
+   * équipé.
+   */
+  travellers?: number;
 }
 
 /** Réponse de POST /api/routes/plan, triée selon la priorité du profil. */

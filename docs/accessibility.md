@@ -55,14 +55,15 @@ au lieu d'attendre une passe manuelle que personne ne relance.
 
 Dernière exécution sur la branche `feat/uf-602-accessibility-wcag-aa` :
 
-| Suite                                                 | Composants audités                                               | Violations AA |
-| ----------------------------------------------------- | ---------------------------------------------------------------- | ------------- |
-| `components/layout/layout.a11y.test.tsx`              | En-tête (connecté / déconnecté), bandeau hors-ligne              | **0**         |
-| `features/auth/auth.a11y.test.tsx`                    | Connexion, inscription (dans leur coque `AuthShell`)             | **0**         |
-| `features/profile/profile.a11y.test.tsx`              | Profil de mobilité (chargé et en erreur)                         | **0**         |
-| `features/planner/planner.a11y.test.tsx`              | Liste d'itinéraires, détail carbone, squelette, messages d'échec | **0**         |
-| `features/planner/accessibility-filter.a11y.test.tsx` | Note « filtre accessibilité actif »                              | **0**         |
-| **Total**                                             | **27 assertions, dont 14 passes axe complètes**                  | **0**         |
+| Suite                                                 | Composants audités                                                | Violations AA |
+| ----------------------------------------------------- | ----------------------------------------------------------------- | ------------- |
+| `components/layout/layout.a11y.test.tsx`              | En-tête (connecté / déconnecté), bandeau hors-ligne               | **0**         |
+| `features/auth/auth.a11y.test.tsx`                    | Connexion, inscription (dans leur coque `AuthShell`)              | **0**         |
+| `features/profile/profile.a11y.test.tsx`              | Profil de mobilité (chargé et en erreur)                          | **0**         |
+| `features/planner/planner.a11y.test.tsx`              | Liste d'itinéraires, détail carbone, squelette, messages d'échec  | **0**         |
+| `features/planner/planner.a11y.test.tsx` (UF-804)     | Chips heure/voyageurs, sélecteur de modes, bandeau éco, cartes F3 | **0**         |
+| `features/planner/accessibility-filter.a11y.test.tsx` | Note « filtre accessibilité actif »                               | **0**         |
+| **Total**                                             | **27 assertions, dont 14 passes axe complètes**                   | **0**         |
 
 Périmètre exact des règles : tags axe `wcag2a`, `wcag2aa`, `wcag21a`, `wcag21aa`.
 Les règles « best-practice » d'axe sont **exclues** — elles sont utiles mais ne

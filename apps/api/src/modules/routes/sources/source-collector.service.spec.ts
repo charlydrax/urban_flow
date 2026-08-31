@@ -357,6 +357,44 @@ describe('SourceCollectorService', () => {
 
       expect(getTransitJourneys).toHaveBeenCalledWith(from, to, { wheelchair: true });
     });
+
+    it('passes the requested departure time down to the transit engine (UF-804)', async () => {
+      await service.collectAllSources(from, to, {
+        reducedMobility: false,
+        departureAt: '2026-09-01T08:30:00+02:00',
+      });
+
+      expect(getTransitJourneys).toHaveBeenCalledWith(from, to, {
+        wheelchair: false,
+        departureAt: '2026-09-01T08:30:00+02:00',
+      });
+    });
+
+    it('leaves the departure time out when the chip stayed on “now” (UF-804)', async () => {
+      // Le connecteur a son propre défaut : lui passer explicitement l'instant
+      // présent figerait l'heure au moment où la collecte se prépare, et non au
+      // moment où le moteur traite la requête.
+      await service.collectAllSources(from, to, { reducedMobility: false });
+
+      expect(getTransitJourneys).toHaveBeenCalledWith(from, to, { wheelchair: false });
+    });
+
+    it('never dates the two sources that do not depend on the clock (UF-804, C5)', async () => {
+      // Une borne Vélo'v et un tronçon cyclable rendent la même chose à 8 h et
+      // à 22 h : leur passer une date n'ajouterait qu'un paramètre que personne
+      // ne lit, et laisserait croire qu'ils en tiennent compte.
+      await service.collectAllSources(from, to, {
+        reducedMobility: false,
+        departureAt: '2026-09-01T08:30:00+02:00',
+      });
+
+      for (const call of getNearbyStations.mock.calls) {
+        expect(JSON.stringify(call)).not.toContain('2026-09-01');
+      }
+      for (const call of getCycleSegments.mock.calls) {
+        expect(JSON.stringify(call)).not.toContain('2026-09-01');
+      }
+    });
   });
 
   describe('toAvailability', () => {

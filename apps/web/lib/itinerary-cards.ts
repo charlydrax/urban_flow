@@ -274,38 +274,171 @@ const VIEW_COMPARATORS: Record<ItinerarySortKey, (a: Itinerary, b: Itinerary) =>
   durationAsc: (a, b) => a.durationMinutes - b.durationMinutes || a.carbonGrams - b.carbonGrams,
 };
 
-/**
- * Réordonne la liste affichée selon la clé demandée, sans la modifier.
- *
- * @param itineraries Itinéraires reçus du serveur
- * @param sortKey Clé de vue choisie par l'usager (ou celle publiée par le serveur au départ)
- * @returns Une **nouvelle** liste : muter le tableau d'état de React ne
- * déclencherait aucun rendu, et ferait diverger la liste de ce que la carte trace
- */
-export function sortItineraries(
-  itineraries: readonly Itinerary[],
-  sortKey: ItinerarySortKey,
-): Itinerary[] {
-  return [...itineraries].sort(VIEW_COMPARATORS[sortKey]);
-}
-
-/** Libellé du tri appliqué, annoncé sous le décompte des itinéraires. */
+/** Libellé du tri **publié par le serveur**, annoncé sous le décompte. */
 export const SORT_LABELS: Record<ItinerarySortKey, string> = {
   carbonAsc: 'classés par empreinte carbone croissante',
   durationAsc: 'classés par durée croissante',
 };
 
+// ------------------------------------------------- les quatre vues (UF-804)
+
 /**
- * Intitulé du bouton de chaque tri dans le sélecteur de vue.
+ * Clé d'une des **quatre vues** du panneau de résultats (UF-804).
  *
- * `carbonAsc` vient en premier partout — dans ce `Record` comme à l'écran :
- * c'est le tri par défaut du produit, et l'ordre de lecture est le premier
- * signal de ce qui est proposé et de ce qui est une alternative.
+ * La planche Figma (« 5. RÉSULTATS F2+F3 ») pose quatre pastilles — Tous,
+ * Rapide, Écolo, Économe — là où UF-503 n'en avait livré que deux. Le type est
+ * distinct d'`ItinerarySortKey`, et ce n'est pas un détail : `ItinerarySortKey`
+ * est le **contrat serveur**, celui que `sortedBy` publie et que le serveur
+ * sait appliquer. Ces quatre-là sont des vues **du client**, qui n'existent que
+ * dans ce panneau. Les confondre laisserait croire qu'on peut demander
+ * « Économe » à l'API.
  */
-export const SORT_OPTIONS: ReadonlyArray<{ key: ItinerarySortKey; label: string; icon: string }> = [
-  { key: 'carbonAsc', label: 'Écologique', icon: '🌱' },
-  { key: 'durationAsc', label: 'Rapide', icon: '⚡' },
+export type ItineraryViewKey = 'all' | 'durationAsc' | 'carbonAsc' | 'fareAsc';
+
+/** Une pastille du bandeau de filtres. */
+export interface ItineraryView {
+  key: ItineraryViewKey;
+  /** Intitulé de la planche. */
+  label: string;
+  /** Pictogramme décoratif, à poser en `aria-hidden`. */
+  icon: string;
+  /** Ce que la vue fait, annoncé sous le décompte et repris par le lecteur d'écran. */
+  description: string;
+}
+
+/**
+ * Les quatre vues, dans l'ordre de la planche.
+ *
+ * « Tous » vient en premier, et c'est elle qui est active à l'ouverture : c'est
+ * la pastille sombre de la maquette, et surtout l'ordre **publié par le
+ * serveur**. Les trois autres sont des relectures de la même liste.
+ *
+ * ## L'écart assumé sur « Économe »
+ *
+ * La planche affiche un prix sur chaque carte (« 1,90 € »). Nous n'en avons
+ * aucun : ni le GTFS TCL ni le flux GBFS ne publient de tarif, et le périmètre
+ * du projet (CLAUDE.md §3) ne comporte aucune intégration billettique.
+ * Fabriquer une grille tarifaire pour remplir la pastille reviendrait à
+ * afficher un chiffre inventé à côté de chiffres mesurés — exactement ce que le
+ * reste du produit s'interdit (C9).
+ *
+ * « Économe » est donc appliqué à la seule donnée de coût que nous possédions
+ * réellement : le **nombre de titres de transport** à sortir, compté sur les
+ * segments (voir {@link fareCount}). Marcher ne coûte rien, un métro coûte un
+ * ticket, deux lignes de bus en coûtent deux. C'est moins précis qu'un prix, ce
+ * n'est pas faux, et cela classe les options dans le même ordre la plupart du
+ * temps.
+ */
+export const ITINERARY_VIEWS: readonly ItineraryView[] = [
+  { key: 'all', label: 'Tous', icon: '☰', description: 'dans l’ordre proposé par UrbanFlow' },
+  { key: 'durationAsc', label: 'Rapide', icon: '⚡', description: 'classés par durée croissante' },
+  {
+    key: 'carbonAsc',
+    label: 'Écolo',
+    icon: '🌱',
+    description: 'classés par empreinte carbone croissante',
+  },
+  {
+    key: 'fareAsc',
+    label: 'Économe',
+    icon: '💶',
+    description: 'classés par nombre de titres de transport croissant',
+  },
 ];
+
+/** Retrouve une vue par sa clé — le catalogue est court, la recherche linéaire suffit. */
+export function itineraryView(key: ItineraryViewKey): ItineraryView {
+  // « Tous » est le repli : une clé inconnue ne peut venir que d'un état
+  // corrompu, et rendre la liste dans l'ordre du serveur reste une réponse
+  // valide.
+  return ITINERARY_VIEWS.find((view) => view.key === key) ?? ITINERARY_VIEWS[0];
+}
+
+/**
+ * Nombre de titres de transport à payer pour un itinéraire.
+ *
+ * Compte **une unité par service payant emprunté**, et non par segment : un
+ * métro B repris après un changement de quai reste un ticket. Deux lignes de
+ * bus différentes en font deux ; un vélo en libre-service en fait un, quelle
+ * que soit la longueur du trajet. La marche ne compte pas.
+ *
+ * Ce n'est pas un prix, et le nom le dit. Voir {@link ITINERARY_VIEWS} pour la
+ * raison pour laquelle on n'en calcule pas.
+ *
+ * @param itinerary Itinéraire à évaluer
+ * @returns Le nombre de titres, `0` pour un itinéraire entièrement à pied
+ */
+export function fareCount(itinerary: Itinerary): number {
+  const fares = new Set<string>();
+
+  for (const segment of itinerary.segments) {
+    if (segment.mode === TransportMode.WALK) continue;
+    // La ligne distingue deux bus l'un de l'autre ; en son absence (un vélo en
+    // libre-service n'en a pas), le mode suffit à identifier le service.
+    fares.add(segment.line ? `${segment.mode}:${segment.line}` : segment.mode);
+  }
+
+  return fares.size;
+}
+
+/**
+ * Comparateurs des trois vues qui réordonnent (« Tous » n'en a pas besoin).
+ *
+ * Chacun porte un second critère, pour la même raison que
+ * {@link VIEW_COMPARATORS} : sans lui, l'ordre d'un ex æquo dépendrait de la
+ * stabilité du `sort` du moteur. « Économe » départage sur la durée — à titres
+ * égaux, le trajet le plus court est le meilleur.
+ */
+const FILTER_COMPARATORS: Record<
+  Exclude<ItineraryViewKey, 'all'>,
+  (a: Itinerary, b: Itinerary) => number
+> = {
+  carbonAsc: VIEW_COMPARATORS.carbonAsc,
+  durationAsc: VIEW_COMPARATORS.durationAsc,
+  fareAsc: (a, b) => fareCount(a) - fareCount(b) || a.durationMinutes - b.durationMinutes,
+};
+
+/**
+ * Applique une vue à la liste reçue du serveur.
+ *
+ * Les quatre vues **réordonnent** ; aucune ne retire d'itinéraire. C'est une
+ * décision, pas un raccourci : cacher des options derrière une pastille ferait
+ * disparaître de l'écran, sans le dire, des trajets que le serveur juge
+ * pertinents — et l'usager qui clique « Écolo » veut voir le plus écologique
+ * *en premier*, pas être privé des autres. Le mot « filtre » vient de la
+ * planche ; le geste, lui, reste une relecture.
+ *
+ * @param itineraries Itinéraires reçus, dans l'ordre publié par le serveur
+ * @param view Vue active
+ * @returns Une **nouvelle** liste — muter le tableau d'état de React ne
+ * déclencherait aucun rendu, et ferait diverger la liste de ce que la carte trace
+ */
+export function applyItineraryView(
+  itineraries: readonly Itinerary[],
+  view: ItineraryViewKey,
+): Itinerary[] {
+  if (view === 'all') return [...itineraries];
+  return [...itineraries].sort(FILTER_COMPARATORS[view]);
+}
+
+/**
+ * Libellé complet du classement affiché, posé sous le décompte.
+ *
+ * « Tous » est le seul cas où la vue ne dit pas tout : l'ordre est celui du
+ * serveur, et c'est `sortedBy` qui le décrit. Sans cette reprise, un usager
+ * resté sur « Tous » n'aurait aucun moyen de savoir sur quel critère sa liste
+ * est classée.
+ *
+ * @param view Vue active
+ * @param serverSort Clé publiée par le serveur, `null` avant la première réponse
+ */
+export function describeItineraryView(
+  view: ItineraryViewKey,
+  serverSort: ItinerarySortKey | null,
+): string {
+  if (view !== 'all') return itineraryView(view).description;
+  return serverSort ? SORT_LABELS[serverSort] : itineraryView('all').description;
+}
 
 /**
  * Description d'un itinéraire en une phrase, pour les technologies d'assistance

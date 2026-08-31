@@ -1,5 +1,10 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
-import type { ItinerarySortKey } from '@urbanflow/shared';
+import {
+  MIN_TRAVELLERS,
+  TransportMode,
+  type AppliedRouteConstraints,
+  type ItinerarySortKey,
+} from '@urbanflow/shared';
 
 import { CarbonService } from '../carbon/carbon.service';
 import { SearchHistoryService } from '../search-history/search-history.service';
@@ -97,10 +102,23 @@ export class RoutesService {
       ? await this.users.getPreferences(userId)
       : { ...DEFAULT_PREFERENCES, preferredModes: [...DEFAULT_PREFERENCES.preferredModes] };
 
-    // Publié dans les deux sorties de la méthode (UF-602) : que la liste soit
-    // pleine, courte ou vide, le client doit pouvoir dire *pourquoi* — un
-    // filtre PMR actif change la lecture d'un « aucun itinéraire » (C7/C12).
-    const appliedConstraints = { reducedMobility: preferences.reducedMobility };
+    // UF-804 : la chip « voyageurs » et le sélecteur de modes de l'écran. Ce
+    // sont des contraintes **de la requête**, pas du profil : elles ne sont
+    // donc pas fusionnées dans `preferences`, qui décrit un compte, mais
+    // passées à côté. Un groupe de un et une sélection absente rendent
+    // exactement le comportement d'avant le ticket.
+    const travellers = dto.travellers ?? MIN_TRAVELLERS;
+    const selectedModes = dto.modes;
+
+    // Publié dans les deux sorties de la méthode (UF-602, étendu par UF-804) :
+    // que la liste soit pleine, courte ou vide, le client doit pouvoir dire
+    // *pourquoi* — un filtre PMR actif, un mode décoché ou un groupe de quatre
+    // changent tous la lecture d'un « aucun itinéraire » (C7/C12).
+    const appliedConstraints = describeConstraints(
+      preferences.reducedMobility,
+      selectedModes,
+      travellers,
+    );
 
     // Étape 18 : la recherche est enregistrée dès sa soumission, en même temps
     // que la collecte démarre. Deux raisons de ne pas attendre le résultat :
@@ -113,6 +131,7 @@ export class RoutesService {
     // Étapes 13-18 : les trois sources en parallèle (UF-305).
     const collected = await this.collector.collectAllSources(from, to, {
       reducedMobility: preferences.reducedMobility,
+      ...(dto.departAt ? { departureAt: dto.departAt } : {}),
     });
 
     if (collected.allSourcesFailed) {
@@ -135,7 +154,11 @@ export class RoutesService {
 
     // Étape 5 du flux : la fusion (UF-401). Fonction pure — elle ne connaît que
     // ce que la collecte a rapporté, et ne peut donc rien inventer.
-    const { itineraries, sortedBy } = mergeIntoItineraries(collected, from, to, preferences);
+    const { itineraries, sortedBy } = mergeIntoItineraries(collected, from, to, {
+      ...preferences,
+      travellers,
+      ...(selectedModes ? { selectedModes } : {}),
+    });
 
     // Étapes 16-17 du flux (UF-502) : la valorisation carbone de la liste
     // fusionnée. Mesurée, parce que le ticket exige que le calcul « ne rallonge
@@ -262,6 +285,41 @@ export class RoutesService {
       return null;
     }
   }
+}
+
+/**
+ * Traduit les contraintes **de cette requête** en `appliedConstraints` publiable
+ * (UF-602, étendu par UF-804).
+ *
+ * Le principe est le même pour les trois : on ne publie que ce qui a
+ * effectivement retiré des options. Une contrainte inerte annoncée comme active
+ * ferait chercher une explication là où il n'y en a pas, et userait la
+ * confiance qu'on met dans les deux autres.
+ */
+function describeConstraints(
+  reducedMobility: boolean,
+  selectedModes: TransportMode[] | undefined,
+  travellers: number,
+): AppliedRouteConstraints {
+  const constraints: AppliedRouteConstraints = { reducedMobility };
+
+  if (selectedModes) {
+    // Ce qui est publié, ce sont les modes **écartés**, pas les modes retenus.
+    // Le client sait déjà ce qu'il a coché ; ce qu'il ne peut pas déduire, c'est
+    // lesquelles de ses cases expliquent la liste qu'il a sous les yeux. La
+    // marche n'y figure jamais : elle reste admise quoi qu'il arrive
+    // (`usesOnlySelectedModes`), et l'annoncer exclue serait faux.
+    const excludedModes = Object.values(TransportMode).filter(
+      (mode) => mode !== TransportMode.WALK && !selectedModes.includes(mode),
+    );
+    if (excludedModes.length > 0) constraints.excludedModes = excludedModes;
+  }
+
+  // Un voyageur seul n'a rien retiré : l'annoncer ferait chercher une contrainte
+  // là où il n'y en a pas.
+  if (travellers > MIN_TRAVELLERS) constraints.travellers = travellers;
+
+  return constraints;
 }
 
 /**

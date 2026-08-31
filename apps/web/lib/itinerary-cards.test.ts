@@ -3,14 +3,16 @@ import { describe, expect, it } from 'vitest';
 
 import {
   HIGHLIGHT_LABELS,
+  ITINERARY_VIEWS,
   MODE_ICONS,
-  SORT_OPTIONS,
+  applyItineraryView,
   describeItinerary,
+  describeItineraryView,
+  fareCount,
   formatClock,
   itineraryClock,
   itineraryHighlights,
   modeSequence,
-  sortItineraries,
 } from './itinerary-cards';
 import { MODE_TRACK_STYLES } from './route-map-layers';
 
@@ -290,8 +292,8 @@ describe('itineraryHighlights', () => {
   });
 });
 
-describe('sortItineraries', () => {
-  const rapideEtSale = itinerary([segment(TransportMode.BUS, 12)], {
+describe('applyItineraryView', () => {
+  const rapideEtSale = itinerary([segment(TransportMode.BUS, 12, { line: 'C3' })], {
     id: 'rapide',
     durationMinutes: 12,
     carbonGrams: 400,
@@ -302,44 +304,134 @@ describe('sortItineraries', () => {
     carbonGrams: 0,
   });
 
-  it('classe par empreinte croissante — le défaut assumé du produit', () => {
-    const sorted = sortItineraries([rapideEtSale, lentEtPropre], 'carbonAsc');
+  it('rend la liste dans l’ordre du serveur sur la vue « Tous »', () => {
+    // C'est le point de la vue par défaut : elle n'affirme rien que le serveur
+    // n'ait fait, et ne réordonne donc rien.
+    const shown = applyItineraryView([rapideEtSale, lentEtPropre], 'all');
 
-    expect(sorted.map((option) => option.id)).toEqual(['propre', 'rapide']);
+    expect(shown.map((option) => option.id)).toEqual(['rapide', 'propre']);
   });
 
-  it('classe par durée croissante quand l’usager le demande', () => {
-    const sorted = sortItineraries([lentEtPropre, rapideEtSale], 'durationAsc');
+  it('classe par empreinte croissante sur la vue « Écolo »', () => {
+    const shown = applyItineraryView([rapideEtSale, lentEtPropre], 'carbonAsc');
 
-    expect(sorted.map((option) => option.id)).toEqual(['rapide', 'propre']);
+    expect(shown.map((option) => option.id)).toEqual(['propre', 'rapide']);
+  });
+
+  it('classe par durée croissante sur la vue « Rapide »', () => {
+    const shown = applyItineraryView([lentEtPropre, rapideEtSale], 'durationAsc');
+
+    expect(shown.map((option) => option.id)).toEqual(['rapide', 'propre']);
+  });
+
+  it('classe par nombre de titres croissant sur la vue « Économe »', () => {
+    // Le vélo en libre-service coûte un titre, le bus aussi ; c'est la marche
+    // seule qui n'en coûte aucun — et c'est elle que « Économe » remonte.
+    const aPied = itinerary([segment(TransportMode.WALK, 25)], {
+      id: 'marche',
+      durationMinutes: 25,
+      carbonGrams: 0,
+    });
+    const shown = applyItineraryView([rapideEtSale, aPied], 'fareAsc');
+
+    expect(shown.map((option) => option.id)).toEqual(['marche', 'rapide']);
   });
 
   it('départage les ex æquo sur l’autre critère, comme le serveur', () => {
     // Même empreinte : sans second critère, l'ordre dépendrait de la stabilité
     // du `sort` du moteur — donc du hasard.
     const lourd = { ...lentEtPropre, id: 'lourd', durationMinutes: 40, carbonGrams: 400 };
-    const sorted = sortItineraries([lourd, rapideEtSale], 'carbonAsc');
+    const shown = applyItineraryView([lourd, rapideEtSale], 'carbonAsc');
 
-    expect(sorted.map((option) => option.id)).toEqual(['rapide', 'lourd']);
+    expect(shown.map((option) => option.id)).toEqual(['rapide', 'lourd']);
   });
 
-  it('ne modifie pas la liste reçue — l’état React ne se mute pas', () => {
+  it('ne modifie jamais la liste reçue — l’état React ne se mute pas', () => {
     const received = [rapideEtSale, lentEtPropre];
-    const sorted = sortItineraries(received, 'carbonAsc');
 
+    for (const view of ITINERARY_VIEWS) {
+      const shown = applyItineraryView(received, view.key);
+      expect(shown).not.toBe(received);
+    }
     expect(received.map((option) => option.id)).toEqual(['rapide', 'propre']);
-    expect(sorted).not.toBe(received);
+  });
+
+  it('ne retire aucun itinéraire, quelle que soit la vue', () => {
+    // Les quatre pastilles réordonnent ; aucune ne filtre. Cacher des options
+    // derrière un « filtre » ferait disparaître de l'écran des trajets que le
+    // serveur juge pertinents, sans le dire.
+    for (const view of ITINERARY_VIEWS) {
+      expect(applyItineraryView([rapideEtSale, lentEtPropre], view.key)).toHaveLength(2);
+    }
   });
 });
 
-describe('SORT_OPTIONS', () => {
-  it('propose l’empreinte en premier — l’ordre de lecture dit le défaut (UF-503)', () => {
-    expect(SORT_OPTIONS.map((option) => option.key)).toEqual(['carbonAsc', 'durationAsc']);
+describe('fareCount', () => {
+  it('ne compte pas la marche', () => {
+    expect(fareCount(itinerary([segment(TransportMode.WALK, 25)]))).toBe(0);
   });
 
-  it('nomme le tri écologique sans jargon de clé de tri', () => {
-    expect(SORT_OPTIONS[0]!.label).toBe('Écologique');
-    expect(SORT_OPTIONS[1]!.label).toBe('Rapide');
+  it('compte un titre par service, pas un par segment', () => {
+    // Un métro B repris après un changement de quai reste un ticket.
+    const memeLigne = itinerary([
+      segment(TransportMode.METRO, 4, { line: 'B' }),
+      segment(TransportMode.WALK, 2),
+      segment(TransportMode.METRO, 6, { line: 'B' }),
+    ]);
+
+    expect(fareCount(memeLigne)).toBe(1);
+  });
+
+  it('compte deux titres pour deux lignes différentes', () => {
+    const correspondance = itinerary([
+      segment(TransportMode.BUS, 6, { line: 'C3' }),
+      segment(TransportMode.BUS, 8, { line: 'C9' }),
+    ]);
+
+    expect(fareCount(correspondance)).toBe(2);
+  });
+
+  it('compte le vélo en libre-service, qui n’a pas de ligne', () => {
+    expect(fareCount(itinerary([segment(TransportMode.BIKE, 12)]))).toBe(1);
+  });
+});
+
+describe('ITINERARY_VIEWS', () => {
+  it('reprend les quatre pastilles de la planche, dans son ordre (UF-804)', () => {
+    expect(ITINERARY_VIEWS.map((view) => view.label)).toEqual([
+      'Tous',
+      'Rapide',
+      'Écolo',
+      'Économe',
+    ]);
+  });
+
+  it('ouvre sur « Tous » — la seule vue qui n’affirme rien', () => {
+    expect(ITINERARY_VIEWS[0]!.key).toBe('all');
+  });
+
+  it('décrit chaque vue en clair, sans jargon de clé de tri', () => {
+    for (const view of ITINERARY_VIEWS) {
+      expect(view.description).not.toMatch(/Asc|carbonGrams|durationMinutes/);
+      expect(view.description.length).toBeGreaterThan(10);
+    }
+  });
+});
+
+describe('describeItineraryView', () => {
+  it('reprend le tri du serveur sur la vue « Tous »', () => {
+    // Sans cette reprise, un usager resté sur « Tous » n'aurait aucun moyen de
+    // savoir sur quel critère sa liste est classée.
+    expect(describeItineraryView('all', 'durationAsc')).toMatch(/durée/i);
+    expect(describeItineraryView('all', 'carbonAsc')).toMatch(/empreinte/i);
+  });
+
+  it('reste lisible avant la première réponse, quand `sortedBy` est inconnu', () => {
+    expect(describeItineraryView('all', null)).toMatch(/UrbanFlow/);
+  });
+
+  it('décrit la vue elle-même dès qu’elle réordonne', () => {
+    expect(describeItineraryView('fareAsc', 'carbonAsc')).toMatch(/titres de transport/i);
   });
 });
 

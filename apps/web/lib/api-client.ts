@@ -4,12 +4,14 @@ import type {
   CarbonSummaryDays,
   CreateSearchHistoryPayload,
   DeleteAccountResult,
+  NearbyStationsResult,
   PlanRouteRequest,
   PlanRoutesResponse,
   SearchHistoryEntry,
   SearchHistoryList,
   SelectItineraryPayload,
   SessionUser,
+  TransportSourceStatus,
   UpdateUserProfilePayload,
   UserProfile,
 } from '@urbanflow/shared';
@@ -283,6 +285,47 @@ export const apiClient = {
       method: 'PATCH',
       body: JSON.stringify(payload),
     });
+  },
+
+  /**
+   * Stations de véhicules en libre-service autour d'un point (F3 — UF-303),
+   * consommées par la carte temps réel de l'écran de résultats (UF-804).
+   *
+   * Accessible **sans compte** depuis UF-804 : le nombre de vélos à une borne
+   * est une donnée publique, identique pour tout le monde, et l'écran qui
+   * l'affiche est lui-même ouvert aux visiteurs (UF-801).
+   *
+   * Une indisponibilité de l'opérateur se lit dans `status`, **pas** dans un
+   * code HTTP : l'appel rend `200` avec `status: 'unavailable'` et une liste
+   * vide. L'appelant n'a donc pas à distinguer une panne amont d'une requête
+   * fautive (C10).
+   *
+   * @param lat Latitude du point de recherche (WGS84)
+   * @param lng Longitude du point de recherche
+   * @param options Rayon en mètres et nombre de stations — l'API borne les deux (C5)
+   */
+  getNearbyStations(
+    lat: number,
+    lng: number,
+    options: { radius?: number; limit?: number } = {},
+  ): Promise<NearbyStationsResult> {
+    const query = new URLSearchParams({ lat: String(lat), lng: String(lng) });
+    if (options.radius !== undefined) query.set('radius', String(options.radius));
+    if (options.limit !== undefined) query.set('limit', String(options.limit));
+
+    return request(`/transport/stations/nearby?${query.toString()}`);
+  },
+
+  /**
+   * État des sources GTFS et GBFS (F3 — UF-306), affiché en provenance sous les
+   * cartes temps réel (UF-804).
+   *
+   * Sert à **dater la donnée**, pas à décider de l'afficher : une source figée
+   * nuance un nombre de vélos, elle ne le supprime pas. C'est la lecture C10 du
+   * mode dégradé — on continue de servir en disant ce qu'on sert.
+   */
+  getTransportStatus(): Promise<TransportSourceStatus[]> {
+    return request('/transport/status');
   },
 
   /**

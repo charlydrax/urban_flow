@@ -12,6 +12,7 @@ import { useCallback, useRef, useState } from 'react';
 
 import { apiClient } from '../../lib/api-client';
 import { classifyPlanFailure, type PlanFailureKind } from '../../lib/plan-feedback';
+import { toPlanOptions, type TripOptions } from '../../lib/trip-options';
 
 /**
  * Les échecs qui font vraiment échouer l'écran — tout sauf `no-route`, qui est
@@ -68,8 +69,15 @@ export interface RoutePlanState {
    * dispense l'écran de traiter un cas qui ne peut pas se produire.
    */
   failure: PlanFailure | null;
-  /** Lance une recherche ; annule silencieusement celle qui serait encore en vol. */
-  plan: (from: Place, to: Place) => void;
+  /**
+   * Lance une recherche ; annule silencieusement celle qui serait encore en vol.
+   *
+   * `options` porte les réglages de l'écran (UF-804) : heure de départ, taille
+   * du groupe, modes retenus. Il est **facultatif** — un appelant qui n'en
+   * passe pas envoie exactement la requête d'avant le ticket, `{ from, to }`
+   * et rien d'autre.
+   */
+  plan: (from: Place, to: Place, options?: TripOptions) => void;
   /** Change l'itinéraire mis en avant (recette 4 du ticket). */
   select: (itineraryId: string) => void;
 }
@@ -189,7 +197,7 @@ export function useRoutePlan(onSearchRecorded?: SearchRecordedHandler): RoutePla
   const onSearchRecordedRef = useRef(onSearchRecorded);
   onSearchRecordedRef.current = onSearchRecorded;
 
-  const plan = useCallback((from: Place, to: Place) => {
+  const plan = useCallback((from: Place, to: Place, options?: TripOptions) => {
     const requestId = requestIdRef.current + 1;
     requestIdRef.current = requestId;
 
@@ -212,8 +220,13 @@ export function useRoutePlan(onSearchRecorded?: SearchRecordedHandler): RoutePla
     // son choix sur l'ancien trajet (UF-505).
     searchHistoryIdRef.current = null;
 
+    // `toPlanOptions` n'ajoute que les champs qui **contraignent** : une
+    // recherche laissée sur ses valeurs par défaut produit `{ from, to }`, le
+    // corps exact d'avant UF-804. C'est ce qui garantit qu'ouvrir l'écran ne
+    // change pas la requête, et que le serveur ne publiera pas un filtre que
+    // personne n'a posé.
     void apiClient
-      .planRoutes({ from, to })
+      .planRoutes({ from, to, ...(options ? toPlanOptions(options) : {}) })
       .then(({ response, servedFromCache: fromCache }) => {
         if (requestIdRef.current !== requestId) return;
 
