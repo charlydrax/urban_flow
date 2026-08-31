@@ -144,6 +144,21 @@ function ensureLayers(map: MapLibreMap): void {
   });
 }
 
+/**
+ * Réglages du dessin — un seul à ce jour, et il n'existe que pour le guidage.
+ */
+export interface RouteOverlayOptions {
+  /**
+   * Cadrer la caméra sur l'itinéraire retenu (défaut : `true`).
+   *
+   * Mis à `false` par l'écran de navigation (UF-806) : là, c'est la **position**
+   * qui commande la caméra, pas le tracé. Laisser les deux actifs ferait
+   * s'affronter un `fitBounds` sur tout l'itinéraire et un `easeTo` sur le point
+   * courant — la carte partirait en va-et-vient à chaque mesure du GPS.
+   */
+  fitSelectedRoute?: boolean;
+}
+
 /** Construit la pastille DOM d'un repère — styles dans `app/globals.css`. */
 function createMarkerElement(marker: RouteMarker): HTMLElement {
   const element = document.createElement('div');
@@ -165,11 +180,13 @@ function createMarkerElement(marker: RouteMarker): HTMLElement {
  * @param map Instance MapLibre déjà chargée (`load` émis), ou `null` tant qu'elle ne l'est pas
  * @param itineraries Itinéraires à dessiner — tous, y compris les non retenus
  * @param selectedItineraryId Itinéraire mis en avant ; `null` n'estompe pas, il n'affiche rien en avant
+ * @param options Voir {@link RouteOverlayOptions}
  */
 export function useRouteOverlay(
   map: MapLibreMap | null,
   itineraries: readonly Itinerary[],
   selectedItineraryId: string | null,
+  { fitSelectedRoute = true }: RouteOverlayOptions = {},
 ): void {
   // --- Tracés -------------------------------------------------------------
   useEffect(() => {
@@ -205,7 +222,7 @@ export function useRouteOverlay(
 
   // --- Cadrage ------------------------------------------------------------
   useEffect(() => {
-    if (!map) return;
+    if (!map || !fitSelectedRoute) return;
 
     const itinerary = itineraries.find((candidate) => candidate.id === selectedItineraryId);
     const bounds = itinerary ? routeBounds(itinerary) : null;
@@ -222,5 +239,5 @@ export function useRouteOverlay(
       maxZoom: FIT_MAX_ZOOM,
       duration: prefersReducedMotion ? 0 : 700,
     });
-  }, [map, itineraries, selectedItineraryId]);
+  }, [map, itineraries, selectedItineraryId, fitSelectedRoute]);
 }

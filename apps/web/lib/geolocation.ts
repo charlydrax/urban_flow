@@ -129,3 +129,101 @@ export function formatAccuracy(accuracyMeters: number): string {
 export function formatPositionLabel(position: UserPosition): string {
   return `Ma position (${formatCoordinates(position)})`;
 }
+
+/**
+ * Délai maximal d'une **première** mesure en mode suivi (UF-806).
+ *
+ * Plus généreux que {@link GEOLOCATION_TIMEOUT_MS} : `enableHighAccuracy: true`
+ * allume le GPS, et un premier point satellitaire demande couramment plus de
+ * dix secondes en ville, façades hautes comprises. Rendre la main trop tôt
+ * ferait échouer un guidage qui allait aboutir.
+ */
+export const GEOLOCATION_WATCH_TIMEOUT_MS = 20_000;
+
+/** Ce que l'abonnement pousse à son appelant, mesure après mesure. */
+export interface PositionWatchHandlers {
+  /** Nouvelle position acceptée par le navigateur. */
+  onPosition: (position: UserPosition) => void;
+  /**
+   * Échec **non fatal** : l'abonnement reste actif et peut reprendre tout seul.
+   *
+   * L'API Geolocation continue en effet d'émettre après un `TIMEOUT` ou un
+   * `POSITION_UNAVAILABLE` — c'est le cas du tunnel, où le signal revient à la
+   * sortie. Couper l'abonnement au premier échec obligerait l'usager à
+   * relancer le guidage à chaque perte de réseau (recette 5 du ticket).
+   */
+  onFailure: (reason: GeolocationFailureReason) => void;
+}
+
+/**
+ * S'abonne aux positions successives de l'utilisateur (C6) — le suivi continu
+ * qu'exige le guidage (UF-806).
+ *
+ * ## Réglages inverses de ceux d'UF-202, et les deux modes coexistent
+ *
+ * |                      | `getCurrentPosition` (UF-202) | `watchUserPosition` (UF-806) |
+ * | -------------------- | ----------------------------- | ---------------------------- |
+ * | `enableHighAccuracy` | `false` — le quartier suffit  | `true` — on suit un tracé    |
+ * | `maximumAge`         | `30_000` — un point récent va | `0` — jamais de point rejoué |
+ * | Coût batterie (C5)   | négligeable                   | réel, d'où l'arrêt explicite |
+ *
+ * Remplir un champ « Départ » et se faire guider ne demandent pas la même
+ * précision : à ± 500 m on retrouve un quartier, on ne sait pas dans quelle rue
+ * on tourne. Et `maximumAge: 0` est ici une **obligation** : rejouer une
+ * position de trente secondes ferait avancer la progression sur un point que
+ * l'usager a déjà quitté.
+ *
+ * Les deux fonctions sont indépendantes — options locales à chaque appel, aucun
+ * état partagé : ouvrir un guidage ne change rien au bouton « Me localiser »,
+ * et les deux peuvent tourner en même temps (recette 4 du ticket).
+ *
+ * ## Éco-conception (C5) et RGPD (C8)
+ *
+ * Le suivi continu est ce que le produit fait de plus coûteux en batterie et de
+ * plus intrusif en données. Deux garde-fous : il ne démarre que sur un geste
+ * explicite (« Démarrer »), et la fonction rend **son propre arrêt** plutôt
+ * qu'un identifiant à ranger quelque part — un abonnement qu'on oublie de
+ * fermer est un GPS qui tourne dans le vide.
+ *
+ * @param handlers Rappels de position et d'échec
+ * @param timeoutMs Délai maximal d'une mesure (défaut 20 s)
+ * @returns Fonction d'arrêt, sûre à appeler plusieurs fois ; sur un navigateur
+ * sans géolocalisation, `onFailure('unsupported')` est émis et l'arrêt ne fait rien
+ */
+export function watchUserPosition(
+  handlers: PositionWatchHandlers,
+  timeoutMs = GEOLOCATION_WATCH_TIMEOUT_MS,
+): () => void {
+  if (typeof navigator === 'undefined' || !('geolocation' in navigator)) {
+    handlers.onFailure('unsupported');
+    return () => {};
+  }
+
+  const watchId = navigator.geolocation.watchPosition(
+    (position) =>
+      handlers.onPosition({
+        lat: position.coords.latitude,
+        lng: position.coords.longitude,
+        accuracyMeters: position.coords.accuracy,
+      }),
+    (error) =>
+      handlers.onFailure(
+        error.code === error.PERMISSION_DENIED
+          ? 'denied'
+          : error.code === error.TIMEOUT
+            ? 'timeout'
+            : 'unavailable',
+      ),
+    { enableHighAccuracy: true, timeout: timeoutMs, maximumAge: 0 },
+  );
+
+  // Idempotent : le démontage React et un arrêt manuel peuvent tomber tous les
+  // deux, et `clearWatch` sur un identifiant déjà libéré n'est pas garanti sans
+  // effet par la spécification.
+  let cleared = false;
+  return () => {
+    if (cleared) return;
+    cleared = true;
+    navigator.geolocation.clearWatch(watchId);
+  };
+}

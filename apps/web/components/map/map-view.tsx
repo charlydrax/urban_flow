@@ -80,6 +80,14 @@ export interface MapViewProps {
   /** Itinéraire mis en avant, cadré par la caméra. `null` : aucun tracé au premier plan. */
   selectedItineraryId?: string | null;
   /**
+   * Cadrer la caméra sur l'itinéraire retenu (défaut : `true`).
+   *
+   * L'écran de navigation (UF-806) le met à `false` : il pilote lui-même la
+   * caméra depuis `center`, pour la faire suivre la position. Deux mouvements
+   * de caméra sur la même frame s'annulent — voir `RouteOverlayOptions`.
+   */
+  fitSelectedRoute?: boolean;
+  /**
    * Appelé une fois la carte prête (`load`). Point d'extension prévu pour F2 :
    * ajout des sources/couches GeoJSON des itinéraires.
    * @param map Instance MapLibre — ne pas conserver après le démontage
@@ -124,6 +132,7 @@ export function MapView({
   showGeolocateControl = false,
   itineraries = NO_ITINERARIES,
   selectedItineraryId = null,
+  fitSelectedRoute = true,
   onReady,
   children,
 }: MapViewProps) {
@@ -269,7 +278,7 @@ export function MapView({
   }, [userPosition]);
 
   // Tracés, repères et cadrage de l'itinéraire retenu (UF-403).
-  useRouteOverlay(loadedMap, itineraries, selectedItineraryId);
+  useRouteOverlay(loadedMap, itineraries, selectedItineraryId, { fitSelectedRoute });
 
   const selectedItinerary =
     itineraries.find((itinerary) => itinerary.id === selectedItineraryId) ?? null;
