@@ -32,6 +32,8 @@ import { SearchHistoryService } from './search-history.service';
 describe('SearchHistoryService', () => {
   let service: SearchHistoryService;
   let queryRaw: jest.Mock;
+  let deleteModeFootprints: jest.Mock;
+  let createModeFootprints: jest.Mock;
 
   const createdAt = new Date('2026-07-31T09:12:00.000Z');
 
@@ -66,12 +68,24 @@ describe('SearchHistoryService', () => {
 
   beforeEach(async () => {
     queryRaw = jest.fn().mockResolvedValue([dbRow()]);
+    deleteModeFootprints = jest.fn().mockResolvedValue({ count: 0 });
+    createModeFootprints = jest.fn().mockResolvedValue({ count: 0 });
+
+    // Depuis UF-805, `recordSelection` écrit la sélection ET sa ventilation par
+    // mode dans une seule transaction. Le faux `$transaction` exécute le rappel
+    // avec le même client : les assertions portent donc sur les mêmes mocks,
+    // sans avoir à distinguer ce qui passe par la transaction de ce qui n'y passe pas.
+    const prismaMock = {
+      $queryRaw: queryRaw,
+      tripModeFootprint: { deleteMany: deleteModeFootprints, createMany: createModeFootprints },
+      $transaction: (callback: (tx: unknown) => unknown) => callback(prismaMock),
+    };
 
     const moduleRef = await Test.createTestingModule({
       providers: [
         SearchHistoryService,
         CarbonService,
-        { provide: PrismaService, useValue: { $queryRaw: queryRaw } },
+        { provide: PrismaService, useValue: prismaMock },
       ],
     }).compile();
 
@@ -274,6 +288,78 @@ describe('SearchHistoryService', () => {
       expect(entry.selectedSummary).toBe('Marche + Bus C3');
       expect(entry.carbonGrams).toBe(380);
       expect(entry.carEquivalentGrams).toBe(959);
+    });
+
+    /**
+     * UF-805 — la sélection dépose désormais aussi la ventilation par mode du
+     * trajet retenu. Sans elle, la répartition par mode et la colonne
+     * « Distance » du tableau par trajet resteraient incalculables.
+     */
+    it('writes the mode breakdown of the chosen itinerary', async () => {
+      await service.recordSelection('user-1', 'history-1', selection());
+
+      const [{ data }] = createModeFootprints.mock.calls[0] as [
+        { data: { mode: string; distanceMeters: number; grams: number }[] },
+      ];
+
+      expect(data).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ mode: TransportMode.WALK, distanceMeters: 400, grams: 0 }),
+          // 4 km de bus au barème du service — la même valeur que celle qui
+          // entre dans `carbon_grams`, puisque c'est le même calcul.
+          expect.objectContaining({ mode: TransportMode.BUS, distanceMeters: 4_000 }),
+        ]),
+      );
+    });
+
+    it('folds several segments of the same mode into a single line', async () => {
+      await service.recordSelection(
+        'user-1',
+        'history-1',
+        selection({
+          segments: [
+            { mode: TransportMode.WALK, distanceMeters: 400 },
+            { mode: TransportMode.BUS, distanceMeters: 3_000 },
+            { mode: TransportMode.WALK, distanceMeters: 200 },
+          ],
+        }),
+      );
+
+      const [{ data }] = createModeFootprints.mock.calls[0] as [
+        { data: { mode: string; distanceMeters: number }[] },
+      ];
+
+      // Deux bouts de marche autour d'un bus, c'est UNE barre de marche à
+      // l'écran — et la contrainte d'unicité `(search_history_id, mode)`
+      // refuserait de toute façon deux lignes.
+      expect(data).toHaveLength(2);
+      expect(data.find((line) => line.mode === TransportMode.WALK)?.distanceMeters).toBe(600);
+    });
+
+    it('replaces the previous breakdown when the user changes their mind', async () => {
+      await service.recordSelection('user-1', 'history-1', selection());
+
+      // Un second choix sur la même recherche doit refaire la ventilation, pas
+      // s'ajouter à la précédente : sinon le même trajet compterait deux fois
+      // dans la répartition par mode.
+      expect(deleteModeFootprints).toHaveBeenCalledWith({
+        where: { searchHistoryId: 'history-1' },
+      });
+    });
+
+    it('never touches the breakdown of a row owned by someone else (C4 / OWASP A01)', async () => {
+      queryRaw.mockResolvedValue([]);
+
+      await expect(service.recordSelection('user-2', 'history-1', selection())).rejects.toThrow(
+        NotFoundException,
+      );
+
+      // L'effacement des ventilations ne porte que sur `search_history_id`, sans
+      // filtre de propriétaire : c'est l'échec de l'UPDATE qui doit l'empêcher
+      // d'être atteint. Une inversion de l'ordre des deux écritures rendrait la
+      // ventilation d'autrui effaçable en devinant un UUID.
+      expect(deleteModeFootprints).not.toHaveBeenCalled();
+      expect(createModeFootprints).not.toHaveBeenCalled();
     });
   });
 });

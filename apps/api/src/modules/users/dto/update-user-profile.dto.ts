@@ -1,4 +1,5 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
+import { CARBON_GOAL_MAX_GRAMS, CARBON_GOAL_MIN_GRAMS } from '@urbanflow/shared';
 import { Type } from 'class-transformer';
 import {
   ArrayNotEmpty,
@@ -62,6 +63,34 @@ export class MobilityPreferencesDto {
   @Min(0)
   @Max(60)
   maxWalkMinutes?: number;
+
+  /**
+   * Budget carbone mensuel, en grammes de CO₂ — l'objectif de la page « Mon
+   * impact » (UF-805).
+   *
+   * Trois états, et non deux : le champ **absent** laisse l'objectif inchangé
+   * (sémantique du `PATCH`), une **valeur** le fixe ou le remplace, et `null`
+   * le **retire**. Sans ce dernier cas, un objectif une fois posé serait
+   * impossible à enlever autrement qu'en le mettant très haut — ce qui n'est
+   * pas la même chose que ne pas en avoir.
+   *
+   * Bornes larges et volontairement peu contraignantes : elles sont là pour
+   * refuser une valeur absurde venue du réseau (C4), pas pour arbitrer ce qu'un
+   * usager a le droit de viser.
+   */
+  @ApiPropertyOptional({
+    minimum: CARBON_GOAL_MIN_GRAMS,
+    maximum: CARBON_GOAL_MAX_GRAMS,
+    nullable: true,
+    example: 16_000,
+  })
+  // `@IsOptional()` laisse passer `null` sans le valider : c'est exactement ce
+  // qu'il faut ici, le retrait n'ayant ni minimum ni maximum à respecter.
+  @IsOptional()
+  @IsInt()
+  @Min(CARBON_GOAL_MIN_GRAMS)
+  @Max(CARBON_GOAL_MAX_GRAMS)
+  monthlyCarbonGoalGrams?: number | null;
 }
 
 /**

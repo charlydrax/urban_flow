@@ -20,6 +20,16 @@ export interface MobilityPreferences {
   reducedMobility: boolean;
   /** Durée de marche maximale acceptée par segment, en minutes. */
   maxWalkMinutes: number;
+  /**
+   * Budget carbone mensuel que l'usager s'est fixé, en grammes de CO₂, ou
+   * `null` s'il n'en a pas (UF-805).
+   *
+   * Rangé dans les préférences de mobilité et non dans un module « objectifs » :
+   * c'est un réglage du compte, il se modifie par le même `PATCH /users/me` que
+   * les autres et disparaît avec le profil (C8). La page « Mon impact » le lit
+   * déjà ramené à la période affichée — voir `CarbonGoal`.
+   */
+  monthlyCarbonGoalGrams: number | null;
 }
 
 /**

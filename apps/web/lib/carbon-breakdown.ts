@@ -1,6 +1,7 @@
 import type { CarbonFootprint, Itinerary, TransportMode } from '@urbanflow/shared';
 
 import { formatCarbon } from './format-carbon';
+import { formatDistance } from './format-distance';
 import { MODE_ICONS } from './itinerary-cards';
 import { MODE_TRACK_STYLES } from './route-map-layers';
 
@@ -78,19 +79,6 @@ export interface CarbonBreakdown {
    * qu'un lecteur d'écran annonce à la place (C7 — WCAG 1.1.1).
    */
   description: string;
-}
-
-/**
- * Distance lisible : mètres sous le kilomètre, kilomètres au-delà.
- *
- * « 0,4 km » pour une traversée de place est moins parlant que « 400 m », et
- * « 4200 m » pour un trajet de métro l'est moins que « 4,2 km ». Le seuil est
- * celui de `geolocation.ts`, pour que les deux écrans comptent pareil.
- */
-function formatDistance(meters: number): string {
-  if (!Number.isFinite(meters) || meters <= 0) return '0 m';
-  if (meters < 1000) return `${Math.round(meters)} m`;
-  return `${(meters / 1000).toLocaleString('fr-FR', { maximumFractionDigits: 1 })} km`;
 }
 
 /** Pourcentage entier de `part` dans `whole`, borné à [0, 100]. */

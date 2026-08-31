@@ -31,7 +31,8 @@ consulter, rectifier et supprimer ses données se font au même endroit — voir
     "preferredModes": ["WALK", "METRO", "BIKE"],
     "priority": "GREENEST",
     "reducedMobility": false,
-    "maxWalkMinutes": 15
+    "maxWalkMinutes": 15,
+    "monthlyCarbonGoalGrams": null
   }
 }
 ```
@@ -40,6 +41,32 @@ Un compte qui n'a jamais enregistré ses préférences reçoit les **valeurs par
 défaut** (`WALK`/`METRO`/`BIKE`, priorité `GREENEST`, 15 min de marche) sans
 qu'aucune ligne ne soit créée en base : une lecture n'écrit jamais (C5). La ligne
 `mobility_profiles` naît au premier `PATCH`.
+
+### `monthlyCarbonGoalGrams` — le budget carbone (UF-805)
+
+Le budget mensuel de la page « Mon impact », en **grammes** comme tout le domaine
+carbone. Rangé ici et non dans un module « objectifs » : c'est un réglage du
+compte, il se modifie par le même `PATCH` que les autres et disparaît avec le
+profil (C8).
+
+Trois états, et le troisième est celui qu'on oublie :
+
+| Valeur envoyée | Effet                               |
+| -------------- | ----------------------------------- |
+| champ absent   | l'objectif reste **inchangé**       |
+| un entier      | l'objectif est **fixé** ou remplacé |
+| `null`         | l'objectif est **retiré**           |
+
+Sans le troisième cas, un objectif une fois posé ne serait plus retirable
+autrement qu'en le portant très haut — or « je ne me fixe plus de budget » n'est
+pas « mon budget est très grand ». C'est aussi pourquoi la valeur par défaut est
+`null` et non `0` : un objectif à zéro afficherait un dépassement perpétuel à
+tout compte neuf.
+
+Bornes : 1 kg à 1 t par mois. Volontairement larges — elles refusent une valeur
+absurde venue du réseau (C4), elles n'arbitrent pas ce qu'un usager a le droit de
+viser. C'est `GET /api/carbon/summary` qui proratise ce budget à la période
+affichée, pas ce module.
 
 ### `PATCH /api/users/me`
 

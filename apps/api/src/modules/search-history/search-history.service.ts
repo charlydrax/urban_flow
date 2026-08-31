@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import {
   DEFAULT_SEARCH_HISTORY_LIMIT,
   MAX_SEARCH_HISTORY_LIMIT,
+  type CarbonSegmentFootprint,
   type SearchHistoryEntry,
 } from '@urbanflow/shared';
 import { randomUUID } from 'node:crypto';
@@ -186,6 +187,16 @@ export class SearchHistoryService {
    * provisoire et s'affinera, mais un bilan personnel dont les mois passés se
    * réécriraient à chaque mise à jour ne serait pas un historique.
    *
+   * ## Ce que l'écriture dépose, depuis UF-805
+   *
+   * En plus des deux totaux, la **ventilation par mode** du trajet retenu
+   * (`trip_mode_footprints`). Sans elle, la répartition par mode et la colonne
+   * « Distance » du tableau par trajet de la planche restaient incalculables :
+   * `search_history` ne conserve que deux points, et la distance à vol d'oiseau
+   * n'est pas celle du trajet réel. Les deux écritures sont dans la même
+   * transaction — un trajet qui pèserait dans les totaux sans figurer dans la
+   * répartition serait un écart visible à l'écran.
+   *
    * ## Isolation (C4 / OWASP A01)
    *
    * L'UUID vient du chemin, donc du client. Le `WHERE` porte sur **le couple**
@@ -212,26 +223,51 @@ export class SearchHistoryService {
       dto.segments.map((segment) => ({ ...segment }) as RouteSegmentDto),
     );
 
-    const [row] = await this.prisma.$queryRaw<SearchHistoryRow[]>`
-      UPDATE search_history
-      SET
-        selected_summary     = ${dto.selectedSummary},
-        carbon_grams         = ${footprint.totalGrams},
-        car_equivalent_grams = ${footprint.carEquivalentGrams}
-      WHERE id = ${id}::uuid AND user_id = ${userId}::uuid
-      RETURNING
-        id,
-        from_label           AS "fromLabel",
-        ST_Y(from_geom)      AS "fromLat",
-        ST_X(from_geom)      AS "fromLng",
-        to_label             AS "toLabel",
-        ST_Y(to_geom)        AS "toLat",
-        ST_X(to_geom)        AS "toLng",
-        selected_summary     AS "selectedSummary",
-        carbon_grams         AS "carbonGrams",
-        car_equivalent_grams AS "carEquivalentGrams",
-        created_at           AS "createdAt"
-    `;
+    // La sélection et sa ventilation par mode forment **un seul fait** : un
+    // trajet valorisé dont on ne saurait pas de quels modes il est fait
+    // n'apparaîtrait ni dans la répartition ni dans le tableau par trajet, tout
+    // en pesant dans les totaux — un écart visible à l'écran (UF-805). D'où la
+    // transaction : les deux écritures réussissent ensemble ou pas du tout.
+    const row = await this.prisma.$transaction(async (tx) => {
+      const [updated] = await tx.$queryRaw<SearchHistoryRow[]>`
+        UPDATE search_history
+        SET
+          selected_summary     = ${dto.selectedSummary},
+          carbon_grams         = ${footprint.totalGrams},
+          car_equivalent_grams = ${footprint.carEquivalentGrams}
+        WHERE id = ${id}::uuid AND user_id = ${userId}::uuid
+        RETURNING
+          id,
+          from_label           AS "fromLabel",
+          ST_Y(from_geom)      AS "fromLat",
+          ST_X(from_geom)      AS "fromLng",
+          to_label             AS "toLabel",
+          ST_Y(to_geom)        AS "toLat",
+          ST_X(to_geom)        AS "toLng",
+          selected_summary     AS "selectedSummary",
+          carbon_grams         AS "carbonGrams",
+          car_equivalent_grams AS "carEquivalentGrams",
+          created_at           AS "createdAt"
+      `;
+
+      // Sortie anticipée sur ligne absente **ou** appartenant à autrui : c'est
+      // ce `UPDATE` filtré sur le couple `(id, user_id)` qui fait l'autorisation.
+      // Les écritures suivantes ne portent que `searchHistoryId`, sans filtre de
+      // propriétaire ; ne les atteindre qu'ici est ce qui empêche d'effacer la
+      // ventilation d'un trajet d'autrui en devinant son UUID (C4 / OWASP A01).
+      if (!updated) return null;
+
+      // Remplacement et non ajout : changer d'avis sur une option déjà retenue
+      // doit refaire la ventilation, pas la cumuler à la précédente. La
+      // contrainte d'unicité `(search_history_id, mode)` refuserait de toute
+      // façon le doublon — autant que le code dise la même chose qu'elle.
+      await tx.tripModeFootprint.deleteMany({ where: { searchHistoryId: id } });
+      await tx.tripModeFootprint.createMany({
+        data: SearchHistoryService.toModeFootprints(id, footprint.segments),
+      });
+
+      return updated;
+    });
 
     if (!row) {
       // C11 : le message ne dit ni quel identifiant a été visé ni s'il existe
@@ -240,6 +276,44 @@ export class SearchHistoryService {
     }
 
     return SearchHistoryService.toEntry(row);
+  }
+
+  /**
+   * Agrège les lignes segment par segment du Service Carbone en **une ligne par
+   * mode**, prête pour `trip_mode_footprints` (UF-805).
+   *
+   * Un itinéraire « marche → bus → marche » compte trois segments mais deux
+   * modes : la page « Mon impact » trace une barre par mode, jamais par segment,
+   * et l'écran de résultats reste le seul endroit où le détail segment par
+   * segment a un sens. Agréger ici plutôt qu'à la lecture supprime un `GROUP BY`
+   * de chaque affichage du tableau de bord (C5/C10) et respecte la contrainte
+   * d'unicité `(search_history_id, mode)`.
+   *
+   * @param searchHistoryId Ligne d'historique à laquelle rattacher la ventilation
+   * @param segments Détail par segment produit par `computeFootprint`
+   * @returns Une entrée par mode réellement emprunté, prête pour `createMany`
+   */
+  private static toModeFootprints(
+    searchHistoryId: string,
+    segments: CarbonSegmentFootprint[],
+  ): { searchHistoryId: string; mode: string; distanceMeters: number; grams: number }[] {
+    const byMode = new Map<string, { distanceMeters: number; grams: number }>();
+
+    for (const segment of segments) {
+      const totals = byMode.get(segment.mode) ?? { distanceMeters: 0, grams: 0 };
+      // `Math.max(0, …)` : même garde que le barème, une distance négative
+      // arrivée d'un connecteur ne doit pas retrancher des kilomètres au cumul.
+      totals.distanceMeters += Math.max(0, segment.distanceMeters || 0);
+      totals.grams += segment.grams;
+      byMode.set(segment.mode, totals);
+    }
+
+    return [...byMode.entries()].map(([mode, totals]) => ({
+      searchHistoryId,
+      mode,
+      distanceMeters: Math.round(totals.distanceMeters),
+      grams: totals.grams,
+    }));
   }
 
   /** Projette une ligne SQL en contrat d'API (dates sérialisées en ISO 8601 — C9). */

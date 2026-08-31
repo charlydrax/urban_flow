@@ -57,6 +57,14 @@ model MobilityProfile {
   reducedMobility Boolean  @default(false) @map("reduced_mobility")
   /// Marche maximale acceptée par segment, en minutes.
   maxWalkMinutes  Int      @default(15) @map("max_walk_minutes")
+  /// Budget carbone mensuel que l'usager s'est fixé, en grammes (UF-805), `NULL`
+  /// tant qu'il n'en a pas défini. Un objectif absent et un objectif à zéro ne
+  /// disent pas la même chose : le premier signifie « pas encore choisi » et
+  /// l'écran propose d'en fixer un, le second serait un dépassement perpétuel.
+  ///
+  /// En grammes comme le reste du domaine carbone, jamais en kilogrammes : une
+  /// seule unité en base, la conversion est affaire d'affichage.
+  monthlyCarbonGoalGrams Int? @map("monthly_carbon_goal_grams")
   updatedAt       DateTime @updatedAt @map("updated_at")
 
   @@map("mobility_profiles")
@@ -110,6 +118,10 @@ model SearchHistory {
 
   createdAt DateTime @default(now()) @map("created_at")
 
+  /// Empreinte par mode de l'option retenue (UF-805) — liste vide tant qu'aucune
+  /// option n'a été retenue, comme `carbonGrams` est alors `NULL`.
+  modeFootprints TripModeFootprint[]
+
   /// Lecture nominale : « les N dernières recherches de CET utilisateur »
   /// (`WHERE user_id = … ORDER BY created_at DESC`) — l'index couvre les deux.
   @@index([userId, createdAt])
@@ -119,6 +131,57 @@ model SearchHistory {
   /// partant d'ici », `ST_DWithin`) — cf. étape 4 du flux de référence.
   @@index([fromGeom(ops: raw("gist_geometry_ops_2d"))], type: Gist)
   @@map("search_history")
+}
+
+/// Empreinte par mode d'un trajet retenu (UF-805) — une ligne par mode, pas par
+/// segment.
+///
+/// ## Pourquoi une table, et pourquoi agrégée par mode
+///
+/// UF-505 avait délibérément renoncé à la répartition par mode de la maquette,
+/// faute d'endroit où ranger le détail : `search_history` ne conserve que deux
+/// totaux. Les stocker ici plutôt que de recalculer à la lecture tient à la même
+/// raison que `car_equivalent_grams` — le barème (`emission-factors.ts`) est
+/// provisoire, et un bilan dont les mois passés se réécriraient à chaque
+/// affinage ne serait pas un historique.
+///
+/// **Une ligne par mode et non par segment** : trois arrêts de bus successifs
+/// forment trois segments mais une seule barre à l'écran, et personne n'a
+/// jamais demandé à la page « Mon impact » le détail arrêt par arrêt. Agréger à
+/// l'écriture divise le volume stocké par cinq environ et supprime un `GROUP BY`
+/// à chaque lecture (C5/C10). Le détail segment par segment reste publié en
+/// direct par le planificateur (`CarbonFootprint.segments`), là où il sert.
+///
+/// RGPD (C8) : donnée de déplacement, donc personnelle par recoupement. Effacée
+/// en cascade avec la recherche dont elle dépend, elle-même effacée avec le
+/// compte — la chaîne du droit à l'effacement reste complète.
+model TripModeFootprint {
+  id String @id @default(uuid()) @db.Uuid
+
+  /// Cascade : la ligne ne survit pas à la recherche qui la porte (C8).
+  searchHistory   SearchHistory @relation(fields: [searchHistoryId], references: [id], onDelete: Cascade)
+  searchHistoryId String        @map("search_history_id") @db.Uuid
+
+  /// Mode concerné (valeurs de l'enum TransportMode côté API).
+  mode String
+
+  /// Distance cumulée parcourue sur ce mode pour ce trajet, en mètres.
+  /// Conservée parce que la colonne « Distance » du tableau par trajet en a
+  /// besoin : `search_history` ne stocke que deux points, et la distance à vol
+  /// d'oiseau n'est pas celle du trajet réel.
+  distanceMeters Int @map("distance_meters")
+
+  /// Empreinte de ce mode sur ce trajet, en grammes, au barème du jour.
+  grams Int
+
+  /// Un mode ne peut peser qu'une fois sur un trajet donné : c'est ce qui rend
+  /// l'écriture de la sélection réexécutable sans dupliquer (UF-805), et ce qui
+  /// garantit que la somme des lignes égale bien `search_history.carbon_grams`.
+  @@unique([searchHistoryId, mode])
+  /// Lecture nominale : « toutes les lignes des trajets de cette période »,
+  /// c'est-à-dire une jointure depuis `search_history`.
+  @@index([searchHistoryId])
+  @@map("trip_mode_footprints")
 }
 
 /// Aménagements cyclables de la Métropole de Lyon (UF-304) — troisième source du

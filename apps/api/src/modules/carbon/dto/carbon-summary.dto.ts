@@ -2,6 +2,9 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   CARBON_SUMMARY_DAYS,
   DEFAULT_CARBON_SUMMARY_DAYS,
+  TransportMode,
+  type CarbonGoal,
+  type CarbonModeTotals,
   type CarbonPeriodTotals,
   type CarbonSummary,
   type CarbonSummaryDays,
@@ -63,6 +66,57 @@ export class CarbonPeriodTotalsDto implements CarbonPeriodTotals {
 }
 
 /**
+ * Empreinte cumulée d'un mode sur la période (UF-805) — une barre de la
+ * « Répartition des émissions » de la planche.
+ */
+export class CarbonModeTotalsDto implements CarbonModeTotals {
+  /** Mode concerné — porte sa couleur et son pictogramme côté écran. */
+  @ApiProperty({ enum: TransportMode, example: TransportMode.BUS })
+  mode!: TransportMode;
+
+  /** Distance cumulée sur ce mode, en mètres. */
+  @ApiProperty({ example: 42_800 })
+  distanceMeters!: number;
+
+  /** CO₂ émis par ce mode sur la période, en grammes. */
+  @ApiProperty({ example: 5_900 })
+  grams!: number;
+
+  /** Trajets distincts comportant au moins un segment de ce mode. */
+  @ApiProperty({ example: 7 })
+  tripsCount!: number;
+}
+
+/**
+ * Objectif carbone ramené à la période affichée (UF-805).
+ *
+ * L'usager fixe un budget **mensuel** (`PATCH /api/users/me`) ; l'API le
+ * proratise à la durée demandée pour que l'écran n'ait aucune arithmétique à
+ * refaire — et que les deux côtés ne divergent jamais sur le même objectif.
+ */
+export class CarbonGoalDto implements CarbonGoal {
+  /** Budget mensuel choisi par l'usager, en grammes. */
+  @ApiProperty({ example: 16_000 })
+  monthlyGrams!: number;
+
+  /** Ce budget ramené à la période affichée, en grammes. */
+  @ApiProperty({ example: 16_000 })
+  periodGrams!: number;
+
+  /** Émissions déjà constatées sur la période, en grammes. */
+  @ApiProperty({ example: 13_500 })
+  emittedGrams!: number;
+
+  /**
+   * Part du budget consommée, en pourcentage entier. **Non borné à 100** : un
+   * dépassement se lit comme tel, la barre de progression se borne à
+   * l'affichage.
+   */
+  @ApiProperty({ example: 84 })
+  usedPercent!: number;
+}
+
+/**
  * Réponse de `GET /api/carbon/summary` (UF-505) — le suivi carbone personnel.
  *
  * RGPD (C8) : chaque champ est un agrégat des déplacements du **seul** compte
@@ -97,4 +151,20 @@ export class CarbonSummaryDto implements CarbonSummary {
    */
   @ApiProperty({ example: 3 })
   unpricedTripsCount!: number;
+
+  /**
+   * Empreinte cumulée par mode sur la période — la « Répartition des émissions »
+   * de la planche (UF-805). Triée par grammes décroissants ; les modes sans
+   * aucun trajet n'y figurent pas.
+   */
+  @ApiProperty({ type: [CarbonModeTotalsDto] })
+  modeBreakdown!: CarbonModeTotalsDto[];
+
+  /**
+   * Objectif carbone ramené à la période, `null` si l'usager n'en a pas fixé.
+   * Un objectif absent n'est pas un objectif à zéro : l'écran propose alors
+   * d'en définir un plutôt que d'annoncer un dépassement.
+   */
+  @ApiProperty({ type: CarbonGoalDto, nullable: true })
+  goal!: CarbonGoalDto | null;
 }

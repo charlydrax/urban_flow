@@ -63,31 +63,47 @@ export function ImpactComparison({ totals }: ImpactComparisonProps) {
         Vos trajets vs tout en voiture
       </h2>
 
+      {/*
+        Chaque couple est une grille de deux colonnes plutôt qu'un `div` de mise
+        en page contenant un second `div` : dans une liste de définitions, `dt`
+        et `dd` doivent être des enfants DIRECTS de la liste ou d'un `div` qui ne
+        contient qu'eux (WCAG 1.3.1). Le niveau d'emballage intermédiaire d'origine
+        les rendait petits-enfants et cassait la relation terme/définition pour
+        les technologies d'assistance — défaut révélé par l'audit ajouté avec
+        UF-805, cet écran n'ayant jamais eu de test d'accessibilité jusque-là.
+
+        La barre est un second `dd` sur toute la largeur : un terme peut en avoir
+        plusieurs, et c'est la seule place valide pour un élément qui doit
+        s'étendre sous le couple.
+      */}
       <dl className="flex flex-col gap-3">
-        <div>
-          <div className="flex items-baseline justify-between gap-2 text-sm">
-            <dt className="text-ink-700">Vos émissions réelles</dt>
-            <dd className="shrink-0 font-bold text-ink">{formatCarbon(totals.emittedGrams)}</dd>
-          </div>
-          <div aria-hidden="true" className="mt-1 h-3 overflow-hidden rounded-full bg-tint-neutral">
-            <div className="h-full rounded-full bg-primary" style={{ width: `${realWidth}%` }} />
-          </div>
+        <div className="grid grid-cols-[1fr_auto] items-baseline gap-x-2 gap-y-1 text-sm">
+          <dt className="text-ink-700">Vos émissions réelles</dt>
+          <dd className="shrink-0 font-bold text-ink">{formatCarbon(totals.emittedGrams)}</dd>
+          <dd
+            aria-hidden="true"
+            className="col-span-2 h-3 overflow-hidden rounded-full bg-tint-neutral"
+          >
+            <span
+              className="block h-full rounded-full bg-primary"
+              style={{ width: `${realWidth}%` }}
+            />
+          </dd>
         </div>
 
-        <div>
-          <div className="flex items-baseline justify-between gap-2 text-sm">
-            <dt className="text-ink-700">Si tout en voiture</dt>
-            <dd className="shrink-0 font-bold text-ink">
-              {formatCarbon(totals.carEquivalentGrams)}
-            </dd>
-          </div>
-          <div aria-hidden="true" className="mt-1 h-3 overflow-hidden rounded-full bg-tint-neutral">
+        <div className="grid grid-cols-[1fr_auto] items-baseline gap-x-2 gap-y-1 text-sm">
+          <dt className="text-ink-700">Si tout en voiture</dt>
+          <dd className="shrink-0 font-bold text-ink">{formatCarbon(totals.carEquivalentGrams)}</dd>
+          <dd
+            aria-hidden="true"
+            className="col-span-2 h-3 overflow-hidden rounded-full bg-tint-neutral"
+          >
             {/*
               La référence occupe toute la largeur par construction : c'est elle
               l'échelle, et elle est toujours ≥ aux émissions réelles.
             */}
-            <div className="h-full w-full rounded-full bg-error" />
-          </div>
+            <span className="block h-full w-full rounded-full bg-error" />
+          </dd>
         </div>
       </dl>
 

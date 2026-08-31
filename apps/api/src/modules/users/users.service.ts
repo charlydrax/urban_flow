@@ -16,6 +16,8 @@ export interface MobilityPreferencesView {
   priority: RoutePriority;
   reducedMobility: boolean;
   maxWalkMinutes: number;
+  /** Budget carbone mensuel, en grammes, ou `null` si aucun objectif n'est fixé (UF-805). */
+  monthlyCarbonGoalGrams: number | null;
 }
 
 /** Profil complet du compte connecté (minimisation des données — C8). */
@@ -40,6 +42,9 @@ export const DEFAULT_PREFERENCES: MobilityPreferencesView = {
   priority: RoutePriority.GREENEST,
   reducedMobility: false,
   maxWalkMinutes: 15,
+  // Pas d'objectif par défaut : en imposer un serait décider à la place de
+  // l'usager de ce qui constitue pour lui un bon mois (UF-805).
+  monthlyCarbonGoalGrams: null,
 };
 
 /** Compte + profil de mobilité tels que lus en base (colonnes strictement utiles — C8). */
@@ -269,6 +274,7 @@ export class UsersService {
         : DEFAULT_PREFERENCES.priority,
       reducedMobility: profile.reducedMobility,
       maxWalkMinutes: profile.maxWalkMinutes,
+      monthlyCarbonGoalGrams: profile.monthlyCarbonGoalGrams,
     };
   }
 
@@ -286,6 +292,11 @@ export class UsersService {
     if (preferences.reducedMobility !== undefined)
       patch.reducedMobility = preferences.reducedMobility;
     if (preferences.maxWalkMinutes !== undefined) patch.maxWalkMinutes = preferences.maxWalkMinutes;
+    // `!== undefined` et non un test de véracité : `null` est une valeur
+    // signifiante ici — c'est ainsi que l'usager RETIRE son objectif, là où
+    // l'absence du champ le laisse inchangé (UF-805).
+    if (preferences.monthlyCarbonGoalGrams !== undefined)
+      patch.monthlyCarbonGoalGrams = preferences.monthlyCarbonGoalGrams;
     return patch;
   }
 }

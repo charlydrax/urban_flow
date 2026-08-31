@@ -2,6 +2,7 @@ import type {
   AuthResponse,
   CarbonSummary,
   CarbonSummaryDays,
+  CarbonTripsPage,
   CreateSearchHistoryPayload,
   DeleteAccountResult,
   NearbyStationsResult,
@@ -337,5 +338,21 @@ export const apiClient = {
   getCarbonSummary(days?: CarbonSummaryDays): Promise<CarbonSummary> {
     const query = days === undefined ? '' : `?days=${days}`;
     return request(`/carbon/summary${query}`);
+  },
+
+  /**
+   * Trajets valorisés du compte connecté sur la même fenêtre (UF-805) — la
+   * matière du tableau « Détail par trajet » et de l'export.
+   *
+   * Appel **séparé** de `getCarbonSummary` : le résumé s'affiche toujours, la
+   * liste des trajets seulement quand l'usager la déplie. Les fondre en une
+   * seule réponse ferait transiter à chaque ouverture de page une liste que
+   * personne n'a demandée (C5/C10).
+   *
+   * @param days Durée de la période — l'API n'accepte que 7, 30 ou 90 (C5)
+   */
+  getCarbonTrips(days?: CarbonSummaryDays): Promise<CarbonTripsPage> {
+    const query = days === undefined ? '' : `?days=${days}`;
+    return request(`/carbon/trips${query}`);
   },
 };

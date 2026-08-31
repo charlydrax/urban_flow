@@ -26,6 +26,14 @@ export interface CarbonSummaryState {
   days: CarbonSummaryDays;
   /** Change la période — déclenche une nouvelle lecture. */
   setDays: (days: CarbonSummaryDays) => void;
+  /**
+   * Relit le bilan de la période courante (UF-805).
+   *
+   * Utile après avoir modifié l'objectif carbone : c'est le serveur qui le
+   * proratise à la période affichée, et recomposer le résumé côté client
+   * ferait diverger les deux le jour où la règle de prorata changerait.
+   */
+  reload: () => void;
 }
 
 /**
@@ -66,6 +74,9 @@ export function useCarbonSummary(
   const [days, setDays] = useState<CarbonSummaryDays>(initialDays);
   const [summary, setSummary] = useState<CarbonSummary | null>(null);
   const [status, setStatus] = useState<CarbonSummaryStatus>('loading');
+  // Compteur de relecture : le faire changer relance l'effet, sans dupliquer
+  // la logique de lecture dans une fonction jumelle qui finirait par diverger.
+  const [reloadCount, setReloadCount] = useState(0);
 
   useEffect(() => {
     // `AbortController` sert ici de jeton d'annulation logique : la requête part
@@ -90,7 +101,7 @@ export function useCarbonSummary(
       });
 
     return () => controller.abort();
-  }, [days]);
+  }, [days, reloadCount]);
 
-  return { status, summary, days, setDays };
+  return { status, summary, days, setDays, reload: () => setReloadCount((count) => count + 1) };
 }
