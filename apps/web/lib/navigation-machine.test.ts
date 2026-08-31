@@ -284,6 +284,25 @@ describe('libellés du panneau de guidage', () => {
     expect(estimatedArrival(INITIAL_NAVIGATION_STATE, now)).toBeNull();
     expect(estimatedArrival(run(START, { type: 'pause' }), now)).toBeNull();
   });
+
+  it('annonce l’heure du réseau, pas celle de l’appareil', () => {
+    /*
+      Le cas qui a fait tomber la CI : le runner GitHub est en UTC, mon poste
+      en Europe/Paris, et un `toLocaleTimeString` sans fuseau explicite rendait
+      « 08:11 » d'un côté et « 10:11 » de l'autre.
+
+      Ce n'était pas qu'un test fragile : le panneau de guidage aurait affiché
+      une autre heure que la carte de résultat du même trajet, qui passe elle
+      par `formatClock` (UF-404). L'assertion vaut donc pour la règle produit —
+      un poste resté à l'heure de Londres lit l'heure à laquelle on arrive à
+      Lyon — et pas seulement pour la stabilité de la suite.
+    */
+    const parisNoon = new Date('2026-09-01T12:00:00+02:00');
+
+    expect(estimatedArrival(guiding, parisNoon)).toBe('12:11');
+    // Le même instant, écrit en UTC : la réponse ne doit pas changer.
+    expect(estimatedArrival(guiding, new Date('2026-09-01T10:00:00Z'))).toBe('12:11');
+  });
 });
 
 describe('guidanceSteps', () => {

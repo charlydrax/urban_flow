@@ -2,7 +2,7 @@ import type { Itinerary, RouteSegment } from '@urbanflow/shared';
 
 import type { GeolocationFailureReason, UserPosition } from './geolocation';
 import { GEOLOCATION_ERROR_MESSAGES } from './geolocation';
-import { MODE_ICONS } from './itinerary-cards';
+import { MODE_ICONS, formatClock } from './itinerary-cards';
 import { computeRouteProgress, type RouteProgress } from './route-progress';
 import { MODE_TRACK_STYLES } from './route-map-layers';
 
@@ -322,13 +322,20 @@ export function guidanceSubline(state: NavigationState, now: Date = new Date()):
  * calcul, elle ne bouge pas quand l'usager traîne. Une heure d'arrivée qui
  * n'avance jamais est pire que pas d'heure du tout.
  *
+ * Le formatage passe par `formatClock` (UF-404) plutôt que par un
+ * `toLocaleTimeString` écrit ici : c'est lui qui force le fuseau du réseau
+ * (Europe/Paris) au lieu de celui de l'appareil. Sans cela, un poste resté à
+ * l'heure de Londres aurait lu « Arrivée 09:03 » sur ce panneau et
+ * « Arrivée 10:03 » sur la carte de résultat du même trajet — deux horloges
+ * pour un seul voyage (C9).
+ *
  * @param state État du guidage
  * @param now Instant de référence, injecté pour rendre la fonction testable
  */
 export function estimatedArrival(state: NavigationState, now: Date = new Date()): string | null {
   if (state.phase !== 'guiding' || !state.progress) return null;
   const arrival = new Date(now.getTime() + state.progress.totalRemainingMinutes * 60_000);
-  return arrival.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+  return formatClock(arrival.toISOString());
 }
 
 /**
