@@ -115,14 +115,15 @@ export interface CarbonPeriodTotals {
  *
  * ## Ce qui est compté, et ce qui ne l'est pas
  *
- * Un trajet n'entre dans ces totaux que lorsque l'usager a **retenu une
- * option** dans la liste de résultats. Une recherche lancée puis abandonnée
- * reste dans l'historique (elle sert les rappels du planificateur) mais ne
- * pèse rien ici : compter des suggestions du serveur comme des déplacements
- * réels gonflerait le bilan de trajets que personne n'a faits.
+ * Un trajet n'entre dans ces totaux que lorsqu'il a été **parcouru** — c'est-à-dire
+ * mené à son terme par le guidage (UF-806/UF-807, `completedAt`). Retenir une
+ * option dans la liste de résultats ne suffit pas : c'est une intention, et un
+ * bilan d'intentions ne mesure aucun déplacement. Les recherches lancées puis
+ * abandonnées, comme les options retenues mais jamais parcourues, restent dans
+ * l'historique — elles servent les rappels du planificateur — sans peser ici.
  *
- * C'est pourquoi `unpricedTripsCount` est publié : sans lui, un usager qui
- * cherche beaucoup et choisit peu verrait un total bas sans comprendre
+ * C'est pourquoi `uncountedTripsCount` est publié : sans lui, un usager qui
+ * cherche beaucoup et se déplace peu verrait un total bas sans comprendre
  * pourquoi, et croirait à un défaut de l'application.
  */
 export interface CarbonSummary {
@@ -148,10 +149,12 @@ export interface CarbonSummary {
    */
   buckets: CarbonPeriodTotals[];
   /**
-   * Recherches de la période **sans option retenue**, donc absentes des
-   * totaux. Publié par honnêteté du chiffre (voir ci-dessus).
+   * Recherches de la période **non menées à leur terme**, donc absentes des
+   * totaux (UF-807) : celles où aucune option n'a été retenue comme celles où
+   * une option retenue n'a jamais été parcourue. Publié par honnêteté du
+   * chiffre (voir ci-dessus).
    */
-  unpricedTripsCount: number;
+  uncountedTripsCount: number;
 
   /**
    * Empreinte cumulée par mode sur la période — la « Répartition des émissions »

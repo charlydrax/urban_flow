@@ -145,12 +145,14 @@ export class CarbonSummaryDto implements CarbonSummary {
   buckets!: CarbonPeriodTotalsDto[];
 
   /**
-   * Recherches de la période **sans itinéraire retenu**, donc absentes des
-   * totaux. Publié par honnêteté du chiffre : sans lui, un usager qui cherche
-   * beaucoup et choisit peu croirait à une panne devant un total bas.
+   * Recherches de la période **non menées à leur terme**, donc absentes des
+   * totaux (UF-807) : celles sans itinéraire retenu comme celles dont l'option
+   * retenue n'a jamais été parcourue. Publié par honnêteté du chiffre : sans
+   * lui, un usager qui cherche beaucoup et se déplace peu croirait à une panne
+   * devant un total bas.
    */
   @ApiProperty({ example: 3 })
-  unpricedTripsCount!: number;
+  uncountedTripsCount!: number;
 
   /**
    * Empreinte cumulée par mode sur la période — la « Répartition des émissions »

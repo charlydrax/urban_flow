@@ -26,7 +26,7 @@ interface CarbonBucketRow {
   emittedGrams: number;
   carEquivalentGrams: number;
   tripsCount: number;
-  unpricedCount: number;
+  uncountedCount: number;
 }
 
 /**
@@ -136,17 +136,21 @@ export class CarbonService {
    * Suivi carbone personnel du compte connecté (UF-505) — la matière de la page
    * « Mon impact ».
    *
-   * ## Ce qui est compté
+   * ## Ce qui est compté (UF-807)
    *
-   * Uniquement les recherches sur lesquelles un itinéraire a été **retenu**
-   * (`carbon_grams IS NOT NULL`, posé par `PATCH /search-history/:id/selection`).
-   * Une recherche lancée puis abandonnée reste dans l'historique — elle sert les
-   * rappels du planificateur — mais ne pèse rien ici : additionner des
-   * suggestions du serveur ferait un bilan de trajets que personne n'a faits.
+   * Uniquement les trajets **réalisés** : `completed_at IS NOT NULL`, posé par
+   * `POST /search-history/:id/completion` quand le guidage (UF-806) atteint la
+   * destination. Retenir une option dans la liste n'y suffit pas — c'était le
+   * défaut que ce ticket corrige : le suivi comptait des clics, c'est-à-dire des
+   * intentions, et un bilan d'intentions ne mesure aucun déplacement.
    *
-   * Ces recherches non valorisées sont tout de même **dénombrées** et publiées
-   * (`unpricedTripsCount`). Sans elles, quelqu'un qui cherche beaucoup et
-   * choisit peu verrait un total anormalement bas sans pouvoir comprendre
+   * Une recherche abandonnée, comme une option retenue puis jamais parcourue,
+   * reste dans l'historique — elle sert les rappels du planificateur — mais ne
+   * pèse rien ici.
+   *
+   * Ces trajets non comptés sont tout de même **dénombrés** et publiés
+   * (`uncountedTripsCount`). Sans eux, quelqu'un qui cherche beaucoup et se
+   * déplace peu verrait un total anormalement bas sans pouvoir comprendre
    * pourquoi, et conclurait à une panne.
    *
    * ## Pourquoi une seule requête, et pourquoi ici
@@ -214,14 +218,22 @@ export class CarbonService {
           FLOOR(
             EXTRACT(EPOCH FROM (created_at - ${spanFrom}::timestamptz)) * 1000 / ${bucketMs}
           )::int AS "bucket",
-          -- COALESCE : une tranche sans trajet valorisé vaut 0, pas NULL — le
+          -- COALESCE : une tranche sans trajet réalisé vaut 0, pas NULL — le
           -- graphique doit pouvoir tracer une barre nulle, pas un trou.
           -- Cast ::int : PostgreSQL somme les entiers en bigint, que le pilote
           -- rendrait en BigInt, non sérialisable en JSON.
-          COALESCE(SUM(carbon_grams), 0)::int         AS "emittedGrams",
-          COALESCE(SUM(car_equivalent_grams), 0)::int AS "carEquivalentGrams",
-          COUNT(*) FILTER (WHERE carbon_grams IS NOT NULL)::int AS "tripsCount",
-          COUNT(*) FILTER (WHERE carbon_grams IS NULL)::int     AS "unpricedCount"
+          --
+          -- Le FILTER porte aussi sur les SOMMES, et pas seulement sur les
+          -- comptes (UF-807) : une option retenue puis
+          -- abandonnée porte bien une empreinte en base, et la sommer ferait
+          -- exactement ce que ce ticket corrige — compter un trajet qui n'a pas
+          -- eu lieu.
+          COALESCE(SUM(carbon_grams) FILTER (WHERE completed_at IS NOT NULL), 0)::int
+            AS "emittedGrams",
+          COALESCE(SUM(car_equivalent_grams) FILTER (WHERE completed_at IS NOT NULL), 0)::int
+            AS "carEquivalentGrams",
+          COUNT(*) FILTER (WHERE completed_at IS NOT NULL)::int AS "tripsCount",
+          COUNT(*) FILTER (WHERE completed_at IS NULL)::int     AS "uncountedCount"
         FROM search_history
         WHERE user_id = ${userId}::uuid
           AND created_at >= ${spanFrom}
@@ -232,10 +244,11 @@ export class CarbonService {
       // Répartition par mode de la période affichée (UF-805).
       //
       // La jointure part de `trip_mode_footprints` et remonte vers
-      // `search_history` : c'est là que vivent le propriétaire et la date, et
-      // c'est le seul filtre qui garantisse qu'un compte ne lit que ses
-      // ventilations (C4 / OWASP A01). `carbon_grams IS NOT NULL` est implicite
-      // — une ligne de ventilation n'existe que pour un trajet retenu.
+      // `search_history` : c'est là que vivent le propriétaire, la date et
+      // l'arrivée, et c'est le seul filtre qui garantisse qu'un compte ne lit
+      // que ses ventilations (C4 / OWASP A01). Le filtre sur `completed_at`,
+      // lui, est explicite : une ventilation existe dès la sélection, donc pour
+      // des trajets qui n'ont pas forcément eu lieu (UF-807).
       //
       // `COUNT(DISTINCT …)` et non `COUNT(*)` : la table porte déjà une ligne
       // par mode et par trajet, mais compter les lignes dirait « 2 trajets en
@@ -251,6 +264,7 @@ export class CarbonService {
         WHERE h.user_id = ${userId}::uuid
           AND h.created_at >= ${currentFrom}
           AND h.created_at <  ${now}
+          AND h.completed_at IS NOT NULL
         GROUP BY f.mode
         -- La barre la plus longue en haut : devant ce bloc, la question de
         -- l'usager est « qu'est-ce qui pèse le plus ? ».
@@ -272,7 +286,7 @@ export class CarbonService {
       emittedGrams: 0,
       carEquivalentGrams: 0,
       tripsCount: 0,
-      unpricedCount: 0,
+      uncountedCount: 0,
     }));
 
     for (const row of rows) {
@@ -283,7 +297,7 @@ export class CarbonService {
       slot.emittedGrams += row.emittedGrams;
       slot.carEquivalentGrams += row.carEquivalentGrams;
       slot.tripsCount += row.tripsCount;
-      slot.unpricedCount += row.unpricedCount;
+      slot.uncountedCount += row.uncountedCount;
     }
 
     /** Agrège une plage de tranches (bornes incluses) en totaux de période. */
@@ -318,9 +332,9 @@ export class CarbonService {
         const bucket = CARBON_SUMMARY_BUCKETS + offset;
         return totalsOf(bucket, bucket);
       }),
-      unpricedTripsCount: series
+      uncountedTripsCount: series
         .slice(CARBON_SUMMARY_BUCKETS)
-        .reduce((sum, row) => sum + row.unpricedCount, 0),
+        .reduce((sum, row) => sum + row.uncountedCount, 0),
       // Rendu tel quel : la base a déjà trié par grammes décroissants, et
       // retrier ici ferait faire deux fois le même travail (C5).
       modeBreakdown: modeRows,
@@ -333,8 +347,9 @@ export class CarbonService {
   }
 
   /**
-   * Trajets valorisés de la période, pour le tableau « Détail par trajet » de la
-   * planche et pour l'export (UF-805).
+   * Trajets **réalisés** de la période, pour le tableau « Détail par trajet » de
+   * la planche et pour l'export (UF-805, restreint aux trajets parcourus par
+   * UF-807).
    *
    * ## Deux lectures plutôt qu'une jointure
    *
@@ -382,9 +397,11 @@ export class CarbonService {
       WHERE user_id = ${userId}::uuid
         AND created_at >= ${from}
         AND created_at < ${now}
-        -- Un trajet sans empreinte est une recherche abandonnée : elle est
-        -- dénombrée à part par getSummary (unpricedTripsCount), pas listée ici.
-        AND carbon_grams IS NOT NULL
+        -- Seuls les trajets réalisés (UF-807). Une recherche abandonnée, comme
+        -- une option retenue mais jamais parcourue, est dénombrée à part par
+        -- getSummary (uncountedTripsCount) et n'a pas sa ligne dans un tableau
+        -- qui s'appelle « Détail par trajet ».
+        AND completed_at IS NOT NULL
       ORDER BY created_at DESC
       LIMIT ${CARBON_TRIPS_MAX + 1}
     `;

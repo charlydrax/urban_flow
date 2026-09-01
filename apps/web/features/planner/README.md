@@ -513,9 +513,10 @@ plus le cas.
 
 ### L'historique n'est plus écrit par le front
 
-Depuis UF-402, `POST /routes/plan` enregistre lui-même la recherche (étape 18 du
+Depuis UF-402, `POST /routes/plan` enregistre lui-même la recherche (étape 7 du
 flux) et renvoie la ligne créée dans `searchHistoryId`. Le `POST /search-history`
-que le formulaire émettait ferait désormais **deux lignes pour un seul trajet**.
+que le formulaire émettait aurait fait **deux lignes pour un seul trajet** ;
+UF-807 a retiré l'endpoint, resté sans appelant depuis.
 
 Il est donc remplacé par `noteRecorded(id, from, to)` : une insertion **locale**,
 sans appel réseau — l'API vient d'écrire, nous avons l'identifiant et les deux

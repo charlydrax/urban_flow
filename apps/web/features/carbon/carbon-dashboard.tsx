@@ -202,24 +202,31 @@ export function CarbonDashboard() {
 
           {summary.current.tripsCount === 0 && (
             <p className="rounded-lg bg-tint-green px-4 py-3 text-sm text-primary-dark">
-              Votre bilan est encore vide. Lancez une recherche d’itinéraire, puis{' '}
-              <b>choisissez une option</b> dans la liste des résultats&nbsp;: c’est ce choix qui est
-              compté ici.
+              Votre bilan est encore vide. Lancez une recherche d’itinéraire, choisissez une option,
+              puis <b>suivez le guidage jusqu’à l’arrivée</b>&nbsp;: seuls les trajets réellement
+              parcourus sont comptés ici.
             </p>
           )}
 
-          {summary.unpricedTripsCount > 0 && (
+          {summary.uncountedTripsCount > 0 && (
             /*
               Honnêteté du chiffre : ces recherches existent bien dans
               l'historique mais ne pèsent rien dans les totaux. Sans cette
               phrase, l'écart entre « j'ai beaucoup cherché » et « mon bilan est
               bas » passerait pour un défaut de l'application.
+
+              Depuis UF-807 la phrase dit *pourquoi* elles ne comptent pas, et ce
+              n'est plus la même raison : une option retenue mais jamais parcourue
+              est également écartée. Énumérer les deux cas ferait une phrase de
+              trois lignes sous un graphique ; nommer le critère commun — mené à
+              son terme — dit la règle entière en une fois.
             */
             <p className="text-xs text-ink-500">
-              {summary.unpricedTripsCount} recherche
-              {summary.unpricedTripsCount > 1 ? 's' : ''} de cette période{' '}
-              {summary.unpricedTripsCount > 1 ? 'ne sont' : "n'est"} pas comptée
-              {summary.unpricedTripsCount > 1 ? 's' : ''}&nbsp;: aucun itinéraire n’y a été retenu.
+              {summary.uncountedTripsCount} recherche
+              {summary.uncountedTripsCount > 1 ? 's' : ''} de cette période{' '}
+              {summary.uncountedTripsCount > 1 ? 'ne sont' : "n'est"} pas comptée
+              {summary.uncountedTripsCount > 1 ? 's' : ''}&nbsp;: le trajet n’a pas été mené jusqu’à
+              l’arrivée.
             </p>
           )}
 

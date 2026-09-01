@@ -353,10 +353,12 @@ export class PlanRoutesResponseDto implements PlanRoutesResponse {
    * Identifiant de la ligne écrite dans `search_history` pour cette recherche
    * (UF-204, étape 18 du flux).
    *
-   * Publié pour que le client n'ait pas à réenregistrer le trajet : un second
-   * `POST /search-history` dupliquerait ce que le serveur vient d'écrire. Il
-   * servira aussi de référence pour rattacher l'option retenue quand l'usager
-   * en choisira une (UF-404).
+   * Publié parce que c'est la **clé de tout ce qui suit** : le client s'en sert
+   * pour rattacher l'option retenue (`PATCH .../selection`, UF-505) puis, à
+   * l'arrivée du guidage, le trajet réellement parcouru
+   * (`POST .../completion`, UF-807) — le seul événement que le suivi carbone
+   * compte. Sans lui, le client n'aurait d'autre choix que de recréer une ligne
+   * et d'en dupliquer une par recherche.
    *
    * `null` quand l'écriture a échoué — un désagrément, pas une panne de la
    * recherche : les itinéraires sont rendus quand même (C10).

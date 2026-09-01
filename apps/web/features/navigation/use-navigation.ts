@@ -44,11 +44,22 @@ import type { UserLocationState } from '../planner/use-user-location';
  * serveur (C8). Le refus, lui, ne demande rien de particulier : sans position,
  * le guidage ne démarre pas, et le portail a déjà dit pourquoi.
  *
+ * ## L'arrivée est le seul moment où le guidage parle au serveur (UF-807)
+ *
+ * Jusqu'à UF-806, ce hook n'écrivait rien : il lisait un itinéraire déjà reçu
+ * et une position déjà consentie. Il publie désormais **un** événement, et un
+ * seul — « arrivé » — parce que c'est lui qui distingue un trajet parcouru
+ * d'une option cliquée, et donc ce que le suivi carbone a le droit de compter.
+ * Il ne l'émet pas lui-même : il appelle `onArrival`, et c'est le planificateur
+ * qui sait sur quelle ligne d'historique l'inscrire. Le guidage reste ainsi
+ * sans requête réseau du début à la fin (C5).
+ *
  * Couvre : C6 (suivi continu et échecs capteur), C8 (aucun consentement en
  * double), C5 (l'abonnement haute précision ne vit que dans les phases qui en
  * ont besoin).
  *
  * @param location État du parcours « Me localiser », tel que le planificateur le tient déjà
+ * @param onArrival Appelé **une fois par session**, quand la destination est atteinte
  */
 export interface NavigationController {
   state: NavigationState;
@@ -64,8 +75,17 @@ export interface NavigationController {
   stop: () => void;
 }
 
-export function useNavigation(location: UserLocationState): NavigationController {
+export function useNavigation(
+  location: UserLocationState,
+  onArrival?: (itinerary: Itinerary) => void,
+): NavigationController {
   const [state, dispatch] = useReducer(navigationReducer, INITIAL_NAVIGATION_STATE);
+
+  // Le rappel passe par une ref, comme `requestLocation` : l'appelant peut le
+  // recréer à chaque rendu sans faire repartir l'effet d'arrivée, qui ne doit
+  // dépendre que de la phase.
+  const onArrivalRef = useRef(onArrival);
+  onArrivalRef.current = onArrival;
 
   /**
    * Itinéraire retenu en attendant la position — le clic sur « Démarrer » a eu
@@ -119,6 +139,24 @@ export function useNavigation(location: UserLocationState): NavigationController
     setPending(null);
     dispatch({ type: 'stop' });
   }, []);
+
+  /*
+    Arrivée : l'événement qu'UF-807 attendait.
+
+    Déclenché par la **phase**, pas par la position : `arrived` est un état
+    terminal du réducteur (seul `stop` en sort), donc l'effet ne se rejoue pas
+    aux mesures qui suivent — trois pas dans le hall n'ajoutent pas un second
+    trajet au bilan. C'est aussi ce qui rend la règle testable sans GPS : la
+    séquence d'événements qui mène à `arrived` est déjà rejouée par
+    `navigation-machine.test.ts`.
+
+    `state.itinerary` est celui sur lequel le guidage a démarré, et non l'option
+    cochée dans la liste : on valorise ce qui a été parcouru.
+  */
+  useEffect(() => {
+    if (state.phase !== 'arrived' || !state.itinerary) return;
+    onArrivalRef.current?.(state.itinerary);
+  }, [state.phase, state.itinerary]);
 
   /*
     Abonnement au capteur — ouvert et fermé par la seule phase.

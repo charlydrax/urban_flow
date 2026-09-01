@@ -3,7 +3,7 @@ import type {
   CarbonSummary,
   CarbonSummaryDays,
   CarbonTripsPage,
-  CreateSearchHistoryPayload,
+  CompleteTripPayload,
   DeleteAccountResult,
   NearbyStationsResult,
   PlanRouteRequest,
@@ -228,8 +228,9 @@ export const apiClient = {
    * `userId` (400) et lit l'identité dans le cookie de session (C4).
    *
    * Elle **enregistre elle-même** la recherche dans l'historique et rend la
-   * ligne créée dans `searchHistoryId` : appeler `createSearchHistory` après un
-   * `planRoutes` créerait un doublon.
+   * ligne créée dans `searchHistoryId` — c'est le seul créateur de lignes
+   * d'historique, et c'est pourquoi le `POST /search-history` d'UF-204, qui en
+   * aurait fait une seconde, a été retiré (UF-807).
    *
    * La réponse est mise en cache par le service worker pour l'accès hors-ligne
    * (C1/C10) : hors réseau, c'est le **dernier itinéraire mémorisé** qui
@@ -244,15 +245,6 @@ export const apiClient = {
         servedFromCache = isServedFromCache(response.headers);
       },
     }).then((response) => ({ response, servedFromCache }));
-  },
-
-  /**
-   * Enregistre la recherche qui vient d'être lancée (UF-204) — étape 18 du flux.
-   * Le trajet est rattaché au compte du cookie de session : aucun identifiant
-   * n'est envoyé, il n'y a donc rien à falsifier côté client (C4).
-   */
-  createSearchHistory(payload: CreateSearchHistoryPayload): Promise<SearchHistoryEntry> {
-    return request('/search-history', { method: 'POST', body: JSON.stringify(payload) });
   },
 
   /**
@@ -284,6 +276,38 @@ export const apiClient = {
   ): Promise<SearchHistoryEntry> {
     return request(`/search-history/${searchHistoryId}/selection`, {
       method: 'PATCH',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  /**
+   * Consigne l'arrivée du guidage : le trajet a été **parcouru** (UF-807).
+   *
+   * ## Ce que cet appel change, et l'autre pas
+   *
+   * `recordItinerarySelection` dit « voilà l'option que je regarde ». Celui-ci
+   * dit « je l'ai faite » — et c'est lui, désormais, qui fait entrer le trajet
+   * dans la page « Mon impact ». Un bilan nourri de sélections comptait des
+   * intentions ; c'est le défaut que ce ticket corrige.
+   *
+   * Le corps est le même que celui de la sélection, et pour la même raison :
+   * **aucune empreinte n'est envoyée**, le Service Carbone valorise côté
+   * serveur (C4). Aucun horodatage non plus — l'heure d'arrivée est celle du
+   * serveur, une horloge de mobile ne fait pas foi.
+   *
+   * L'appel est **rejouable** : le serveur retient la première arrivée
+   * (`COALESCE`), donc un réessai après une coupure ne duplique ni ne décale le
+   * trajet.
+   *
+   * @param searchHistoryId Ligne rendue par `planRoutes` dans `searchHistoryId`
+   * @param payload Résumé du trajet parcouru et ses segments
+   */
+  recordTripCompletion(
+    searchHistoryId: string,
+    payload: CompleteTripPayload,
+  ): Promise<SearchHistoryEntry> {
+    return request(`/search-history/${searchHistoryId}/completion`, {
+      method: 'POST',
       body: JSON.stringify(payload),
     });
   },

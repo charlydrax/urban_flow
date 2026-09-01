@@ -2,42 +2,46 @@
 
 ## Rôle
 
-Persiste chaque recherche d'itinéraire du compte connecté — **étape 18 de la
-séquence de référence** (`INSERT search_history`) — et sert les dernières
-recherches au planificateur, qui les affiche sous les champs de saisie sous forme
-de rappels recliquables.
+Persiste chaque recherche d'itinéraire du compte connecté et sert les dernières
+au planificateur, qui les affiche sous les champs de saisie sous forme de rappels
+recliquables. Depuis UF-807, le module porte aussi la distinction qui fait vivre
+le suivi carbone : **retenu** (une option cochée) contre **réalisé** (un trajet
+parcouru).
+
+## Les trois âges d'une ligne
+
+| Moment                          | Qui l'écrit                               | Ce qui est posé            |
+| ------------------------------- | ----------------------------------------- | -------------------------- |
+| la recherche part (étape 7)     | `RoutesService` (`POST /api/routes/plan`) | les deux extrémités        |
+| une option est retenue (UF-505) | `PATCH …/selection`                       | résumé + empreinte         |
+| le guidage arrive (UF-807)      | `POST …/completion`                       | `completed_at` + empreinte |
+
+Les deux dernières peuvent arriver dans n'importe quel ordre, ou pas du tout. Et
+c'est la troisième, **elle seule**, qui fait entrer le trajet dans « Mon
+impact » : retenir n'est pas parcourir.
 
 Deux usages en découlent :
 
 - **immédiat** : rejouer un trajet fréquent en un clic (F2) ;
-- **à venir** : le tableau de bord des habitudes de mobilité et l'agrégation
-  carbone, qui liront ces mêmes lignes.
+- **carbone** : le tableau de bord personnel (UF-505/UF-805), qui ne compte que
+  les lignes portant un `completed_at`.
 
 ## Endpoints (tous protégés par le guard JWT global)
 
-| Méthode | Route                               | Description                          |
-| ------- | ----------------------------------- | ------------------------------------ |
-| POST    | `/api/search-history`               | Enregistre une recherche             |
-| GET     | `/api/search-history?limit=N`       | Les N dernières recherches du compte |
-| PATCH   | `/api/search-history/:id/selection` | Inscrit l'itinéraire retenu (UF-505) |
+| Méthode | Route                                | Description                          |
+| ------- | ------------------------------------ | ------------------------------------ |
+| GET     | `/api/search-history?limit=N`        | Les N dernières recherches du compte |
+| PATCH   | `/api/search-history/:id/selection`  | Inscrit l'itinéraire retenu (UF-505) |
+| POST    | `/api/search-history/:id/completion` | Marque le trajet réalisé (UF-807)    |
 
-### `POST /api/search-history`
-
-```json
-{
-  "from": { "label": "Gare Part-Dieu, 69003 Lyon", "lat": 45.7605, "lng": 4.8596 },
-  "to": { "label": "Place Bellecour, 69002 Lyon", "lat": 45.7578, "lng": 4.832 },
-  "selectedSummary": "Marche + Métro B",
-  "carbonGrams": 14
-}
-```
-
-`selectedSummary` et `carbonGrams` sont **facultatifs** : la recherche est
-enregistrée dès sa soumission, donc avant que l'utilisateur n'ait choisi une
-option. Les coordonnées, elles, sont **obligatoires** — voir plus bas.
-
-Réponses : `201` (l'entrée créée, relue depuis les colonnes géométriques),
-`400` (coordonnées absentes ou hors bornes WGS84, clé inconnue), `401`.
+> **Ce module ne crée aucune ligne par HTTP.** Elles naissent de
+> `POST /api/routes/plan` (étape 7 du flux), qui en publie l'identifiant dans
+> `searchHistoryId`. Le `POST /api/search-history` livré par UF-204 n'avait plus
+> d'appelant depuis UF-403 — l'émettre en plus du plan aurait fait deux lignes
+> pour un seul trajet — et son corps acceptait un nombre de grammes venu du
+> navigateur, ce qu'UF-505 avait justement cessé de faire. **UF-807 le retire**
+> plutôt que de le rebrancher : un point d'écriture sans appelant n'est pas une
+> réserve, c'est une porte qu'on oublie de surveiller (C4).
 
 ### `GET /api/search-history`
 
@@ -51,7 +55,8 @@ Réponses : `201` (l'entrée créée, relue depuis les colonnes géométriques),
       "selectedSummary": null,
       "carbonGrams": null,
       "carEquivalentGrams": null,
-      "createdAt": "2026-07-31T09:12:00.000Z"
+      "createdAt": "2026-07-31T09:12:00.000Z",
+      "completedAt": null
     }
   ]
 }
@@ -69,10 +74,22 @@ l'affichage qui les replie, et le tableau de bord carbone a besoin du détail.
 
 ### `PATCH /api/search-history/:id/selection` (UF-505)
 
-Ce qui alimente le suivi carbone personnel. La ligne d'historique naît à
-l'étape 18 du flux, **avant** qu'aucune option n'existe : inscrire d'office la
-première proposition ferait passer un classement du serveur pour une décision de
-l'usager. Le choix arrive plus tard — ou n'arrive jamais — d'où un second appel.
+L'option que l'usager **retient** dans la liste de résultats. La ligne
+d'historique naît à l'étape 7 du flux, **avant** qu'aucune option n'existe :
+inscrire d'office la première proposition ferait passer un classement du serveur
+pour une décision de l'usager. Le choix arrive plus tard — ou n'arrive jamais —
+d'où un second appel.
+
+> ⚠️ **Depuis UF-807, cet appel ne fait plus compter le trajet.** Il enregistre
+> une intention ; c'est l'arrivée du guidage qui enregistre un déplacement. Le
+> résumé et l'empreinte restent écrits ici — ils rendent la ligne lisible et
+> évitent de tout recalculer à l'arrivée — mais ils ne suffisent plus à faire
+> entrer le trajet dans le bilan.
+>
+> Et **un trajet déjà réalisé ne se réécrit pas** : l'`UPDATE` porte
+> `AND completed_at IS NULL`. Revenir sur la liste après être arrivé et cliquer
+> une autre option rend la ligne inchangée (`200`, sans erreur) plutôt que de
+> revaloriser un trajet parcouru avec un itinéraire qui ne l'a pas été.
 
 ```jsonc
 // Corps : aucun gramme. Le mode et la distance, rien d'autre.
@@ -116,6 +133,43 @@ porte sur le **couple** `(id, user_id)` — viser la ligne d'un autre compte ne 
 rien à jour et répond `404`, indiscernable d'un identifiant inexistant.
 
 Réponses : `200` (l'entrée mise à jour), `400`, `401`, `404`.
+
+### `POST /api/search-history/:id/completion` (UF-807)
+
+L'arrivée du guidage (UF-806). C'est **le** correctif du ticket : jusqu'ici le
+suivi carbone comptait le clic de sélection, c'est-à-dire une intention, et un
+bilan d'intentions ne mesure aucun déplacement.
+
+```jsonc
+// Même corps que la sélection : aucun gramme, aucun horodatage.
+{
+  "selectedSummary": "Marche + Métro B",
+  "segments": [
+    { "mode": "WALK", "distanceMeters": 400 },
+    { "mode": "METRO", "distanceMeters": 3200 },
+  ],
+}
+```
+
+**Pourquoi cet appel valorise aussi le trajet.** La première option de la liste
+est présélectionnée sans clic (UF-404) : un usager qui démarre le guidage dessus
+et arrive n'a jamais émis de sélection. Exiger qu'un `PATCH …/selection` ait
+précédé ferait disparaître du bilan des trajets bel et bien parcourus. Et scinder
+en deux appels ouvrirait une fenêtre où un trajet serait réalisé sans empreinte,
+donc compté pour zéro gramme.
+
+**`POST` et non `PATCH`** : l'appel consigne un événement — « je suis arrivé » —
+et non la modification d'un champ que le client choisirait. L'horodatage est
+celui du serveur (`NOW()`) : une date venue du navigateur permettrait de ranger
+un trajet dans la période de son choix, et l'horloge d'un mobile n'est pas une
+source de temps fiable (C4). `200` et non `201` : rien n'est créé.
+
+**L'appel est rejouable.** `completed_at = COALESCE(completed_at, NOW())` — la
+**première** arrivée fait foi. Un client qui perd le réseau au moment précis où
+il arrive peut donc réessayer sans dupliquer ni décaler le trajet.
+
+Réponses : `200` (l'entrée mise à jour, `completedAt` renseigné), `400`, `401`,
+`404`.
 
 ## Stockage PostGIS
 
@@ -182,9 +236,8 @@ le vérifie explicitement.
 - `CarbonService` (UF-505) — valorise les segments d'un itinéraire retenu, pour
   que l'empreinte écrite ne vienne jamais du client
 - `@CurrentUser()` — identité issue du JWT (jamais du corps — C4)
-- `@urbanflow/shared` — contrats `SearchHistoryEntry`,
-  `CreateSearchHistoryPayload`, `SelectItineraryPayload`, bornes
-  `DEFAULT/MAX_SEARCH_HISTORY_LIMIT` (C9)
+- `@urbanflow/shared` — contrats `SearchHistoryEntry`, `SelectItineraryPayload`,
+  `CompleteTripPayload`, bornes `DEFAULT/MAX_SEARCH_HISTORY_LIMIT` (C9)
 
 ## Contraintes couvertes
 
@@ -205,13 +258,16 @@ le vérifie explicitement.
   `limit`, dédoublonnage des trajets répétés. Depuis UF-505 : l'empreinte d'une
   sélection est **calculée par le barème** et non reprise du corps, les deux
   colonnes carbone sont écrites ensemble, et une ligne appartenant à un autre
-  compte remonte `NotFoundException`.
+  compte remonte `NotFoundException`. Depuis UF-807 : la sélection **ne pose
+  pas** `completed_at`, l'arrivée le pose avec l'horloge du serveur et le
+  conserve si l'appel est rejoué, elle valorise un trajet jamais sélectionné, et
+  un trajet déjà réalisé est rendu inchangé plutôt que revalorisé.
 
 ## Consommateurs du service
 
 - `RoutesService` (UF-402) — **écriture** : `create` à chaque planification
-  (étape 18). Le planificateur est le premier consommateur du module hors de son
-  propre contrôleur.
+  (étape 7). Depuis UF-807, c'est le **seul** créateur de lignes : la route HTTP
+  jumelle a été retirée, et `create` ne prend plus que les deux extrémités.
 - ~~`SourceDiagnosticsService` (UF-306)~~ — **retiré par UF-402**, avec son
   endpoint. Il lisait l'historique pour rejouer un trajet et sonder les trois
   sources dessus, et n'y écrivait jamais : sonder l'infrastructure n'est pas un
@@ -221,7 +277,11 @@ le vérifie explicitement.
 ## Reste à faire (hors UF-204)
 
 - ~~Agrégation par le tableau de bord carbone~~ — livrée par UF-505
-  (`CarbonService.getSummary`, qui agrège `search_history` directement).
+  (`CarbonService.getSummary`, qui agrège `search_history` directement) et
+  restreinte aux trajets réalisés par UF-807.
+- **Reprise des lignes d'avant UF-807** : les trajets valorisés avant ce ticket
+  n'ont pas de `completed_at` et ne comptent donc plus. Volontaire — c'étaient
+  des sélections, et les marquer réalisés d'office rétablirait le défaut corrigé.
 - **Politique de rétention** (C8/C11) : les trajets ne devraient pas être
   conservés indéfiniment. Purge au-delà de N mois + suppression manuelle d'une
   entrée à exposer — la cascade avec le compte est en place, pas la durée de vie.

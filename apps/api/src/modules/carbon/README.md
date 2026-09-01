@@ -173,12 +173,21 @@ mois-ci » : un bilan mensuel est quasiment vide le 1er du mois, et l'évolution
 qu'il afficherait le 2 ne voudrait rien dire. Une fenêtre glissante et sa jumelle
 immédiatement antérieure comparent toujours deux durées identiques.
 
-**Seuls les trajets retenus comptent.** Une ligne de `search_history` n'entre
-dans les totaux qu'une fois son `carbon_grams` posé, c'est-à-dire une fois que
-l'usager a **choisi** une option (voir plus bas). Additionner les recherches
-abandonnées ferait un bilan de déplacements que personne n'a faits. Ces
-recherches sont tout de même dénombrées à part (`unpricedTripsCount`) : sans
-cela, un total bas serait incompréhensible pour quelqu'un qui a beaucoup cherché.
+**Seuls les trajets réalisés comptent (UF-807).** Une ligne de `search_history`
+n'entre dans les totaux qu'une fois son `completed_at` posé, c'est-à-dire une
+fois que le guidage (UF-806) a atteint la destination. Le critère précédent —
+« une option a été retenue », `carbon_grams IS NOT NULL` — comptait des **clics**
+et donc des intentions : c'est le défaut que ce ticket corrige. Une recherche
+abandonnée, comme une option retenue puis jamais parcourue, est tout de même
+dénombrée à part (`uncountedTripsCount`) : sans cela, un total bas serait
+incompréhensible pour quelqu'un qui a beaucoup cherché.
+
+Le filtre porte sur les **sommes** autant que sur les comptes
+(`SUM(carbon_grams) FILTER (WHERE completed_at IS NOT NULL)`) : une option
+retenue puis abandonnée porte bien une empreinte en base, et la sommer referait
+exactement le défaut corrigé. Même règle pour la répartition par mode, dont les
+lignes existent dès la sélection (`h.completed_at IS NOT NULL` dans la jointure),
+et pour le tableau « Détail par trajet ».
 
 **Le module lit `search_history` directement**, sans passer par
 `SearchHistoryService`. Ce service existe pour encapsuler les géométries PostGIS
@@ -187,12 +196,22 @@ matérialise jamais une entrée d'historique. L'y loger imposerait par ailleurs 
 cycle entre les deux modules, `search-history` dépendant déjà de ce service-ci
 pour valoriser une sélection.
 
-## Comment l'empreinte arrive en base (UF-505)
+## Comment l'empreinte arrive en base (UF-505), et ce qui la fait compter (UF-807)
 
-La ligne d'historique naît à l'étape 18 du flux, **avant** qu'aucune option
-n'existe : `carbon_grams` et `car_equivalent_grams` y sont `NULL`. C'est
-`PATCH /api/search-history/:id/selection` (module `search-history`) qui les pose,
-quand l'usager retient un itinéraire.
+La ligne d'historique naît à l'étape 7 du flux, **avant** qu'aucune option
+n'existe : `carbon_grams`, `car_equivalent_grams` et `completed_at` y sont
+`NULL`. Deux appels du module `search-history` les posent ensuite, et ils ne
+disent pas la même chose :
+
+| Appel                                     | Ce qu'il pose              | Compté dans « Mon impact » ?  |
+| ----------------------------------------- | -------------------------- | ----------------------------- |
+| `PATCH /api/search-history/:id/selection` | résumé + empreinte         | **non** — c'est une intention |
+| `POST /api/search-history/:id/completion` | `completed_at` + empreinte | **oui** — le trajet a eu lieu |
+
+L'arrivée valorise aussi le trajet parce que la première option de la liste est
+présélectionnée sans clic : un usager qui démarre le guidage dessus et arrive
+n'a jamais émis de sélection, et son trajet — bien réel — n'aurait rien à
+valoriser.
 
 Cet endpoint n'accepte **aucun gramme du client** : il reçoit les couples
 (mode, distance) des segments retenus et appelle `computeFootprint`. Le Service

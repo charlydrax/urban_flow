@@ -136,8 +136,14 @@ export function PlannerScreen() {
     chercher ailleurs : l'itinéraire retenu et le parcours de consentement à la
     géolocalisation. Le monter plus haut aurait rendu un guidage disponible sur
     des écrans qui n'ont pas d'itinéraire à suivre.
+
+    L'arrivée est rendue au planificateur (UF-807) : c'est lui qui tient la ligne
+    d'historique de la recherche en cours, et donc le seul à savoir sur quoi
+    inscrire « ce trajet a été parcouru ». Le guidage constate, le planificateur
+    consigne — aucun des deux n'a besoin d'en savoir plus sur l'autre.
   */
-  const navigation = useNavigation(location);
+  const { reportArrival } = routePlan;
+  const navigation = useNavigation(location, reportArrival);
 
   const isSearching = routePlan.status === 'loading';
   const isEmptyResult = routePlan.status === 'ready' && routePlan.itineraries.length === 0;

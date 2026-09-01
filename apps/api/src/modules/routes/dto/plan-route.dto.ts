@@ -64,8 +64,8 @@ export class PlaceDto implements Place {
  * Le `ValidationPipe` global (`whitelist` + `forbidNonWhitelisted`) transforme
  * la suppression en garde active : une requête qui envoie encore un `userId`
  * échoue en `400` au lieu d'être silencieusement acceptée. C'est exactement la
- * recette 2 du ticket, et c'est déjà le contrat de
- * `POST /api/search-history` (UF-204) — les deux écritures de trajet parlent
+ * recette 2 du ticket, et c'est le contrat de toutes les écritures de trajet
+ * du module `search-history` (`/selection`, `/completion`) — elles parlent
  * ainsi le même langage.
  */
 export class PlanRouteDto implements PlanRouteRequest {

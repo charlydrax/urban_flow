@@ -7,7 +7,7 @@ import {
 } from '@urbanflow/shared';
 import { IsInt, IsOptional, Max, Min } from 'class-validator';
 
-import { SearchHistoryPlaceDto } from './create-search-history.dto';
+import { SearchHistoryPlaceDto } from './search-history-place.dto';
 
 /**
  * Paramètres de `GET /api/search-history`.
@@ -63,6 +63,16 @@ export class SearchHistoryEntryDto implements SearchHistoryEntry {
 
   @ApiProperty({ format: 'date-time', example: '2026-07-31T09:12:00.000Z' })
   createdAt!: string;
+
+  /**
+   * Arrivée effective du guidage, `null` tant que le trajet n'a pas été parcouru
+   * (UF-807).
+   *
+   * C'est ce champ, et non `carbonGrams`, qui fait entrer un trajet dans le
+   * suivi carbone : une option retenue puis abandonnée reste une intention.
+   */
+  @ApiProperty({ format: 'date-time', nullable: true, example: '2026-07-31T09:41:00.000Z' })
+  completedAt!: string | null;
 }
 
 /**
