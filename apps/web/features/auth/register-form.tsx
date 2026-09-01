@@ -16,9 +16,8 @@ const AFTER_AUTH_REDIRECT = '/';
  * Formulaire d'inscription (F1) — câblé sur `POST /api/auth/register`.
  *
  * La maquette Figma ne comporte pas d'écran d'inscription : cet écran est
- * **dérivé** de « 2. CONNEXION F1 » (mêmes champs, mêmes gabarits, même bloc
- * bas de carte), la ligne « Se souvenir de moi » étant remplacée par la
- * politique de mot de passe.
+ * **dérivé** de « 2. CONNEXION F1 » (mêmes champs, mêmes gabarits, même bascule
+ * de bas de carte), la politique de mot de passe prenant la place laissée libre.
  *
  * Applique la politique de mot de passe OWASP côté client (retour immédiat),
  * la validation serveur restant la source de vérité (C4). Le JWT est posé en

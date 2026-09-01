@@ -16,10 +16,39 @@ import { HSTS_HEADER, STATIC_SECURITY_HEADERS } from './lib/security-headers';
  * - `poweredByHeader: false` : `X-Powered-By: Next.js` annonce la techno et sa
  *   famille de CVE à qui scanne. Aucun gain fonctionnel à le publier (OWASP A05).
  * - `distDir` pilotable par l'environnement (UF-605) : voir plus bas.
+ * - `pageExtensions` : les pages de développement ne sont pas bâties en
+ *   production (UF-808) — voir plus bas.
  */
+
+/**
+ * Extensions reconnues comme fichiers de route par l'App Router.
+ *
+ * La liste par défaut (`tsx`, `ts`, `jsx`, `js`) est réduite à ce que le projet
+ * écrit réellement, puis **augmentée de `dev.tsx` hors production**. Une page
+ * nommée `page.dev.tsx` est alors une route ordinaire en développement, et
+ * cesse d'être une page du tout dès que `next build` tourne : Next ne la voit
+ * plus, ne la compile pas, et son code n'entre dans aucun bundle.
+ *
+ * C'est le seul montage qui tienne la promesse « pas exposé en production ».
+ * Un garde à l'exécution — `notFound()` sur `NODE_ENV === 'production'` —
+ * répondrait bien `404`, mais le code de la page partirait quand même dans le
+ * livrable, à un drapeau d'environnement près de redevenir visible. C'est
+ * exactement le reproche fait à `POST /routes/sources` avant sa suppression par
+ * UF-402 (voir `docs/source-diagnostics-endpoint.md`).
+ *
+ * Concerne aujourd'hui `app/dev/ui/page.dev.tsx`, la planche du design system
+ * (UF-007) : un outil de vérification visuelle, sans utilité pour un usager et
+ * sans raison d'être servi par la PWA installée.
+ */
+const pageExtensions = ['tsx', 'ts'];
+if (process.env.NODE_ENV !== 'production') {
+  pageExtensions.push('dev.tsx');
+}
+
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
+  pageExtensions,
   /*
    * Répertoire de sortie du build, surchargeable par `NEXT_DIST_DIR` (UF-605).
    *

@@ -10,40 +10,44 @@ import {
 } from '@nestjs/swagger';
 
 import { OptionalAuth } from '../../common/decorators/optional-auth.decorator';
-import { CyclePathsService } from './cycle-paths/cycle-paths.service';
-import { CycleSegmentsQueryDto, CycleSegmentsResponseDto } from './dto/cycle-segments.dto';
 import { NearbyStationsQueryDto, NearbyStationsResponseDto } from './dto/nearby-stations.dto';
 import { SharedMobilityService } from './shared-mobility.service';
 import { TransportService, TransportSourceStatus } from './transport.service';
 
 /**
  * Contrôleur des intégrations transport (F3).
- * Expose l'état des sources GTFS/GBFS pour le diagnostic et l'affichage
- * d'un mode dégradé côté client (C10), les stations de véhicules en
- * libre-service à proximité d'un point (UF-303), et les tronçons cyclables
- * issus de notre propre base PostGIS (UF-304).
  *
- * ## Deux endpoints ouverts aux visiteurs (UF-804)
+ * Deux routes, deux consommateurs : l'état des sources GTFS/GBFS, qui écrit la
+ * ligne de provenance des encarts temps réel de l'écran de résultats (C9, C10),
+ * et les stations de véhicules en libre-service autour d'un point (UF-303), qui
+ * alimente l'encart « station » du même écran.
  *
- * `GET /transport/status` et `GET /transport/stations/nearby` passent en
- * authentification **facultative**, pour la même raison qui a ouvert
- * `POST /routes/plan` (UF-801) : ils rendent une donnée publique — l'état de
+ * ## Les deux sont ouvertes aux visiteurs (UF-804)
+ *
+ * Authentification **facultative**, pour la même raison qui a ouvert
+ * `POST /routes/plan` (UF-801) : elles rendent une donnée publique — l'état de
  * nos sources et le nombre de vélos à une borne — identique pour tout le monde,
- * et ils alimentent désormais les deux cartes temps réel de l'écran de
- * résultats, lui-même accessible sans compte. Les laisser sous le régime par
- * défaut aurait donné un écran à deux vitesses : le visiteur aurait vu ses
- * itinéraires, et deux cartes en erreur 401 sous elles.
+ * et elles alimentent un écran lui-même accessible sans compte. Les laisser sous
+ * le régime par défaut aurait donné un écran à deux vitesses : le visiteur aurait
+ * vu ses itinéraires, et deux cartes en erreur 401 sous elles.
  *
  * `@OptionalAuth()` plutôt que `@Public()` : un jeton périmé doit rester un
  * `401`, sans quoi une session morte deviendrait une visite anonyme en silence
  * (voir la docstring du décorateur).
  *
- * `GET /transport/cycle-paths/nearby` **reste protégé** : aucun écran ne le
- * consomme, et ouvrir une route sans consommateur serait élargir la surface
- * d'attaque sans contrepartie (C4). Ce n'est pas pour autant du code mort — le
- * service qu'il expose est appelé à chaque planification, c'est l'endpoint HTTP
- * qui n'a pas d'appelant. Voir le tableau « Qui consomme quoi » du README du
- * module.
+ * ## Ce contrôleur n'expose plus les pistes cyclables (depuis UF-808)
+ *
+ * `GET /transport/cycle-paths/nearby` (UF-304) est retiré. Aucun écran ne l'a
+ * jamais appelé : UF-804 l'avait conservé comme pièce de recette et de
+ * démonstration `ST_DWithin`, ce que le ticket #97 solde — une route qui
+ * n'a pas d'appelant n'a pas non plus de gardien, et c'est de la surface
+ * d'attaque qu'on n'a aucune raison de surveiller (C4).
+ *
+ * Le `CyclePathsService`, lui, **reste** et n'a rien perdu : il est appelé à
+ * chaque planification, en troisième branche du `Promise.all` de la collecte
+ * (UF-305). C'est l'endpoint HTTP qui disparaît, pas la fonctionnalité — et
+ * `ST_DWithin` se démontre désormais par le planificateur, ou par l'`EXPLAIN`
+ * documenté dans `docs/cycle-paths-postgis.md`.
  */
 @ApiTags('transport')
 @ApiBearerAuth()
@@ -54,7 +58,6 @@ export class TransportController {
   constructor(
     private readonly transportService: TransportService,
     private readonly sharedMobilityService: SharedMobilityService,
-    private readonly cyclePathsService: CyclePathsService,
   ) {}
 
   /**
@@ -103,46 +106,6 @@ export class TransportController {
   })
   getNearbyStations(@Query() query: NearbyStationsQueryDto): Promise<NearbyStationsResponseDto> {
     return this.sharedMobilityService.getNearbyStations(
-      { label: 'Point de recherche', lat: query.lat, lng: query.lng },
-      { radiusMeters: query.radius, limit: query.limit },
-    );
-  }
-
-  /**
-   * Tronçons cyclables et piétons autour d'un point (UF-304).
-   *
-   * Étapes 12-13 du flux de référence : la troisième branche du `Promise.all`
-   * du Service Itinéraire, celle qui vient de **notre** base PostGIS et non
-   * d'une source externe.
-   *
-   * Pas de `status` dans la réponse, à la différence des deux autres sources.
-   * Cet endpoint n'a qu'un objet : les aménagements cyclables. Rendre une liste
-   * vide parce que la base n'a pas répondu affirmerait qu'il n'y en a pas ici —
-   * une réponse fausse, indiscernable d'une réponse vraie. L'erreur doit donc
-   * remonter en `500`.
-   *
-   * ⚠️ Cet arbitrage vaut pour **cet** endpoint, pas pour le planificateur : là,
-   * l'usager demande des itinéraires, et perdre les tronçons cyclables reste
-   * préférable à perdre aussi les trajets en métro. Le Service Itinéraire
-   * dégrade donc cette même source (UF-305) — c'est la question posée qui
-   * change, pas la source.
-   */
-  @Get('cycle-paths/nearby')
-  @ApiOperation({
-    summary: 'Tronçons cyclables et piétons à proximité',
-    description:
-      'Interroge PostGIS (`ST_DWithin` sur index GiST) et retourne les aménagements cyclables ' +
-      'du rayon demandé, triés par distance croissante, tracé GeoJSON compris. La distance est ' +
-      'celle du **point le plus proche du tronçon** : une piste de deux kilomètres qui longe le ' +
-      'point demandé est à quelques mètres, pas à mille. `datasetImportedAt` date le jeu de ' +
-      "données — `null` signifie que l'import n'a pas encore été lancé.",
-  })
-  @ApiOkResponse({ type: CycleSegmentsResponseDto })
-  @ApiBadRequestResponse({
-    description: 'Coordonnées manquantes ou hors bornes WGS84, rayon ou limite hors plage (C4).',
-  })
-  getNearbyCycleSegments(@Query() query: CycleSegmentsQueryDto): Promise<CycleSegmentsResponseDto> {
-    return this.cyclePathsService.getCycleSegments(
       { label: 'Point de recherche', lat: query.lat, lng: query.lng },
       { radiusMeters: query.radius, limit: query.limit },
     );

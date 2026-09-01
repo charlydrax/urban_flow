@@ -25,20 +25,34 @@ authentification (F1), préférences de mobilité et tableau de bord carbone.
 - **API** : client typé `lib/api-client.ts` (cookies httpOnly — C11),
   contrats partagés importés depuis `@urbanflow/shared` (mêmes types que les DTO NestJS — C9).
 - **Session (C4/C11, UF-106)** : toutes les pages sont **privées par défaut**
-  (`middleware.ts`) sauf `/login` et `/register` ; un `401` de l'API purge la session et
-  renvoie vers la connexion en mémorisant la page demandée. Détail et périmètre de
-  confiance : `features/auth/README.md`.
+  (`middleware.ts`) ; sont publiques `/login`, `/register`, `/confidentialite` et le
+  planificateur `/` (ouvert aux visiteurs par UF-801). Un `401` de l'API purge la
+  session et renvoie vers la connexion en mémorisant la page demandée. Détail et
+  périmètre de confiance : `features/auth/README.md`.
 
 ## Structure
 
 ```
 app/           # App Router (layout accessible, pages)
 components/    # UI transverse (carte MapLibre, indicateur hors-ligne — README par dossier, enregistrement SW)
-features/      # auth/ (câblé — UF-105/106), planner/, profile/, carbon/ (stubs)
+features/      # auth/, planner/, navigation/, profile/, carbon/
 lib/           # client API, session, géolocalisation (C6), helpers
 middleware.ts  # protection des routes privées (UF-106)
 sw.ts          # service worker (C1, C10) — voir docs/pwa-offline.md
 ```
+
+### Pages de développement (UF-808)
+
+Une page nommée `page.dev.tsx` est une route **en développement uniquement** :
+`pageExtensions` (dans `next.config.ts`) n'ajoute l'extension `dev.tsx` que hors
+production, si bien que `next build` ne voit pas le fichier, ne le compile pas et
+n'embarque son code dans aucun bundle. Le seul cas aujourd'hui est
+`app/dev/ui/page.dev.tsx`, la planche du design system (UF-007).
+
+Un garde à l'exécution (`notFound()` sur `NODE_ENV === 'production'`) aurait bien
+répondu `404`, mais le code serait parti dans le livrable à un drapeau
+d'environnement près de redevenir visible — le reproche exact fait à
+`POST /routes/sources` avant sa suppression (voir `docs/source-diagnostics-endpoint.md`).
 
 ## Commandes
 

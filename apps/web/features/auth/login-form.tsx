@@ -116,36 +116,6 @@ export function LoginForm({ nextPath }: LoginFormProps) {
         onChange={(event) => setPassword(event.target.value)}
       />
 
-      {/*
-       * Ligne « Se souvenir de moi / Oublié ? » de la maquette. Aucune des deux
-       * options n'a de contrepartie API dans le prototype (UF-103 émet un cookie
-       * de session à durée fixe, et aucune route de réinitialisation n'existe) :
-       * elles sont affichées désactivées et annoncées comme telles, plutôt que
-       * de proposer une action sans effet.
-       */}
-      <div className="flex items-center justify-between gap-4">
-        <label className="flex items-center gap-2 text-xs text-ink-700 has-[:disabled]:text-ink-500">
-          <input
-            type="checkbox"
-            disabled
-            aria-describedby="login-soon"
-            className="size-4 shrink-0 accent-primary"
-          />
-          Se souvenir de moi
-        </label>
-        <button
-          type="button"
-          disabled
-          aria-describedby="login-soon"
-          className="text-xs font-bold text-action-dark hover:underline disabled:text-ink-500 disabled:no-underline"
-        >
-          Oublié ?
-        </button>
-      </div>
-      <p id="login-soon" className="sr-only">
-        Fonctionnalité prévue après le prototype.
-      </p>
-
       <Button type="submit" variant="primary" size="lg" className="w-full" disabled={submitting}>
         {submitting ? 'Connexion…' : 'Se connecter'}
       </Button>

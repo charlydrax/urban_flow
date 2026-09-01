@@ -169,10 +169,30 @@ aménagements en projet, et réconcilier l'existant plutôt que vider la table.
   paramètre JSON** que PostgreSQL déplie (`jsonb_array_elements`). Le texte SQL
   est constant, bien que les libellés viennent d'une source externe.
 
-## 5. L'API
+## 5. Le contrat de lecture
 
-```http
-GET /api/transport/cycle-paths/nearby?lat=45.760515&lng=4.859057&radius=300&limit=3
+> 🗄️ **L'endpoint HTTP `GET /api/transport/cycle-paths/nearby` a été retiré par
+> UF-808** (ticket #97, « nettoyage de la dette morte »). Aucun écran ne l'avait
+> jamais appelé : une route sans appelant n'a pas de gardien non plus, personne
+> ne remarquerait qu'elle se met à mal se comporter, et c'est de la surface
+> d'attaque gratuite (C4). Même raisonnement que pour `POST /routes/sources`,
+> supprimé par UF-402.
+>
+> **Rien de la fonctionnalité n'est perdu.** Le contrat décrit ci-dessous est
+> celui de `CyclePathsService.getCycleSegments(point, options)`, appelé à chaque
+> planification en troisième branche du `Promise.all` de la collecte (UF-305) —
+> c'est lui qui porte la requête `ST_DWithin`, et il n'a pas changé. Seule la
+> façade HTTP a disparu, avec ses DTO. Les appels `curl` de la section 8 sont
+> donc remplacés par le planificateur et par `psql`.
+>
+> Le rejouer si besoin : `git show` sur le merge d'UF-304 contient le contrôleur
+> et ses DTO.
+
+```ts
+cyclePathsService.getCycleSegments(
+  { label: 'Part-Dieu', lat: 45.760515, lng: 4.859057 },
+  { radiusMeters: 300, limit: 3 },
+);
 ```
 
 ```jsonc
@@ -195,10 +215,14 @@ GET /api/transport/cycle-paths/nearby?lat=45.760515&lng=4.859057&radius=300&limi
 }
 ```
 
-| Paramètre | Défaut | Bornes  | Raison de la borne                                         |
-| --------- | ------ | ------- | ---------------------------------------------------------- |
-| `radius`  | 300 m  | 50–2000 | plancher = précision d'un GPS urbain (C6) ; plafond = C5   |
-| `limit`   | 20     | 1–100   | chaque tracé pèse, sur réseau mobile plus qu'ailleurs (C5) |
+| Paramètre      | Défaut | Bornes  | Raison de la borne                                         |
+| -------------- | ------ | ------- | ---------------------------------------------------------- |
+| `radiusMeters` | 300 m  | 50–2000 | plancher = précision d'un GPS urbain (C6) ; plafond = C5   |
+| `limit`        | 20     | 1–100   | chaque tracé pèse, sur réseau mobile plus qu'ailleurs (C5) |
+
+Les bornes sont appliquées **dans le service** (`clampRadius` / `clampLimit`),
+pas seulement dans un DTO : un appel interne fautif ne passe par aucune
+validation HTTP, et c'est justement le seul type d'appel qui reste.
 
 ### Trois points de contrat qui méritent une phrase
 
@@ -213,12 +237,12 @@ dans le rayon : un tronçon peut légitimement être plus long que le rayon dema
 
 **Il n'y a pas de champ `status`**, contrairement aux réponses GTFS et GBFS. Ces
 deux-là décrivent des sources externes dont la panne doit être dégradée
-gracieusement. Cet endpoint-ci n'a qu'un objet : les aménagements cyclables.
+gracieusement. Ce service-ci n'a qu'un objet : les aménagements cyclables.
 Rendre une liste vide parce que la base n'a pas répondu affirmerait qu'il n'y en
 a pas ici — une réponse fausse, et indiscernable d'une réponse vraie. L'erreur
-doit donc remonter en `500`, et se voir.
+est donc levée, et doit se voir.
 
-L'arbitrage vaut pour **cet** endpoint, pas pour le planificateur : là, l'usager
+L'arbitrage vaut pour **cet appel**, pas pour le planificateur : là, l'usager
 demande des itinéraires, et perdre les tronçons cyclables reste préférable à
 perdre aussi les trajets en métro. Le Service Itinéraire dégrade donc cette même
 source comme les deux autres (UF-305, `docs/source-orchestration.md`). Ce n'est
@@ -276,19 +300,24 @@ docker compose exec db psql -U urbanflow -d urbanflow -c "
 
 ### Recette 2 — « ST_DWithin retourne les tronçons dans le rayon donné »
 
-- [x] `GET /api/transport/cycle-paths/nearby?lat=45.760515&lng=4.859057&radius=300`
-      renvoie les 15 tronçons autour de la Part-Dieu, triés par distance croissante.
+> Cette recette passait par `GET /api/transport/cycle-paths/nearby`, retiré par
+> UF-808 (voir section 5). Elle se rejoue à l'identique en base — c'est la même
+> requête, aux paramètres liés près —, et le chemin applicatif se vérifie par une
+> planification : lancer une recherche lyonnaise dans le planificateur appelle
+> `CyclePathsService` sur les deux extrémités du trajet.
+
+- [x] Rayon de 300 m autour de la Part-Dieu : 15 tronçons, triés par distance
+      croissante.
 - [x] Le rayon est bien **métrique**, et se comporte comme un rayon : le nombre
       de tronçons croît avec lui, sans jamais ramener le jeu de données entier —
       ce que ferait un rayon interprété en degrés (300° couvrent la planète).
 
-      | `radius` | 50 m | 100 m | 300 m | 500 m | 1 000 m |
-      | -------- | ---- | ----- | ----- | ----- | ------- |
-      | Tronçons | 0    | 4     | 15    | 63    | 100 (plafond `limit`) |
+      | `radiusMeters` | 50 m | 100 m | 300 m | 500 m | 1 000 m |
+      | -------------- | ---- | ----- | ----- | ----- | ------- |
+      | Tronçons       | 0    | 4     | 15    | 63    | 100 (plafond `limit`) |
 
-- [x] Un point hors Métropole (Paris : `lat=48.8566&lng=2.3522`) renvoie `200` avec
-      `segments: []` **et** une `datasetImportedAt` renseignée — « rien ici », pas
-      « rien en base ».
+- [x] Un point hors Métropole (Paris : `48.8566, 2.3522`) rend `segments: []`
+      **et** une `datasetImportedAt` renseignée — « rien ici », pas « rien en base ».
 - [x] Tests : `cycle-paths.service.spec.ts` (forme de la requête, ordre
       longitude/latitude, bornage) et `cycle-path.mapper.spec.ts` (normalisation).
 

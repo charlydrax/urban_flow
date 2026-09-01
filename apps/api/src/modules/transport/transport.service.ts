@@ -29,8 +29,23 @@ const STALE_STATUS_THRESHOLD_MS = 15 * 60 * 1000;
  *
  * Les calculs eux-mêmes vivent dans `TransitService` (UF-302) et
  * `SharedMobilityService` (UF-303) ; ce service-ci ne fait que rapporter l'état
- * des sources, ce dont le front a besoin pour afficher un bandeau « mode
- * dégradé » (C10).
+ * des sources.
+ *
+ * ## Ce que le front en fait, et ce qu'il n'en fait pas (précisé par UF-808)
+ *
+ * Cet état alimente la **ligne de provenance** des deux encarts temps réel de
+ * l'écran de résultats — « GBFS · temps réel » contre « GBFS · flux figé »,
+ * « GTFS · horaire théorique » contre « GTFS · source injoignable ». C'est ce
+ * qui sépare une carte informative d'une carte décorative (C9, C10).
+ *
+ * Il n'alimente **pas** le bandeau « mode dégradé » du planificateur, contrairement
+ * à ce que cette docstring a longtemps annoncé. Ce bandeau se lit dans le champ
+ * `sources` que `POST /routes/plan` rend pour **la recherche en cours** : c'est
+ * la seule donnée qui dise ce qui a manqué à *ce* calcul-là. Sonder les sources
+ * à côté répondrait à une autre question — « comment vont nos flux en ce
+ * moment ? » —, et une source rétablie entre le calcul et le sondage ferait
+ * disparaître le bandeau alors que les itinéraires affichés, eux, resteraient
+ * incomplets.
  */
 @Injectable()
 export class TransportService {
@@ -51,7 +66,8 @@ export class TransportService {
    * l'autre ferait attendre au diagnostic la somme de deux timeouts, alors
    * qu'une source en panne est précisément le cas où l'on consulte cette page (C10).
    *
-   * @returns Statut de chaque source — diagnostic et bandeau dégradé côté front (C10)
+   * @returns Statut de chaque source — diagnostic, et ligne de provenance des
+   *   deux encarts temps réel de l'écran de résultats (C9, C10)
    */
   async getStatus(): Promise<TransportSourceStatus[]> {
     const checkedAt = new Date().toISOString();

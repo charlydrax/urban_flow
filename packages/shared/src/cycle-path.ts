@@ -115,16 +115,6 @@ export interface CyclePathQueryPoint extends Place {
   lng: number;
 }
 
-/** Paramètres d'une recherche de tronçons cyclables proches. */
-export interface CycleSegmentsQuery {
-  lat: number;
-  lng: number;
-  /** Rayon de recherche en mètres (défaut : 300). */
-  radius?: number;
-  /** Nombre maximal de tronçons retournés (défaut : 20 — C5). */
-  limit?: number;
-}
-
 /**
  * Rayon appliqué par défaut.
  *

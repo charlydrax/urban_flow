@@ -19,36 +19,51 @@ Consommé par le Service Itinéraire (module `routes`) via des appels parallèle
 
 ## Endpoints
 
-| Méthode | Route                               | Description                                  | Auth                 |
-| ------- | ----------------------------------- | -------------------------------------------- | -------------------- |
-| GET     | `/api/transport/status`             | État des deux sources GTFS/GBFS              | facultative (UF-804) |
-| GET     | `/api/transport/stations/nearby`    | Stations en libre-service autour d'un point  | facultative (UF-804) |
-| GET     | `/api/transport/cycle-paths/nearby` | Tronçons cyclables/piétons autour d'un point | requise (guard JWT)  |
+| Méthode | Route                            | Description                                 | Auth                 |
+| ------- | -------------------------------- | ------------------------------------------- | -------------------- |
+| GET     | `/api/transport/status`          | État des deux sources GTFS/GBFS             | facultative (UF-804) |
+| GET     | `/api/transport/stations/nearby` | Stations en libre-service autour d'un point | facultative (UF-804) |
 
-### Qui consomme quoi (UF-804)
+### Qui consomme quoi
 
-Le ticket #93 demandait de « rebrancher le module transport (3 endpoints livrés
-sans consommateur front) ou de clarifier son statut ». État après ce ticket :
+Le ticket #93 (UF-804) demandait de « rebrancher le module transport (3 endpoints
+livrés sans consommateur front) ou de clarifier son statut » ; le ticket #97
+(UF-808) a soldé le cas restant. État courant :
 
-| Route                 | Consommateur                                                     | Statut                       |
-| --------------------- | ---------------------------------------------------------------- | ---------------------------- |
-| `/status`             | ligne de provenance des deux cartes temps réel (`RealtimeCards`) | **branché**                  |
-| `/stations/nearby`    | carte « station en libre-service » du panneau de résultats       | **branché**                  |
-| `/cycle-paths/nearby` | _aucun_ — voir ci-dessous                                        | **volontairement inutilisé** |
+| Route              | Consommateur                                                       | Statut      |
+| ------------------ | ------------------------------------------------------------------ | ----------- |
+| `/status`          | ligne de provenance des deux encarts temps réel (`realtime-cards`) | **branché** |
+| `/stations/nearby` | encart « station en libre-service » du panneau de résultats        | **branché** |
 
-`/cycle-paths/nearby` n'est **pas** du code mort : le service qu'il expose
-(`CyclePathsService`) est appelé à chaque planification, comme troisième branche
-du `Promise.all` de la collecte (UF-305). C'est l'**endpoint HTTP** qui n'a pas
-de consommateur, et il est conservé pour deux raisons — la recette d'UF-304 s'y
-rejoue directement, et le dossier projet s'en sert pour montrer `ST_DWithin` à
-l'œuvre en soutenance. Il reste donc sous le régime d'authentification par
-défaut : ouvrir une route que personne n'appelle élargirait la surface d'attaque
-sans contrepartie (C4).
+Les deux sont en `@OptionalAuth()` parce qu'ils alimentent un écran ouvert aux
+visiteurs (UF-801) et rendent une donnée publique, identique pour tout le monde.
+Un jeton **présenté et invalide** reste un `401` : une session morte ne doit pas
+devenir une visite anonyme en silence.
 
-Les deux autres sont passés en `@OptionalAuth()` parce qu'ils alimentent
-désormais un écran ouvert aux visiteurs (UF-801) et rendent une donnée publique,
-identique pour tout le monde. Un jeton **présenté et invalide** reste un `401` :
-une session morte ne doit pas devenir une visite anonyme en silence.
+À quoi sert `/status`, précisément : à écrire la **provenance** affichée sous
+chaque encart temps réel — « GBFS · temps réel » ou « GBFS · flux figé »,
+« GTFS · horaire théorique » ou « GTFS · source injoignable ». Il n'alimente
+**pas** le bandeau « mode dégradé » du planificateur, contrairement à ce que ce
+README a longtemps laissé entendre : ce bandeau se lit dans le champ `sources`
+que `POST /routes/plan` rend pour la recherche en cours, seul à savoir ce qui a
+manqué à _ce_ calcul-là (UF-305).
+
+### `GET /cycle-paths/nearby` — retiré par UF-808
+
+L'endpoint HTTP des tronçons cyclables (UF-304) n'existe plus. Aucun écran ne
+l'a jamais appelé : UF-804 l'avait conservé comme pièce de recette et de
+démonstration `ST_DWithin`, et le ticket #97 tranche dans l'autre sens — une
+route sans appelant n'a pas non plus de gardien, personne ne remarquerait qu'elle
+se met à mal se comporter, et c'est de la surface d'attaque gratuite (C4). Même
+raisonnement que pour `POST /routes/sources`, supprimé par UF-402.
+
+Rien de la fonctionnalité n'est perdu : `CyclePathsService` est appelé à chaque
+planification, en troisième branche du `Promise.all` de la collecte (UF-305), et
+c'est lui qui porte la requête `ST_DWithin`. Ce qui a disparu est la façade
+HTTP, avec ses DTO et le type de requête `CycleSegmentsQuery` de
+`@urbanflow/shared`. Pour observer la recherche spatiale, voir la recette
+d'UF-304 dans [`docs/cycle-paths-postgis.md`](../../../../../docs/cycle-paths-postgis.md)
+— elle passe désormais par `psql` et par le planificateur.
 
 ## Connecteur transports en commun (UF-302)
 
@@ -71,7 +86,7 @@ const result = await transitService.getTransitJourneys(
 transport/
 ├── transit.service.ts           TC : date de service, requête, normalisation
 ├── shared-mobility.service.ts   mobilités douces : bornage, croisement des flux
-├── transport.service.ts         état des sources (bandeau « mode dégradé » côté front)
+├── transport.service.ts         état des sources (provenance des encarts temps réel)
 ├── dto/                         contrats HTTP + Swagger des endpoints du module
 ├── cycle-paths/
 │   ├── cycle-paths.service.ts   recherche spatiale ST_DWithin, bornage
