@@ -41,7 +41,7 @@ const SUMMARY: CarbonSummary = {
     totals('2026-08-13T12:00:00.000Z', '2026-08-20T12:00:00.000Z', 3_000, 3),
     totals('2026-08-20T12:00:00.000Z', '2026-08-28T12:00:00.000Z', 3_000, 3),
   ],
-  unpricedTripsCount: 3,
+  uncountedTripsCount: 3,
   modeBreakdown: [
     { mode: TransportMode.BUS, distanceMeters: 62_000, grams: 5_900, tripsCount: 7 },
     { mode: TransportMode.METRO, distanceMeters: 48_000, grams: 3_800, tripsCount: 5 },

@@ -118,6 +118,21 @@ model SearchHistory {
 
   createdAt DateTime @default(now()) @map("created_at")
 
+  /// Instant où le guidage (UF-806) a atteint la destination — le trajet a été
+  /// **réalisé**, pas seulement retenu (UF-807).
+  ///
+  /// C'est la colonne qui sépare l'intention du déplacement. `carbonGrams`
+  /// répond à « quelle option a été retenue ? » ; celle-ci répond à « ce trajet
+  /// a-t-il eu lieu ? », et c'est la seconde question que le suivi carbone doit
+  /// poser : un bilan nourri de sélections compterait des trajets que personne
+  /// n'a faits. Les deux ne vont pas forcément ensemble — on retient une option
+  /// sans partir (colonne à `NULL`), et l'arrivée valorise le trajet parcouru
+  /// même quand aucun clic de sélection n'a précédé.
+  ///
+  /// `NULL` jusqu'à l'arrivée : la ligne naît au lancement de la recherche
+  /// (étape 7 du flux), bien avant tout déplacement.
+  completedAt DateTime? @map("completed_at")
+
   /// Empreinte par mode de l'option retenue (UF-805) — liste vide tant qu'aucune
   /// option n'a été retenue, comme `carbonGrams` est alors `NULL`.
   modeFootprints TripModeFootprint[]
@@ -125,6 +140,11 @@ model SearchHistory {
   /// Lecture nominale : « les N dernières recherches de CET utilisateur »
   /// (`WHERE user_id = … ORDER BY created_at DESC`) — l'index couvre les deux.
   @@index([userId, createdAt])
+  /// Lecture du tableau de bord depuis UF-807 : « les trajets **réalisés** de ce
+  /// compte ». Le prédicat est commun aux trois requêtes de « Mon impact », et
+  /// sans lui il faudrait relire toute la fenêtre pour écarter les recherches
+  /// abandonnées (C5/C10).
+  @@index([userId, completedAt])
   /// Index spatial GiST sur le départ : sans lui, stocker des `geometry` plutôt
   /// que deux flottants n'apporterait rien de plus qu'un type mieux nommé.
   /// Il rend indexables les requêtes de proximité à venir (« trajets récents

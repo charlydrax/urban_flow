@@ -1,9 +1,19 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  ParseUUIDPipe,
+  Patch,
+  Post,
+  Query,
+} from '@nestjs/common';
 import {
   ApiBadRequestResponse,
   ApiBearerAuth,
   ApiCookieAuth,
-  ApiCreatedResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
@@ -14,7 +24,7 @@ import {
 
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { AuthenticatedUser } from '../../common/strategies/jwt.strategy';
-import { CreateSearchHistoryDto } from './dto/create-search-history.dto';
+import { CompleteTripDto } from './dto/complete-trip.dto';
 import {
   ListSearchHistoryQueryDto,
   SearchHistoryEntryDto,
@@ -26,6 +36,20 @@ import { SearchHistoryService } from './search-history.service';
 /**
  * Contrôleur de l'historique de recherche (UF-204) — endpoints protégés par le
  * guard JWT global (aucun `@Public()` ici : un historique anonyme n'existe pas).
+ *
+ * ## Ce contrôleur ne crée rien (depuis UF-807)
+ *
+ * Les lignes d'historique naissent **uniquement** de `POST /api/routes/plan`
+ * (étape 7 du flux), qui en rend l'identifiant dans `searchHistoryId`. Le
+ * `POST /api/search-history` livré par UF-204 n'avait plus d'appelant depuis
+ * UF-403 : l'émettre en plus du plan aurait produit deux lignes pour un seul
+ * trajet, et son corps acceptait un nombre de grammes venu du navigateur — ce
+ * qu'UF-505 avait justement cessé de faire. Il est retiré plutôt que rebranché ;
+ * un endpoint d'écriture sans appelant n'est pas une réserve, c'est une porte
+ * qu'on oublie de surveiller (C4).
+ *
+ * Restent donc trois routes : lire ses trajets, dire l'option retenue, dire le
+ * trajet parcouru.
  *
  * Comme `/users/me`, **aucune route n'accepte d'identifiant de compte** : ni en
  * paramètre de chemin, ni en query, ni dans le corps. L'utilisateur désigné est
@@ -44,26 +68,6 @@ import { SearchHistoryService } from './search-history.service';
 @Controller('search-history')
 export class SearchHistoryController {
   constructor(private readonly searchHistoryService: SearchHistoryService) {}
-
-  /**
-   * Enregistre la recherche que l'utilisateur vient de lancer (étape 18 du flux).
-   *
-   * `201 Created` avec l'entrée relue : le client récupère l'`id` et
-   * l'horodatage réels, et peut afficher le nouveau rappel sans redemander
-   * toute la liste (C5 — un aller-retour économisé).
-   */
-  @Post()
-  @ApiOperation({ summary: 'Enregistre une recherche d’itinéraire pour le compte connecté' })
-  @ApiCreatedResponse({ type: SearchHistoryEntryDto })
-  @ApiBadRequestResponse({
-    description: 'Corps invalide : coordonnées manquantes ou hors bornes WGS84 (C4).',
-  })
-  create(
-    @CurrentUser() user: AuthenticatedUser,
-    @Body() dto: CreateSearchHistoryDto,
-  ): Promise<SearchHistoryEntryDto> {
-    return this.searchHistoryService.create(user.userId, dto);
-  }
 
   /**
    * Les dernières recherches du compte connecté — les « trajets récents »
@@ -108,5 +112,43 @@ export class SearchHistoryController {
     @Body() dto: SelectItineraryDto,
   ): Promise<SearchHistoryEntryDto> {
     return this.searchHistoryService.recordSelection(user.userId, id, dto);
+  }
+
+  /**
+   * Marque un trajet **réalisé** : le guidage est arrivé à destination (UF-807).
+   *
+   * ## Pourquoi cet endpoint existe
+   *
+   * `PATCH .../selection` enregistre une **intention** — l'option qu'on regarde.
+   * Jusqu'ici le suivi carbone comptait cela, c'est-à-dire des trajets que
+   * personne n'avait forcément faits. C'est l'arrivée effective qui fait un
+   * déplacement, et c'est elle que cette route consigne.
+   *
+   * ## `POST` et non `PATCH`
+   *
+   * L'appel consigne un **événement** — « je suis arrivé » — et non la
+   * modification d'un champ que le client choisirait. L'horodatage est celui du
+   * serveur, le corps ne le porte pas. Rejouer l'appel est sans effet
+   * supplémentaire (`COALESCE` côté service) : le client peut donc réessayer
+   * après une coupure réseau à l'arrivée, sans dupliquer ni décaler un trajet.
+   *
+   * `200 OK` et non `201 Created` : rien n'est créé, une ligne existante change
+   * d'état et est rendue telle qu'elle est désormais.
+   */
+  @Post(':id/completion')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Marque un trajet comme réalisé (arrivée du guidage)' })
+  @ApiParam({ name: 'id', format: 'uuid', description: 'Trajet parcouru.' })
+  @ApiOkResponse({ type: SearchHistoryEntryDto })
+  @ApiBadRequestResponse({ description: 'Identifiant non-UUID ou corps invalide (C4).' })
+  @ApiNotFoundResponse({
+    description: 'Recherche inconnue — ou appartenant à un autre compte (OWASP A01).',
+  })
+  recordCompletion(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: CompleteTripDto,
+  ): Promise<SearchHistoryEntryDto> {
+    return this.searchHistoryService.recordCompletion(user.userId, id, dto);
   }
 }

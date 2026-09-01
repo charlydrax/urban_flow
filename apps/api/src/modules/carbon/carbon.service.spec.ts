@@ -197,7 +197,7 @@ describe('CarbonService', () => {
       emittedGrams: 0,
       carEquivalentGrams: 0,
       tripsCount: 0,
-      unpricedCount: 0,
+      uncountedCount: 0,
       ...overrides,
     });
 
@@ -220,20 +220,6 @@ describe('CarbonService', () => {
 
       // L'identifiant est un paramètre lié, jamais du texte concaténé (OWASP A03).
       expect(sql).not.toContain('user-1');
-    });
-
-    it('counts only the searches on which an itinerary was actually chosen', async () => {
-      await service.getSummary('user-1', 30, now);
-
-      const sql = sqlOf(queryRaw.mock.calls[0]);
-
-      // Un trajet ne pèse dans le bilan que si une option a été retenue :
-      // additionner les suggestions du serveur gonflerait l'empreinte de
-      // déplacements que personne n'a faits.
-      expect(sql).toContain('FILTER (WHERE carbon_grams IS NOT NULL)');
-      // Les recherches sans choix restent dénombrées à part, pour que le total
-      // bas d'un compte qui cherche beaucoup s'explique.
-      expect(sql).toContain('FILTER (WHERE carbon_grams IS NULL)');
     });
 
     it('totals the current window and compares it with the one before', async () => {
@@ -298,7 +284,7 @@ describe('CarbonService', () => {
       expect(summary.buckets).toHaveLength(4);
       expect(summary.buckets.every((bucket) => bucket.emittedGrams === 0)).toBe(true);
       expect(summary.current.tripsCount).toBe(0);
-      expect(summary.unpricedTripsCount).toBe(0);
+      expect(summary.uncountedTripsCount).toBe(0);
     });
 
     it('cuts the requested window into four contiguous buckets', async () => {
@@ -324,17 +310,40 @@ describe('CarbonService', () => {
       expect(summary.previous.to).toBe(summary.current.from);
     });
 
-    it('reports the searches left without a chosen itinerary', async () => {
+    it('reports the searches that never became a journey', async () => {
       queryRaw.mockResolvedValue([
-        bucketRow(4, { emittedGrams: 200, tripsCount: 1, unpricedCount: 2 }),
-        // Une recherche non valorisée de la période PRÉCÉDENTE ne doit pas
+        bucketRow(4, { emittedGrams: 200, tripsCount: 1, uncountedCount: 2 }),
+        // Une recherche non comptée de la période PRÉCÉDENTE ne doit pas
         // remonter : l'écran explique le total qu'il affiche, pas un autre.
-        bucketRow(0, { unpricedCount: 7 }),
+        bucketRow(0, { uncountedCount: 7 }),
       ]);
 
       const summary = await service.getSummary('user-1', 30, now);
 
-      expect(summary.unpricedTripsCount).toBe(2);
+      expect(summary.uncountedTripsCount).toBe(2);
+    });
+
+    /**
+     * UF-807 — le correctif de fond : le bilan doit compter des trajets
+     * **parcourus**, pas des options cliquées.
+     */
+    it('counts only the trips that were actually travelled', async () => {
+      await service.getSummary('user-1', 30, now);
+
+      const sql = sqlOf(queryRaw.mock.calls[0]);
+
+      // Le filtre porte sur les SOMMES, pas seulement sur les comptes : une
+      // option retenue puis abandonnée porte bien une empreinte en base, et la
+      // sommer referait exactement le défaut que ce ticket corrige.
+      expect(sql).toContain('SUM(carbon_grams) FILTER (WHERE completed_at IS NOT NULL)');
+      expect(sql).toContain('SUM(car_equivalent_grams) FILTER (WHERE completed_at IS NOT NULL)');
+      expect(sql).toContain('COUNT(*) FILTER (WHERE completed_at IS NOT NULL)');
+      // Et le compteur d'écart est son exact complément : tout ce qui n'a pas
+      // été mené à terme, options retenues comprises.
+      expect(sql).toContain('COUNT(*) FILTER (WHERE completed_at IS NULL)');
+      // L'ancien critère — « une empreinte a été inscrite » — ne doit plus
+      // décider de rien : c'était lui qui comptait des intentions.
+      expect(sql).not.toContain('carbon_grams IS NOT NULL');
     });
   });
 
@@ -357,7 +366,7 @@ describe('CarbonService', () => {
       emittedGrams: 0,
       carEquivalentGrams: 0,
       tripsCount: 0,
-      unpricedCount: 0,
+      uncountedCount: 0,
       ...overrides,
     });
 
@@ -382,6 +391,16 @@ describe('CarbonService', () => {
       expect(sql).toContain('JOIN search_history');
       expect(sql).toContain('h.user_id =');
       expect(paramsOf(modeCall)).toContain('user-1');
+    });
+
+    it('leaves out the modes of a trip that was never travelled (UF-807)', async () => {
+      await service.getSummary('user-1', 30, now);
+
+      // Une ventilation par mode existe dès la sélection : sans ce filtre, la
+      // « Répartition des émissions » afficherait des kilomètres que personne
+      // n'a parcourus, alors même que le total au-dessus les ignore.
+      const [, modeCall] = queryRaw.mock.calls;
+      expect(sqlOf(modeCall)).toContain('h.completed_at IS NOT NULL');
     });
 
     it('counts a mode once per trip, not once per segment', async () => {
@@ -487,7 +506,7 @@ describe('CarbonService', () => {
       distanceMeters: number,
     ) => ({ searchHistoryId, mode, grams, distanceMeters });
 
-    it('lists only the trips of the JWT user, and only the valued ones', async () => {
+    it('lists only the trips of the JWT user, and only the travelled ones', async () => {
       queryRaw.mockResolvedValue([]);
 
       await service.listTrips('user-1', 30, now);
@@ -495,9 +514,11 @@ describe('CarbonService', () => {
       const [call] = queryRaw.mock.calls;
       const sql = (call[0] as string[]).join('?');
       expect(sql).toContain('WHERE user_id =');
-      // Une recherche abandonnée est dénombrée par `getSummary`, pas listée ici :
+      // Une recherche abandonnée — comme une option retenue mais jamais
+      // parcourue (UF-807) — est dénombrée par `getSummary`, pas listée ici :
       // le tableau décrit des trajets, pas des intentions sans suite.
-      expect(sql).toContain('carbon_grams IS NOT NULL');
+      expect(sql).toContain('completed_at IS NOT NULL');
+      expect(sql).not.toContain('carbon_grams IS NOT NULL');
       expect(call.slice(1)).toContain('user-1');
     });
 

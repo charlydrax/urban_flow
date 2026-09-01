@@ -6,6 +6,7 @@ import type {
   ItinerarySortKey,
   Place,
   SearchHistoryPlace,
+  SelectItineraryPayload,
   SourceAvailability,
 } from '@urbanflow/shared';
 import { useCallback, useRef, useState } from 'react';
@@ -80,6 +81,11 @@ export interface RoutePlanState {
   plan: (from: Place, to: Place, options?: TripOptions) => void;
   /** Change l'itinéraire mis en avant (recette 4 du ticket). */
   select: (itineraryId: string) => void;
+  /**
+   * Consigne l'arrivée du guidage sur cet itinéraire (UF-807) — c'est cet appel,
+   * et non `select`, qui fait entrer le trajet dans le suivi carbone.
+   */
+  reportArrival: (itinerary: Itinerary) => void;
 }
 
 /**
@@ -104,6 +110,31 @@ type SearchRecordedHandler = (
 function toHistoryPlace(place: Place): SearchHistoryPlace | null {
   if (place.lat === undefined || place.lng === undefined) return null;
   return { label: place.label, lat: place.lat, lng: place.lng };
+}
+
+/**
+ * Réduit un itinéraire à ce que l'API attend pour le valoriser : son résumé et,
+ * par segment, le couple (mode, distance).
+ *
+ * Le corps ne porte **aucun gramme** — le Service Carbone valorise côté serveur,
+ * au même barème que la liste de résultats (C4) — ni aucun tracé : le serveur
+ * n'a rien à faire de kilo-octets de coordonnées pour appliquer un facteur
+ * d'émission (C5).
+ *
+ * Partagé par les deux écritures, la sélection (UF-505) et l'arrivée (UF-807) :
+ * elles décrivent le même itinéraire, à deux moments différents, et deux
+ * conversions séparées finiraient par ne plus dire la même chose.
+ */
+function toItineraryPayload(itinerary: Itinerary): SelectItineraryPayload {
+  return {
+    selectedSummary: itinerary.summary,
+    segments: itinerary.segments.map((segment) => ({
+      mode: segment.mode,
+      // Le serveur valide des entiers : une distance fractionnaire venue d'une
+      // source externe serait refusée en 400 pour rien.
+      distanceMeters: Math.round(Math.max(0, segment.distanceMeters)),
+    })),
+  };
 }
 
 /**
@@ -328,18 +359,51 @@ export function useRoutePlan(onSearchRecorded?: SearchRecordedHandler): RoutePla
     if (!searchHistoryId || !chosen) return;
 
     void apiClient
-      .recordItinerarySelection(searchHistoryId, {
-        selectedSummary: chosen.summary,
-        segments: chosen.segments.map((segment) => ({
-          mode: segment.mode,
-          // Le serveur valide des entiers : une distance fractionnaire venue
-          // d'une source externe serait refusée en 400 pour rien.
-          distanceMeters: Math.round(Math.max(0, segment.distanceMeters)),
-        })),
-      })
+      .recordItinerarySelection(searchHistoryId, toItineraryPayload(chosen))
       .catch(() => {
         // Volontairement muet — voir la docstring. Un 401 est déjà traité
         // globalement par `SessionProvider`.
+      });
+  }, []);
+
+  /**
+   * Consigne l'arrivée du guidage : ce trajet a été **parcouru** (UF-807).
+   *
+   * ## Pourquoi ce rappel vit ici
+   *
+   * L'arrivée est constatée par le guidage (`useNavigation`), mais la ligne
+   * d'historique sur laquelle l'inscrire n'est connue que de ce hook — c'est lui
+   * qui a lancé la recherche et reçu son `searchHistoryId`. Publier
+   * l'identifiant pour que l'écran l'aiguille lui-même ferait circuler une clé
+   * de base de données à travers deux composants dont aucun n'en a l'usage.
+   *
+   * ## Ce que l'appel envoie, et pourquoi c'est le même corps qu'une sélection
+   *
+   * Le trajet **parcouru**, pas celui qui était coché : le guidage suit
+   * l'itinéraire sur lequel il a démarré, et c'est celui-là qu'il faut
+   * valoriser. Comme pour la sélection, le corps ne porte aucun gramme — le
+   * Service Carbone valorise côté serveur (C4).
+   *
+   * ## L'échec reste silencieux, mais pas pour la même raison
+   *
+   * Ne pas comptabiliser un trajet est un désagrément ; l'annoncer comme une
+   * panne au moment précis où l'écran dit « Vous êtes arrivé » en serait une
+   * vraie (C10). L'appel est rejouable côté serveur : relancer le même guidage
+   * plus tard rattrape l'écriture perdue sans dupliquer le trajet.
+   *
+   * @param itinerary Itinéraire effectivement suivi jusqu'à l'arrivée
+   */
+  const reportArrival = useCallback((itinerary: Itinerary) => {
+    const searchHistoryId = searchHistoryIdRef.current;
+    // Recherche rejouée depuis le cache hors-ligne : aucune ligne n'existe en
+    // base, il n'y a rien à marquer. Le guidage, lui, a parfaitement fonctionné
+    // — c'est le bilan qui ne peut pas rattacher ce trajet à une recherche.
+    if (!searchHistoryId) return;
+
+    void apiClient
+      .recordTripCompletion(searchHistoryId, toItineraryPayload(itinerary))
+      .catch(() => {
+        // Volontairement muet — voir la docstring.
       });
   }, []);
 
@@ -354,5 +418,6 @@ export function useRoutePlan(onSearchRecorded?: SearchRecordedHandler): RoutePla
     failure,
     plan,
     select,
+    reportArrival,
   };
 }

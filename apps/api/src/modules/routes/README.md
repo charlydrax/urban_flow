@@ -364,8 +364,10 @@ désagrément ; perdre pour cette raison des itinéraires déjà calculés serai
 régression fonctionnelle (C10). La cause reste dans les logs du serveur, sans
 libellé ni coordonnées (C11).
 
-> Le client n'a donc **plus** à appeler `POST /search-history` après un
-> `planRoutes` : il dupliquerait la ligne que le serveur vient d'écrire.
+> Le client n'avait donc **plus** à appeler `POST /search-history` après un
+> `planRoutes` : il aurait dupliqué la ligne que le serveur venait d'écrire.
+> UF-807 a retiré cet endpoint devenu sans appelant — `RoutesService` est
+> désormais le seul créateur de lignes d'historique.
 
 ### L'endpoint de test UF-306 a été retiré
 

@@ -53,10 +53,10 @@ function isSameTrip(a: SearchHistoryEntry, b: SearchHistoryEntry): boolean {
  * recherche (étape 18 du flux) et rend la ligne créée dans `searchHistoryId`.
  * Le hook se contente d'en prendre acte via `noteRecorded`, sans appel réseau.
  *
- * Le motif précédent — un `POST /search-history` émis par le formulaire — ferait
- * aujourd'hui **deux** lignes pour un seul trajet. `apiClient.createSearchHistory`
- * reste en place : l'endpoint existe toujours au contrat, il n'a simplement plus
- * d'appelant dans ce parcours.
+ * Le motif précédent — un `POST /search-history` émis par le formulaire — aurait
+ * fait **deux** lignes pour un seul trajet. L'endpoint est retiré du contrat par
+ * UF-807 : un point d'écriture sans appelant n'est pas une réserve, c'est une
+ * porte qu'on oublie de surveiller.
  *
  * ## L'historique ne doit jamais casser une recherche
  *
@@ -132,6 +132,11 @@ export function useSearchHistory(enabled: boolean): SearchHistoryState {
         carbonGrams: null,
         carEquivalentGrams: null,
         createdAt: new Date().toISOString(),
+        // Le trajet vient d'être cherché, il n'a évidemment pas encore été
+        // parcouru (UF-807) : l'arrivée du guidage est le seul événement qui
+        // renseigne ce champ, et cette liste ne sert de toute façon que de
+        // rappels de trajets.
+        completedAt: null,
       };
 
       // Le trajet remonte en tête ; sa précédente occurrence disparaît, sinon

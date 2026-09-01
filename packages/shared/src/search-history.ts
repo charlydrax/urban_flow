@@ -1,7 +1,8 @@
 import { TransportMode } from './transport-mode';
 
 /**
- * Contrats de l'historique de recherche (UF-204) — `POST/GET /api/search-history`.
+ * Contrats de l'historique de recherche (UF-204) — `GET /api/search-history` et
+ * les deux écritures qui complètent une ligne (`/selection`, `/completion`).
  * Source de vérité unique du contrat front/back (C9) : les DTO NestJS
  * l'implémentent, le client de la PWA le consomme.
  */
@@ -18,22 +19,6 @@ export interface SearchHistoryPlace {
   label: string;
   lat: number;
   lng: number;
-}
-
-/**
- * Corps de `POST /api/search-history`.
- * L'identité n'y figure pas : elle vient du JWT vérifié, jamais du corps —
- * sinon n'importe qui écrirait dans l'historique d'autrui (C4 / OWASP A01).
- */
-export interface CreateSearchHistoryPayload {
-  from: SearchHistoryPlace;
-  to: SearchHistoryPlace;
-  /** Résumé de l'option retenue (ex. « Marche + Métro B »), quand elle est connue. */
-  selectedSummary?: string;
-  /** Empreinte de l'option retenue, en grammes de CO₂ — alimente le dashboard carbone. */
-  carbonGrams?: number;
-  /** Référence voiture du trajet retenu, en grammes de CO₂ (UF-505). */
-  carEquivalentGrams?: number;
 }
 
 /** Une recherche enregistrée, telle que relue par l'API. */
@@ -53,8 +38,18 @@ export interface SearchHistoryEntry {
    * un historique.
    */
   carEquivalentGrams: number | null;
-  /** Horodatage ISO 8601 (C9). */
+  /** Horodatage ISO 8601 de la recherche (C9). */
   createdAt: string;
+  /**
+   * Horodatage ISO 8601 de l'**arrivée**, `null` tant que le trajet n'a pas été
+   * mené à son terme (UF-807).
+   *
+   * Distinct de `selectedSummary`/`carbonGrams`, qui disent l'option retenue :
+   * retenir n'est pas parcourir, et seul ce champ fait entrer un trajet dans le
+   * suivi carbone. Posé par `POST /api/search-history/:id/completion`, à
+   * l'arrivée du guidage (UF-806).
+   */
+  completedAt: string | null;
 }
 
 /**
@@ -87,6 +82,25 @@ export interface SelectItineraryPayload {
   /** Segments de l'option retenue, dans l'ordre du trajet. */
   segments: SelectedSegmentPayload[];
 }
+
+/**
+ * Corps de `POST /api/search-history/:id/completion` — le trajet que l'usager a
+ * effectivement **parcouru**, tel que le guidage vient de le mener à son terme
+ * (UF-807).
+ *
+ * Même forme que la sélection, et volontairement : l'arrivée valorise le trajet
+ * réalisé **et** le marque réalisé, en un seul appel. Deux raisons à cela.
+ *
+ * D'abord la première option de la liste est présélectionnée sans clic : un
+ * usager qui démarre le guidage dessus et arrive n'a jamais émis de sélection,
+ * et son trajet — bien réel — n'aurait rien à valoriser. Ensuite deux appels
+ * (valoriser, puis marquer) ouvriraient une fenêtre où un trajet serait réalisé
+ * sans empreinte, c'est-à-dire compté pour zéro gramme.
+ *
+ * Comme pour la sélection, **aucun gramme ne vient du client** : les segments
+ * sont valorisés par le Service Carbone.
+ */
+export type CompleteTripPayload = SelectItineraryPayload;
 
 /** Réponse de `GET /api/search-history` — les N dernières recherches du compte connecté. */
 export interface SearchHistoryList {

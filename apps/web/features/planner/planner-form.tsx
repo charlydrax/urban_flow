@@ -79,8 +79,8 @@ function toTripPoint(place: SearchHistoryPlace, id: string): TripPoint {
  * **L'écriture n'est plus faite ici** (UF-403) : depuis UF-402, `POST
  * /routes/plan` enregistre lui-même la recherche et renvoie la ligne créée dans
  * `searchHistoryId`. Le formulaire qui appelait en plus `POST /search-history`
- * créerait désormais un doublon à chaque recherche — une requête de trop (C5) et
- * deux lignes pour un seul trajet.
+ * aurait créé un doublon à chaque recherche — une requête de trop (C5) et deux
+ * lignes pour un seul trajet ; UF-807 a retiré cet endpoint sans appelant.
  *
  * ## Soumission (UF-403)
  *
