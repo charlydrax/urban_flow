@@ -3,7 +3,7 @@
  * extraits de la maquette Figma « 01 · Charte graphique » (UF-007).
  *
  * Sert aux contextes hors CSS : couleurs des tracés MapLibre (C6),
- * tests de contraste WCAG (C7) et page de démo `/dev/ui`.
+ * tests de contraste WCAG (C7) et page de démo `/dev/ui` (développement seul).
  * ⚠ Garder synchronisé avec `globals.css` — source visuelle : la maquette Figma.
  */
 export const urbanflowColors = {

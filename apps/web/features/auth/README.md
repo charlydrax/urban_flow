@@ -13,22 +13,39 @@ Maquette Figma `UrbanFlow Mobility — Maquettes T6 CDSD`, section
 **02 · Maquettes mobile → écran « 2. CONNEXION F1 »** (`node-id=14:1101`).
 
 - `/login` **transpose** cet écran : titre display + accroche, champs à icône interne
-  (✉ / 🔒), bascule « Voir », ligne « Se souvenir de moi / Oublié ? », bouton primaire
-  pleine largeur, séparateur « ou continuer avec », bouton neutre, bascule de bas de carte.
+  (✉ / 🔒), bascule « Voir », bouton primaire pleine largeur, bascule de bas de carte.
 - `/register` est **dérivé** du même gabarit : la maquette ne comporte pas d'écran
-  d'inscription. La ligne « Se souvenir de moi » y est remplacée par la politique de
-  mot de passe.
+  d'inscription ; la politique de mot de passe y prend la place laissée libre.
 
 La maquette dessine l'écran dans un châssis de téléphone 375 × 812 ; en PWA on rend le
 contenu de cet écran : pleine largeur sur mobile, carte centrée à 400 px max dès `sm` (C2).
 
 ### Écarts assumés par rapport à la maquette
 
-| Élément                               | Écart                                                         | Raison                                                                                               |
-| ------------------------------------- | ------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| « ou continuer avec »                 | Gris `Ink 500` au lieu du `#9aa3b5` de la maquette            | `#9aa3b5` sur blanc = 2,6:1, sous le seuil AA de 4,5:1 (C7)                                          |
-| Bouton `G · Google`                   | Affiché mais **désactivé**, annoncé « fonctionnalité prévue » | Pas de fédération d'identité au périmètre (UF-102/103 = email + mot de passe)                        |
-| « Se souvenir de moi » / « Oublié ? » | Affichés mais **désactivés**, même annonce                    | Cookie de session à durée fixe (UF-103) et aucune route de réinitialisation : pas d'action à simuler |
+| Élément                                            | Écart                           | Raison                                                                                                               |
+| -------------------------------------------------- | ------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| « Se souvenir de moi » / « Oublié ? »              | **Retirés** de l'écran (UF-808) | Cookie de session à durée fixe (UF-103), aucune route de réinitialisation : ces commandes n'avaient rien à commander |
+| Séparateur « ou continuer avec » + bouton `Google` | **Retirés** de l'écran (UF-808) | Pas de fédération d'identité au périmètre (UF-102/103 = email + mot de passe)                                        |
+
+#### Pourquoi les retirer plutôt que les laisser désactivés (UF-808)
+
+Ces trois commandes ont d'abord été livrées **affichées mais désactivées**, avec
+une annonce « fonctionnalité prévue après le prototype » : la fidélité à la
+planche primait, et un contrôle grisé ne ment pas autant qu'un contrôle qui ne
+fait rien. Le ticket #97 les solde, pour deux raisons qui n'avaient pas été
+pesées à l'époque :
+
+- **Elles promettent trois fonctionnalités que le produit n'a pas.** Un
+  évaluateur qui ouvre `/login` y lit « connexion Google », « mot de passe
+  oublié » et « session persistante » avant de découvrir que rien de tout cela
+  n'existe. Le prototype se juge sur ce qu'il fait, pas sur ce qu'il esquisse.
+- **Un contrôle désactivé reste du poids et du bruit** : trois nœuds à peindre,
+  deux textes `sr-only` à énoncer et une case à cocher que la navigation clavier
+  traverse pour rien (C5, C7).
+
+La planche reste la référence du **gabarit** — carte, titre, champs, bouton
+pleine largeur. Elle n'est pas la référence du périmètre : c'est une maquette de
+présentation, dessinée avant que le périmètre ne soit arrêté.
 
 ## Contenu
 

@@ -195,14 +195,17 @@ reviendrait à interroger le moteur avant de savoir quoi lui demander.
 
 ### Une note sur `cyclePaths`
 
-L'endpoint `GET /api/transport/cycle-paths/nearby` (UF-304) **ne** dégrade pas
-cette source : il remonte un `500`. Ici, le planificateur la dégrade comme les
-deux autres. Ce n'est pas une incohérence — c'est la question posée qui change.
+`CyclePathsService.getCycleSegments` (UF-304) **ne** dégrade pas cette source :
+il laisse remonter l'erreur. Ici, le planificateur la dégrade comme les deux
+autres. Ce n'est pas une incohérence — c'est la question posée qui change.
 
-Un client qui demande « les pistes cyclables autour de moi » et reçoit une liste
-vide conclurait qu'il n'y en a pas : la réponse serait fausse. Un client qui
+Un appelant qui demande « les pistes cyclables autour de ce point » et reçoit une
+liste vide conclurait qu'il n'y en a pas : la réponse serait fausse. Un usager qui
 demande « des itinéraires » et reçoit le métro sans l'option vélo a perdu une
 option, pas la vérité.
+
+Le collecteur assume donc explicitement cette dégradation, au lieu de la déléguer
+à la source (voir `collectAllSources`).
 
 ## 8. Journalisation (C11)
 

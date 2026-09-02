@@ -18,7 +18,7 @@ const variantClasses: Record<ButtonVariant, string> = {
   primary: 'bg-primary text-white hover:bg-primary-dark',
   secondary: 'bg-action text-white hover:bg-action-dark',
   outline: 'border-2 border-primary bg-white text-primary-dark hover:bg-tint-green',
-  // Bouton secondaire neutre de la maquette « 2. CONNEXION F1 » (bloc « ou continuer avec »)
+  // Bouton secondaire neutre : refus d'une invite, action de repli d'une confirmation.
   neutral: 'border-2 border-ink-200 bg-white text-ink hover:bg-surface-muted',
   ghost: 'text-action-dark hover:bg-tint-blue',
 };

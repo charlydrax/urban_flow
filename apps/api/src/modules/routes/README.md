@@ -233,10 +233,11 @@ Elle ne peut pas non plus être parallélisée avec la collecte : la préférenc
 change la requête envoyée à OTP. Les lancer ensemble reviendrait à interroger le
 moteur avant de savoir quoi lui demander.
 
-> `GET /api/transport/cycle-paths/nearby` (UF-304) ne dégrade pas cette même
-> source et remonte un `500`. Ce n'est pas une incohérence : là, l'usager demande
-> les pistes cyclables, et une liste vide affirmerait qu'il n'y en a pas. Ici il
-> demande des itinéraires — perdre une option vaut mieux que tout perdre.
+> `CyclePathsService` (UF-304) ne dégrade pas cette même source : il laisse
+> remonter l'erreur. Ce n'est pas une incohérence — à cette question-là, une
+> liste vide affirmerait qu'il n'y a pas de piste cyclable ici. Le planificateur
+> pose une autre question, et perdre une option y vaut mieux que tout perdre.
+> C'est le collecteur qui dégrade, pas la source.
 
 ## Fusion en itinéraires multimodaux (UF-401)
 

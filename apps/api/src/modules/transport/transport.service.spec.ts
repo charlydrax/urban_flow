@@ -5,8 +5,9 @@ import { TransitService } from './transit.service';
 import { TransportService } from './transport.service';
 
 /**
- * État des sources transport : c'est ce que le client interroge pour décider
- * d'afficher, ou non, un bandeau « mode dégradé » (C10).
+ * État des sources transport : c'est ce que le client interroge pour écrire la
+ * ligne de provenance de ses deux encarts temps réel — « temps réel », « flux
+ * figé » ou « source injoignable » (C9, C10).
  */
 
 /** Période du miroir GTFS de développement : 14/04 → 13/07/2022, heure de Lyon. */
