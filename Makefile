@@ -17,13 +17,20 @@ OTP_SERVICE := otp
 PREPROD_COMPOSE := $(COMPOSE) -f docker-compose.yml -f docker-compose.preprod.yml
 PREPROD_SERVICES := db-preprod api-preprod web-preprod
 
+# Production (BUG-002) : compose AUTONOME, et secrets dans `.env.prod`.
+# Ces cibles s'exécutent DEPUIS LE SERVEUR, dans /home/debian/urbanflow —
+# pas depuis un poste de développement. Voir docs/production.md.
+PROD_COMPOSE := $(COMPOSE) -f docker-compose.prod.yml --env-file .env.prod
+
 .DEFAULT_GOAL := help
 
 # Toutes les cibles sont des actions, pas des fichiers.
 .PHONY: help up down stop start restart build ps logs db-shell db-wait \
         migrate generate studio reset prune clean \
         otp-data otp-data-force otp-up otp-logs otp-wait otp-test otp-rebuild otp-reset \
-        cycle-import cycle-import-dry cycle-check
+        cycle-import cycle-import-dry cycle-check \
+        prod-config prod-up prod-ps prod-logs-api prod-pull prod-migrate \
+        prod-migrate-status prod-health prod-backup
 
 ## help: Affiche la liste des cibles disponibles.
 help:
@@ -208,3 +215,54 @@ preprod-reset:
 	$(PREPROD_COMPOSE) rm -sf $(PREPROD_SERVICES)
 	docker volume rm dev_urbanflow_pgdata_preprod || true
 	$(PREPROD_COMPOSE) up -d --build $(PREPROD_SERVICES)
+
+# ---------------------------------------------------------------------------
+# Production (BUG-002, #106) — à exécuter DEPUIS LE SERVEUR.
+# Procédure complète, retour arrière et sauvegarde : docs/production.md
+# ---------------------------------------------------------------------------
+
+## prod-config: Valide docker-compose.prod.yml + .env.prod SANS rien démarrer.
+prod-config:
+	@$(PROD_COMPOSE) config --quiet && echo "Configuration de production valide."
+
+## prod-up: Démarre (ou met à jour) la production.
+prod-up: prod-config
+	$(PROD_COMPOSE) up -d
+	@echo "Verifier l'etat reel : make prod-ps  (attendu : Up (healthy))"
+
+## prod-ps: État des services — la colonne STATUS doit dire (healthy).
+prod-ps:
+	@$(PROD_COMPOSE) ps
+
+## prod-logs-api: Journaux structurés de l'API (Ctrl-C pour sortir).
+prod-logs-api:
+	$(PROD_COMPOSE) logs -f --tail=100 api
+
+## prod-pull: Récupère les dernières images publiées (sans redémarrer).
+prod-pull:
+	$(PROD_COMPOSE) pull
+
+# `migrate deploy`, jamais `migrate dev` : ce dernier peut proposer de
+# réinitialiser la base. La CLI Prisma est une dépendance de développement,
+# retirée de l'image par `npm prune` : on la récupère à la volée pour jouer le
+# schéma embarqué dans l'image (voir docs/production.md § 4).
+## prod-migrate: Applique les migrations Prisma sur la base de production.
+prod-migrate:
+	$(PROD_COMPOSE) exec api npx --yes prisma@6 migrate deploy --schema apps/api/prisma/schema.prisma
+
+## prod-migrate-status: Liste les migrations réellement appliquées en production.
+prod-migrate-status:
+	@$(PROD_COMPOSE) exec db psql -U $${POSTGRES_USER:-urbanflow} -d $${POSTGRES_DB:-urbanflow} \
+		-c 'SELECT migration_name FROM _prisma_migrations ORDER BY started_at;'
+
+# La sonde qui manquait le soir de BUG-002 : elle distingue « Caddy répond » de
+# « la pile fonctionne ». Interrogée depuis le serveur, sans passer par le proxy.
+## prod-health: Sonde de santé de l'API de production (API + base).
+prod-health:
+	@$(PROD_COMPOSE) exec api wget -q -O - http://localhost:3001/api/health && echo ""
+
+## prod-backup: Sauvegarde compressée de la base (données personnelles — C8/C11).
+prod-backup:
+	@$(PROD_COMPOSE) exec -T db pg_dump -U $${POSTGRES_USER:-urbanflow} $${POSTGRES_DB:-urbanflow} \
+		| gzip > urbanflow-$$(date +%F).sql.gz
+	@echo "Sauvegarde ecrite : urbanflow-$$(date +%F).sql.gz"

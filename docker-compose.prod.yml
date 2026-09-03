@@ -1,0 +1,183 @@
+# Environnement de PRODUCTION — UrbanFlow Mobility (BUG-002, #106).
+#
+#   db    : PostgreSQL + PostGIS, volume nommé, JAMAIS exposé sur l'hôte
+#   api   : API Gateway NestJS, image publiée
+#   web   : PWA Next.js, image publiée
+#   caddy : terminaison TLS + routage, seul service exposé (80/443)
+#
+# Fichier AUTONOME, à la différence de `docker-compose.preprod.yml` qui se
+# combine au compose de développement : une production ne partage rien avec un
+# autre environnement, ni réseau, ni volume, ni secret.
+#
+#     docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
+#     (ou plus simplement `make prod-up` depuis le serveur)
+#
+# ## Pourquoi ce fichier est versionné (la leçon de BUG-002)
+#
+# Il ne l'était pas. La production a été assemblée à la main sur le serveur, et
+# cinq variables d'environnement obligatoires (`OTP_*`, `GBFS_*`) ont été
+# oubliées du bloc `environment` de l'API. `validateEnv` a fait exactement son
+# travail — refuser de démarrer et nommer les cinq fautives (C4, fail-fast) —
+# mais le message est resté dans les journaux d'un conteneur qui redémarrait en
+# boucle, pendant que Caddy répondait `502` à toute requête `/api/*`. Le front
+# étant intact, le site avait l'air en ligne.
+#
+# Deux règles en découlent, et elles sont appliquées ci-dessous :
+#
+#  1. **Toute variable lue par `config/env.validation.ts` figure ici**, y
+#     compris celles qui ont l'air facultatives. Une variable absente du
+#     fichier ne peut pas être oubliée à moitié : elle l'est franchement, à la
+#     lecture, et non trois semaines plus tard en production.
+#  2. **L'API porte une sonde de santé.** `docker compose ps` doit distinguer
+#     « le conteneur tourne » de « la pile répond » — c'est la différence entre
+#     une panne vue en une commande et une panne vue par un utilisateur.
+#
+# Les secrets ne sont JAMAIS ici : ils viennent de `.env.prod`, non versionné
+# (C4/C11). Voir `.env.production.example` et `docs/production.md`.
+
+name: urbanflow-prod
+
+services:
+  # ---------------------------------------------------------------- base
+  db:
+    image: postgis/postgis:16-3.4
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-urbanflow}
+      # Sans valeur par défaut : une base de production ne démarre pas sur un
+      # mot de passe deviné par le fichier de configuration (C4).
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env.prod}
+      POSTGRES_DB: ${POSTGRES_DB:-urbanflow}
+    volumes:
+      - urbanflow_pgdata:/var/lib/postgresql/data
+      # Active l'extension PostGIS au tout premier démarrage (base vide).
+      - ./docker/initdb:/docker-entrypoint-initdb.d:ro
+    # AUCUN `ports:` — volontaire. La base n'est jointe que par l'API, sur le
+    # réseau interne du projet. Publier 5432 sur l'internet exposerait les
+    # données de déplacement à toute campagne de balayage (C11 / OWASP A05).
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-urbanflow} -d ${POSTGRES_DB:-urbanflow}']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ----------------------------------------------------------------- API
+  api:
+    # Image publiée, pas bâtie sur le serveur : un VPS n'a pas à compiler pour
+    # servir. `IMAGE_TAG` permet de revenir à une version précise — voir la
+    # procédure de retour arrière dans docs/production.md.
+    image: charlydrax/urbanflow-api:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      # Étiquette des journaux. L'image porte `preproduction` par défaut
+      # (apps/api/Dockerfile) : sans cette ligne, les journaux de production
+      # se présentent comme ceux de la préproduction — c'était le cas jusqu'à
+      # BUG-002, et cela rendait un incident réel indiscernable d'un essai.
+      APP_ENV: production
+      LOG_FORMAT: json
+      PORT: 3001
+
+      # --- Identité et accès (C4/C11) ---------------------------------
+      # Origine du front, vue du navigateur. Même domaine que l'API : les
+      # requêtes sont de même origine, le CORS ne joue donc aucun rôle dans le
+      # parcours nominal — la valeur reste juste pour tout appel hors page.
+      CORS_ORIGIN: https://${DOMAIN:?Set DOMAIN in .env.prod}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-urbanflow}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env.prod}@db:5432/${POSTGRES_DB:-urbanflow}?schema=public
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env.prod (32 characters minimum)}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-15m}
+
+      # Un seul proxy de confiance devant l'API : le Caddy ci-dessous.
+      #
+      # Ligne courte, conséquence lourde. Sans elle, Express ne lit pas
+      # `X-Forwarded-For` et voit l'IP de Caddy sur CHAQUE requête : tous les
+      # visiteurs de l'internet partagent alors un unique compteur de débit,
+      # soit 120 requêtes/minute pour le site entier et surtout
+      # **5 inscriptions ou connexions par minute, tous utilisateurs confondus**
+      # (common/throttling.ts). Le premier venu épuise le quota de tous les
+      # autres. La valeur est `1` et pas davantage : un seul proxy est en
+      # place, en annoncer deux laisserait forger un en-tête (C4, UF-604).
+      TRUST_PROXY: 1
+
+      # --- Sources de données externes (F3, C9) ------------------------
+      # LES CINQ VARIABLES QUI MANQUAIENT (BUG-002). Elles n'ont rien de
+      # facultatif : `validateEnv` les exige, et leur absence empêche l'API de
+      # démarrer — même si le mode qu'elles configurent n'est pas déployé.
+      #
+      # OpenTripPlanner n'est PAS encore déployé en production (étape 4 du
+      # ticket #106). Le nom `otp` ne résout donc pas : l'appel échoue tout de
+      # suite côté DNS et le mode transports en commun est simplement ignoré
+      # (dégradation gracieuse par `Promise.allSettled` — C10). Le délai est
+      # réglé bas pour que cet échec reste instantané en toute circonstance :
+      # aucune requête de planification ne doit attendre douze secondes une
+      # réponse qui ne viendra pas (C5/C10). À remonter à 12000 le jour où OTP
+      # tourne réellement.
+      OTP_BASE_URL: ${OTP_BASE_URL:-http://otp:8080}
+      OTP_TIMEOUT_MS: ${OTP_TIMEOUT_MS:-2000}
+
+      # Flux Vélo'v de la Métropole de Lyon — ouvert, sans clé d'API.
+      GBFS_DISCOVERY_URL: ${GBFS_DISCOVERY_URL:-https://download.data.grandlyon.com/files/rdata/jcd_jcdecaux.jcdvelov/gbfs.json}
+      GBFS_TIMEOUT_MS: ${GBFS_TIMEOUT_MS:-5000}
+      GBFS_STATUS_TTL_MS: ${GBFS_STATUS_TTL_MS:-60000}
+    healthcheck:
+      # LA sonde qui manquait. `/api/health` rapporte aussi l'état de la base :
+      # elle distingue « le conteneur tourne » de « la pile fonctionne ». Un
+      # conteneur en boucle de redémarrage se lit alors dans `docker compose ps`
+      # au lieu de se deviner depuis un `502` côté navigateur.
+      test:
+        ['CMD-SHELL', 'wget -q -O - http://localhost:3001/api/health | grep -q ''"status":"ok"''']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  # ----------------------------------------------------------------- PWA
+  web:
+    # ⚠️ `NEXT_PUBLIC_API_URL` est figée dans le bundle au moment du BUILD de
+    # l'image, pas ici : elle vaut `https://<domaine>/api` et changer de domaine
+    # impose de reconstruire l'image. Voir docs/production.md.
+    image: charlydrax/urbanflow-web:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      # `127.0.0.1` et non `localhost` : le serveur autonome de Next écoute en
+      # IPv4 seulement, alors que `localhost` se résout d'abord en `::1` dans
+      # l'image Alpine (même piège qu'en préproduction).
+      test: ['CMD-SHELL', 'wget -q -O /dev/null http://127.0.0.1:3000/ || exit 1']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  # ------------------------------------------------------- reverse proxy
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - '80:80'
+      - '443:443'
+      - '443:443/udp' # HTTP/3
+    environment:
+      DOMAIN: ${DOMAIN:?Set DOMAIN in .env.prod}
+      # Adresse de contact du compte ACME (Let's Encrypt) : sert aux avis
+      # d'expiration de certificat.
+      ACME_EMAIL: ${ACME_EMAIL:?Set ACME_EMAIL in .env.prod}
+    volumes:
+      - ./docker/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      # Certificats et état ACME : sans ces volumes, chaque redémarrage
+      # redemande un certificat et se heurte aux quotas de Let's Encrypt.
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - web
+      - api
+
+volumes:
+  urbanflow_pgdata:
+  caddy_data:
+  caddy_config:
