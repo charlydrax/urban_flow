@@ -98,9 +98,12 @@ Deux labels transverses complètent le tri :
 - **`regression`** — « cela fonctionnait avant ». Monte d'un cran de priorité,
   **et** impose un test de non-régression dans le correctif : une régression
   non couverte reviendra.
-- **`env: preprod` / `env: dev`** — un défaut vu en préproduction pèse plus
-  lourd qu'un défaut vu en développement : il est plus proche de ce qui sera
-  livré.
+- **`env: prod` / `env: preprod` / `env: dev`** — l'échelle du poids d'un
+  défaut. Un défaut vu en développement n'a encore blessé personne ; vu en
+  préproduction, il est proche de ce qui sera livré ; vu en **production**, il
+  est subi par de vrais visiteurs et prime sur tout le reste. `env: prod` a été
+  ajouté par BUG-002 (#106) : la taxonomie s'arrêtait à la préproduction, parce
+  qu'au moment d'UF-607 la production n'existait pas encore.
 
 La taxonomie complète, avec ses couleurs et ses justifications, est versionnée
 dans [`.github/labels.yml`](../.github/labels.yml).
@@ -167,6 +170,23 @@ make preprod-logs-api | grep '"level":"error"'
 gh label create "priority: P1" --color d93f0b --description "Majeur : ..." --force
 ```
 
+### Production — depuis le serveur (BUG-002)
+
+```bash
+make prod-ps              # (healthy) ou seulement Up ? c'est toute la difference
+make prod-health          # la pile repond-elle, ou seulement le proxy ?
+make prod-logs-api        # journaux JSON de production
+make prod-migrate-status  # migrations reellement appliquees
+```
+
+> **Ce que BUG-002 a appris.** L'API annonçait la cause de sa panne, nommément
+> et dès la première seconde. L'information est restée invisible faute d'une
+> sonde pour aller la lire : le conteneur n'avait pas de `healthcheck`, donc
+> `docker ps` affichait « Up » sur un service qui redémarrait en boucle, et le
+> diagnostic est parti d'un `502` côté navigateur plutôt que d'un journal. La
+> détection ne vaut que par ce qui la remonte — voir
+> [`production.md`](production.md).
+
 ---
 
 ## 7. Traçabilité des contraintes
@@ -182,6 +202,7 @@ gh label create "priority: P1" --color d93f0b --description "Majeur : ..." --for
 
 ## 8. Historique
 
-| Défaut      | Sujet                                       | Issue | État                                     |
-| ----------- | ------------------------------------------- | ----- | ---------------------------------------- |
-| **BUG-001** | `format:check` rouge sous Windows (CRLF/LF) | #87   | Corrigé le 29/08/2026 (`.gitattributes`) |
+| Défaut      | Sujet                                       | Issue | État                                                                     |
+| ----------- | ------------------------------------------- | ----- | ------------------------------------------------------------------------ |
+| **BUG-001** | `format:check` rouge sous Windows (CRLF/LF) | #87   | Corrigé le 29/08/2026 (`.gitattributes`)                                 |
+| **BUG-002** | Production : `502` sur tout `/api/*` (P0)   | #106  | Configuration versionnée le 04/09/2026 ; OTP et import cyclable en cours |

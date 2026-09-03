@@ -1,0 +1,52 @@
+# Reverse proxy de PRODUCTION — UrbanFlow Mobility (BUG-002, #106).
+#
+# Un seul point d'entrée public : Caddy termine le TLS (certificat Let's
+# Encrypt obtenu et renouvelé automatiquement) et répartit entre deux amonts
+# internes. Ni l'API ni la PWA ne publient de port sur l'hôte : tout ce qui
+# entre passe par ici (C4/C11).
+#
+# Vérifier avant de recharger :  docker compose -f docker-compose.prod.yml exec caddy caddy validate --config /etc/caddy/Caddyfile
+
+{
+	email {$ACME_EMAIL}
+}
+
+{$DOMAIN} {
+	# Compression des réponses (C5 éco-conception, C10). L'API comprime déjà
+	# son JSON ; ceci couvre le HTML, le JS et le CSS servis par Next.
+	encode zstd gzip
+
+	# --- Swagger UI : fermé en production -----------------------------
+	#
+	# `/api/docs` est la carte complète de l'API : chaque endpoint, chaque
+	# schéma de corps attendu, offerts à qui balaie le domaine. C'est un outil
+	# de développement et d'intégration (C9), pas un service public — il reste
+	# accessible en développement et en préproduction, là où il sert vraiment
+	# (OWASP A05 « Security Misconfiguration »).
+	#
+	# Placé AVANT le bloc `/api/*` : les directives `handle` s'excluent
+	# mutuellement et sont évaluées dans l'ordre où elles sont écrites.
+	handle /api/docs* {
+		respond 404
+	}
+
+	# --- API Gateway (NestJS) -----------------------------------------
+	#
+	# `/api` ET `/api/*` : le chemin nu ne correspond pas au motif étoilé, et
+	# retombait donc sur la PWA, qui le prenait pour une page et redirigeait
+	# vers `/login`. Sans conséquence pratique, mais trompeur au diagnostic —
+	# c'est ce `307` qui a d'abord fait croire à deux comportements différents
+	# lors de l'enquête sur BUG-002.
+	#
+	# Le préfixe `/api` n'est PAS retiré (`handle`, pas `handle_path`) :
+	# NestJS le déclare lui-même en préfixe global (`app.setGlobalPrefix('api')`),
+	# l'amont attend donc bien `/api/auth/register`.
+	handle /api /api/* {
+		reverse_proxy api:3001
+	}
+
+	# --- PWA (Next.js) — tout le reste ---------------------------------
+	handle {
+		reverse_proxy web:3000
+	}
+}

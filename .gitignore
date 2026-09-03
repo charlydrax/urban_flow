@@ -5,6 +5,11 @@ node_modules/
 .env
 .env.*
 !.env.example
+# Modèle de configuration de production (BUG-002) : aucune valeur, que des
+# noms de variables et leur justification. `.env.*` l'attrapait au passage —
+# il faut donc le ré-autoriser explicitement, sinon le fichier qui documente
+# les variables oubliées serait lui-même invisible.
+!.env.production.example
 
 # Next.js
 .next/

@@ -215,6 +215,16 @@ make preprod-migrate   # migrations Prisma sur la base de préproduction
 make preprod-logs-api  # journaux structurés de l'API
 ```
 
+Production (BUG-002) — **depuis le serveur**, dans `/home/debian/urbanflow`.
+Procédure complète, retour arrière et sauvegarde : [`docs/production.md`](docs/production.md).
+
+```bash
+make prod-ps              # STATUS doit dire « Up (healthy) », pas seulement « Up »
+make prod-health          # la pile répond-elle, ou seulement le proxy ?
+make prod-logs-api        # journaux JSON — la cause d'un refus de démarrer est ici
+make prod-migrate-status  # migrations réellement appliquées (à vérifier à chaque mise en ligne)
+```
+
 Initialisation PostGIS (à exécuter une fois sur la base) :
 
 ```sql
@@ -250,7 +260,37 @@ CREATE EXTENSION IF NOT EXISTS postgis;
 > [`docs/bug-process.md`](docs/bug-process.md) et
 > [`docs/preproduction.md`](docs/preproduction.md).
 
-> **Registre vide à ce jour.** BUG-001 (#87 — fins de ligne CRLF vs
-> `endOfLine: "lf"`) était la seule entrée : corrigée le 29/08/2026 par la
-> règle `* text=auto eol=lf` de `.gitattributes`. `npm run format:check` est
-> désormais fiable sous Windows et fait partie de la CI.
+> BUG-001 (#87 — fins de ligne CRLF vs `endOfLine: "lf"`) a été corrigé le
+> 29/08/2026 par la règle `* text=auto eol=lf` de `.gitattributes`.
+> `npm run format:check` est désormais fiable sous Windows et fait partie de la CI.
+
+### BUG-002 (#106) — production : reliquats après le rétablissement — `P0` → `P1`
+
+**Ce qui s'est passé (03/09/2026).** Cinq variables d'environnement obligatoires
+(`OTP_BASE_URL`, `OTP_TIMEOUT_MS`, `GBFS_DISCOVERY_URL`, `GBFS_TIMEOUT_MS`,
+`GBFS_STATUS_TTL_MS`) manquaient au `docker-compose.prod.yml` du serveur.
+`validateEnv` a refusé de démarrer (fail-fast — C4), l'API a bouclé en
+redémarrage, et Caddy a répondu `502` à tout `/api/*` pendant que le front
+restait intact : le site avait l'air en ligne, l'inscription était impossible.
+La configuration de production n'était versionnée nulle part — c'est la cause
+racine, et elle est corrigée par `docker-compose.prod.yml`,
+`docker/caddy/Caddyfile`, `.env.production.example`, les cibles `make prod-*` et
+[`docs/production.md`](docs/production.md).
+
+**Ce qui reste ouvert, et qu'il ne faut pas oublier :**
+
+1. **OpenTripPlanner n'est pas déployé en production.** Le planificateur
+   dégrade gracieusement (C10) et ne rend donc que marche, vélo et trottinette
+   — soit la moitié de F2/F3, et pas le scénario de référence (Marie,
+   Part-Dieu → Bellecour). Le serveur a la mémoire nécessaire (11 Go) : c'est
+   un déploiement à faire, pas une impossibilité. Tant qu'il n'est pas fait,
+   `OTP_TIMEOUT_MS` reste bas (2000) pour que l'échec soit instantané.
+2. **`cycle_paths` est créée vide** par la migration `uf304`. Sans
+   `npm run db:import:cycle-paths`, la recherche de pistes ne rend jamais rien
+   — et le fait **silencieusement**, ce qui est le plus traître.
+3. **Le déploiement reste manuel** (`scp` + `docker compose up -d`) : aucune
+   trace de qui a déployé quoi ni quand.
+
+**Réflexe à garder.** Une image à jour sur une base en retard est une panne qui
+attend son premier utilisateur : le 03/09, la production ne comptait **qu'une
+migration sur sept**. Vérifier `make prod-migrate-status` à chaque mise en ligne.

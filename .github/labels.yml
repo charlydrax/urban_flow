@@ -38,6 +38,14 @@
   color: c2e0c6
   description: 'Cosmétique : sans effet fonctionnel — traité quand la charge le permet'
 
+# Ajouté par BUG-002 (#106). La taxonomie s'arrêtait à la préproduction parce
+# qu'au moment d'UF-607 la production n'existait pas encore. Un défaut vu ici
+# n'est plus « proche de la livraison » : il est subi par de vrais visiteurs,
+# et prime sur tout le reste.
+- name: 'env: prod'
+  color: b60205
+  description: 'Observé en production — subi par les utilisateurs, prioritaire sur tout le reste'
+
 - name: 'env: preprod'
   color: 1d76db
   description: 'Observé en préproduction (le plus proche de la livraison)'
