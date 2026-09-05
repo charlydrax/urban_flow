@@ -85,6 +85,14 @@ db-wait:
 migrate: up db-wait
 	npm run db:migrate
 
+## seed: Peuple la base de développement (comptes de démo — UF-701).
+##       Le compte exploitant n'est créé que si DEMO_ADMIN_EMAIL et
+##       DEMO_ADMIN_PASSWORD sont définis dans apps/api/.env ; sinon le seed
+##       le saute en le disant, plutôt que de retomber sur des identifiants
+##       devinables. Idempotent : relançable sans doublon.
+seed: up db-wait
+	npm run db:seed
+
 ## generate: Régénère le client Prisma.
 generate:
 	npm run db:generate

@@ -236,10 +236,10 @@ Les identifiants viennent de l'environnement, jamais du code ; sans eux le seed
 crée les comptes usagers habituels et saute l'admin, en le disant.
 
 ```bash
-cd apps/api
-# .env : DEMO_ADMIN_EMAIL=… et DEMO_ADMIN_PASSWORD=… (12 caractères minimum)
-npx prisma migrate dev      # applique la colonne `role`
-npm run db:seed             # idempotent — relançable sans doublon
+# apps/api/.env : DEMO_ADMIN_EMAIL=… et DEMO_ADMIN_PASSWORD=… (12 car. minimum)
+make migrate       # démarre la base si besoin, puis applique la colonne `role`
+make seed          # idempotent — relançable sans doublon
+npm run dev        # API sur 3001, PWA sur 3000
 ```
 
 ---
