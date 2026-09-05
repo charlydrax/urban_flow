@@ -3,8 +3,10 @@ import { describe, expect, it } from 'vitest';
 
 import { contrastRatio } from './design-tokens';
 import {
+  APPROXIMATE_TRACK_NOTICE,
   MODE_TRACK_STYLES,
   describeRoute,
+  hasApproximateTrack,
   routeBounds,
   routeLegend,
   routeMarkers,
@@ -179,6 +181,41 @@ describe('describeRoute', () => {
     expect(describeRoute(itinerary('a', [WALK_LEG, METRO_LEG]))).toBe(
       'Itinéraire tracé sur la carte : Marche de Départ à Bellecour (5 min), puis Métro B de Bellecour à Part-Dieu (5 min). Durée totale 22 minutes.',
     );
+  });
+});
+
+/**
+ * Recette UF-702, volet client : un tracé à vol d'oiseau ne doit pas se faire
+ * passer pour un cheminement calculé — ni à l'œil, ni au lecteur d'écran.
+ */
+describe('tracés approchés (UF-702)', () => {
+  const straightWalk = segment(
+    TransportMode.WALK,
+    [
+      [4.85, 45.75],
+      [4.86, 45.76],
+    ],
+    { from: 'Départ', to: 'Bellecour', geometrySource: 'straight' },
+  );
+  const routedWalk = { ...straightWalk, geometrySource: 'routed' as const };
+
+  it('signale un itinéraire dont au moins un segment est replié sur la droite', () => {
+    expect(hasApproximateTrack(itinerary('a', [routedWalk, straightWalk]))).toBe(true);
+  });
+
+  it('ne signale rien quand tous les segments suivent le réseau réel', () => {
+    expect(hasApproximateTrack(itinerary('a', [routedWalk]))).toBe(false);
+  });
+
+  it('ne signale rien faute de marquage — une réponse d’un cache antérieur (C10)', () => {
+    // `geometrySource` absent se lit « on ne sait pas ». Avertir au hasard
+    // rendrait l'avertissement insignifiant là où il compte.
+    expect(hasApproximateTrack(itinerary('a', [WALK_LEG]))).toBe(false);
+  });
+
+  it("porte l'avertissement dans l'alternative textuelle de la carte (C7)", () => {
+    expect(describeRoute(itinerary('a', [straightWalk]))).toContain(APPROXIMATE_TRACK_NOTICE);
+    expect(describeRoute(itinerary('a', [routedWalk]))).not.toContain(APPROXIMATE_TRACK_NOTICE);
   });
 });
 

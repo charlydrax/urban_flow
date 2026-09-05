@@ -296,6 +296,11 @@ racine, et elle est corrigée par `docker-compose.prod.yml`,
    Part-Dieu → Bellecour). Le serveur a la mémoire nécessaire (11 Go) : c'est
    un déploiement à faire, pas une impossibilité. Tant qu'il n'est pas fait,
    `OTP_TIMEOUT_MS` reste bas (2000) pour que l'échec soit instantané.
+   **Depuis UF-702, une seconde conséquence** : le même moteur route les
+   cheminements piétons et cyclables. Sans lui, tous les segments restent
+   tracés à vol d'oiseau — l'application le dit (note de légende et
+   alternative textuelle), et n'appelle même pas le routeur, mais la carte de
+   production reste faite de droites.
 2. **`cycle_paths` est créée vide** par la migration `uf304`. Sans
    `npm run db:import:cycle-paths`, la recherche de pistes ne rend jamais rien
    — et le fait **silencieusement**, ce qui est le plus traître.

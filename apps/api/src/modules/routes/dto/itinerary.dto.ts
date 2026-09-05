@@ -6,6 +6,7 @@ import type {
   Itinerary,
   ItinerarySortKey,
   PlanRoutesResponse,
+  RouteGeometrySource,
   RouteSegment,
   SourceAvailability,
 } from '@urbanflow/shared';
@@ -77,6 +78,19 @@ export class RouteSegmentDto implements RouteSegment {
     },
   })
   geometry?: { type: 'LineString'; coordinates: [number, number][] };
+
+  /**
+   * Provenance du tracé (UF-702) : `routed` s'il suit le réseau réel (voirie
+   * pour la marche et le vélo, `shapes.txt` du GTFS pour les transports en
+   * commun), `straight` s'il a fallu se replier sur la droite à vol d'oiseau.
+   *
+   * Publié parce que le client ne peut pas le déduire : un cheminement d'une
+   * rue rectiligne et un repli produisent la même polyligne de deux points, et
+   * les afficher pareil laisserait croire qu'une droite qui traverse un pâté de
+   * maisons a été calculée (C6). Absent d'une réponse antérieure au ticket.
+   */
+  @ApiPropertyOptional({ enum: ['routed', 'straight'], example: 'routed' })
+  geometrySource?: RouteGeometrySource;
 }
 
 /**

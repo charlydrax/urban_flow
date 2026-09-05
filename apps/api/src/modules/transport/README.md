@@ -422,6 +422,36 @@ l'inverse du choix fait pour les modes OTP — et pour une raison : un mode faux
 fausserait le calcul carbone, alors qu'un type d'aménagement inconnu n'empêche
 pas l'aménagement d'exister et d'être cyclable.
 
+## Routeur de voirie (UF-702)
+
+`StreetRoutingService` n'est pas une quatrième source de données : c'est le
+**cheminement** que suit un segment marche, vélo ou trottinette. Il vit ici
+parce qu'il parle à OpenTripPlanner, et que ce module est le seul à savoir qu'un
+moteur de routage existe.
+
+| Mode interne         | Profil OTP | Pourquoi                                        |
+| -------------------- | ---------- | ----------------------------------------------- |
+| `WALK`               | `WALK`     | réseau piéton du graphe OSM                     |
+| `BIKE`               | `BICYCLE`  | réseau cyclable                                 |
+| `SCOOTER`            | `BICYCLE`  | même réseau ; OTP n'a pas de profil trottinette |
+| `BUS`/`TRAM`/`METRO` | —          | leur tracé vient déjà du GTFS (`shapes.txt`)    |
+
+La table est **exhaustive** : ajouter un mode à l'énumération partagée casse la
+compilation ici plutôt que de produire silencieusement une ligne droite.
+
+Ce que la requête n'envoie pas : ni date ni heure. Un trottoir est le même à 8 h
+et à 22 h, et l'omission garde le routage indépendant de la période couverte par
+le GTFS — un graphe dont le calendrier a expiré route encore parfaitement les
+piétons. La contrainte PMR, elle, est propagée : elle change le cheminement
+rendu (C12).
+
+Résilience et coût, dans le même esprit que les autres connecteurs : le service
+**ne lève jamais** (un cheminement manquant coûte un tracé, pas un itinéraire —
+C10), la rafale est bornée par un budget plafonné à `OTP_TIMEOUT_MS`, les
+demandes identiques sont dédupliquées, et les réponses mémoïsées une heure sur
+une clé arrondie au mètre (C5). L'usage et le repli sont documentés côté
+appelant : [`modules/routes/README.md`](../routes/README.md#tracé-réel-des-segments-uf-702).
+
 ## Configuration
 
 | Variable             | Rôle                                             | Défaut                    |
@@ -531,7 +561,8 @@ Recettes des tickets : UF-302 dans
 
 C4 (variables GraphQL, paramètres SQL liés, revalidation des entrées),
 C5 (mémoïsation graduée, appels parallèles, champs et volumes minimaux, données
-cyclables hébergées), C6 (rayon plancher aligné sur la précision GPS réelle),
+cyclables hébergées, cheminements dédupliqués), C6 (rayon plancher aligné sur la
+précision GPS réelle, tracés fidèles au réseau — UF-702),
 C8 (jeu de données cyclable sans donnée personnelle), C9 (GTFS, GBFS et son
 auto-découverte, WFS/GeoJSON, SRID 4326, contrats partagés), C10 (timeouts
 bornés, dégradation gracieuse, index GiST mesuré), C11 (logs sans donnée de

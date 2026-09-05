@@ -247,6 +247,40 @@ annonce ce qu'on prend, il ne commémore pas ce qu'on quitte.
 - **Le cadrage respecte `prefers-reduced-motion`** : `fitBounds` sans animation
   (WCAG 2.3.3), comme le recentrage de la caméra.
 
+## Tracé réel, et tracé approché (UF-702)
+
+Le serveur publie désormais, pour chaque segment, **d'où vient sa polyligne** :
+`geometrySource: 'routed'` quand elle suit le réseau réel (voirie OSM pour la
+marche et le vélo, `shapes.txt` du GTFS pour les transports en commun),
+`'straight'` quand il a fallu se replier sur la droite à vol d'oiseau.
+
+Rien ne change au dessin : mêmes couleurs, mêmes motifs, mêmes couches — le
+ticket demande explicitement de réutiliser le code couleur en place. Ce qui
+change, c'est la **géométrie** dessinée dessous, et elle arrive telle quelle
+dans `toRouteFeatureCollection`.
+
+Ce qui s'ajoute, en revanche, c'est de **le dire**. Un cheminement le long d'une
+rue rectiligne et un repli produisent le même objet GeoJSON : rien, dans la
+géométrie, ne distingue les deux. Laisser une droite qui traverse un pâté de
+maisons passer pour un cheminement calculé enverrait l'usager contre un mur
+(C6). D'où, quand `hasApproximateTrack(itinerary)` est vrai :
+
+- une **note sous la légende** : « Certains segments sont tracés en ligne
+  droite, faute d'itinéraire détaillé disponible. » ;
+- la **même phrase dans l'alternative textuelle** (`describeRoute`), pour qui
+  n'a pas accès à la carte — une information portée par le seul visuel n'en est
+  pas une (C7 — WCAG 1.1.1). La note visuelle est donc `aria-hidden`, comme le
+  reste de la légende, pour ne pas être lue deux fois.
+
+`geometrySource` **absent** ne déclenche rien : les réponses antérieures au
+ticket, qu'un Service Worker peut encore servir (C10), n'en portent pas.
+L'absence se lit « on ne sait pas », et avertir au hasard rendrait
+l'avertissement insignifiant là où il compte.
+
+Une conséquence gratuite, et voulue : le mode simulation (UF-701) interpole le
+long de `segment.geometry`. Il suit donc le nouveau tracé sans qu'une ligne ait
+eu à changer — le point de démonstration parcourt les rues, pas la diagonale.
+
 ### Tests
 
 ```bash
@@ -256,5 +290,6 @@ cd apps/web && npm run test    # dont lib/route-map-layers.test.ts
 Couvre la construction du GeoJSON (un tronçon par segment, couleur par mode,
 drapeau de sélection), le fait qu'un segment sans tracé soit ignoré sans faire
 tomber le reste (C10), l'emprise, la pose des repères et le non-doublonnage des
-correspondances, la légende dynamique, la description textuelle, et les deux
-garanties d'accessibilité du code couleur.
+correspondances, la légende dynamique, la description textuelle, les deux
+garanties d'accessibilité du code couleur, et le signalement des tracés
+approchés (UF-702) — y compris le silence attendu quand le marquage manque.

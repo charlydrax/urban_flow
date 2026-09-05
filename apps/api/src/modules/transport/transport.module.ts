@@ -4,6 +4,7 @@ import { CyclePathsService } from './cycle-paths/cycle-paths.service';
 import { GbfsClient } from './gbfs/gbfs.client';
 import { OtpClient } from './otp/otp.client';
 import { SharedMobilityService } from './shared-mobility.service';
+import { StreetRoutingService } from './street-routing.service';
 import { TransitService } from './transit.service';
 import { TransportController } from './transport.controller';
 import { TransportService } from './transport.service';
@@ -22,6 +23,11 @@ import { TransportService } from './transport.service';
  * la différence est assumée : le réseau cyclable est du patrimoine, pas du temps
  * réel, et l'héberger retire une latence et un point de panne du chemin critique.
  *
+ * `StreetRoutingService` est exporté depuis UF-702 : il n'est pas une source de
+ * données de plus, mais le **routeur de voirie** qui donne aux segments marche
+ * et vélo le cheminement qu'ils suivent réellement. Il vit ici parce qu'il parle
+ * à OpenTripPlanner, et que ce module est le seul à savoir qu'un moteur existe.
+ *
  * `OtpClient` et `GbfsClient` restent internes au module : ni le protocole du
  * moteur de routage ni la structure des flux GBFS ne doivent fuiter ailleurs.
  */
@@ -32,9 +38,16 @@ import { TransportService } from './transport.service';
     GbfsClient,
     OtpClient,
     SharedMobilityService,
+    StreetRoutingService,
     TransitService,
     TransportService,
   ],
-  exports: [CyclePathsService, SharedMobilityService, TransitService, TransportService],
+  exports: [
+    CyclePathsService,
+    SharedMobilityService,
+    StreetRoutingService,
+    TransitService,
+    TransportService,
+  ],
 })
 export class TransportModule {}

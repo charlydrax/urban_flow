@@ -131,7 +131,44 @@ export interface RouteSegment {
    * RFC 7946 (C9).
    */
   geometry?: LineStringGeometry;
+  /**
+   * D'où vient le tracé publié dans {@link geometry} — UF-702.
+   *
+   * `routed` : la polyligne suit le réseau réel. Elle vient d'OpenTripPlanner,
+   * soit parce que le moteur a planifié le segment lui-même (transports en
+   * commun : c'est la géométrie de tracé du GTFS, `shapes.txt`), soit parce
+   * qu'on lui a demandé le cheminement piéton ou cyclable entre les deux
+   * extrémités du pas.
+   *
+   * `straight` : le repli à vol d'oiseau, deux points et une droite. C'est ce
+   * qui reste quand le moteur de routage n'a rien pu dire — il est arrêté, il
+   * n'a pas répondu dans le budget, ou aucun chemin n'existe entre ces deux
+   * points sur le réseau chargé. Une droite qui traverse les immeubles reste
+   * une information utile (elle montre la direction et l'échelle du trajet),
+   * mais elle ne doit **pas** se faire passer pour un cheminement : le client
+   * l'annonce, plutôt que de laisser croire à un tracé calculé (C6).
+   *
+   * Absent d'une réponse antérieure au ticket — un cache peut en servir une
+   * (C10). L'absence se lit alors « on ne sait pas », et l'affichage n'annonce
+   * rien : c'est le seul cas où le silence est préférable, faute de pouvoir
+   * distinguer les deux.
+   */
+  geometrySource?: RouteGeometrySource;
 }
+
+/**
+ * Provenance d'un tracé de segment (UF-702).
+ *
+ * Nommé plutôt que répété en union anonyme : le serveur le pose, le DTO le
+ * publie, le client l'affiche, et le jour où une troisième provenance
+ * apparaîtra (un routeur piéton dédié, par exemple), la compilation le signalera
+ * aux trois endroits.
+ */
+export type RouteGeometrySource =
+  /** Polyligne suivant le réseau réel — voie piétonne, réseau cyclable, tracé GTFS. */
+  | 'routed'
+  /** Repli à vol d'oiseau : le moteur de routage n'a pas pu fournir de tracé. */
+  | 'straight';
 
 /** Itinéraire multimodal complet (tracé GeoJSON pour MapLibre — C9, accessibilité PMR — C12). */
 export interface Itinerary {
