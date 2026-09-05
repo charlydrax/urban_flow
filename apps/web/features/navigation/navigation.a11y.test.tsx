@@ -10,6 +10,7 @@ import {
 } from '../../lib/navigation-machine';
 import { expectNoA11yViolations } from '../../test/axe';
 import { NavigationSheet } from './navigation-sheet';
+import { SimulateNavigation } from './simulate-navigation';
 import { StartNavigation } from './start-navigation';
 
 const LAT = 45.76;
@@ -55,7 +56,8 @@ function run(...events: NavigationEvent[]): NavigationState {
   return events.reduce(navigationReducer, INITIAL_NAVIGATION_STATE);
 }
 
-const START: NavigationEvent = { type: 'start', itinerary: TRIP };
+const START: NavigationEvent = { type: 'start', itinerary: TRIP, source: 'gps' };
+const SIMULATED: NavigationEvent = { type: 'start', itinerary: TRIP, source: 'simulation' };
 const position = (lng: number, lat = LAT) => ({ lat, lng, accuracyMeters: 12 });
 
 function renderSheet(state: NavigationState, following = true) {
@@ -209,5 +211,102 @@ describe('StartNavigation', () => {
 
     fireEvent.click(screen.getByRole('button'));
     expect(onStart).toHaveBeenCalledWith(TRIP);
+  });
+});
+
+describe('NavigationSheet — mode simulation (UF-701)', () => {
+  it('ne relève aucune violation axe pendant une simulation', async () => {
+    renderSheet(run(SIMULATED, { type: 'position', position: position(4.851) }));
+
+    await expectNoA11yViolations();
+  });
+
+  it('dit en toutes lettres que le déplacement est rejoué', () => {
+    // L'écran est volontairement identique à un guidage réel — c'est ce qui en
+    // fait une démonstration honnête. Il doit donc dire ce qu'il est, sans quoi
+    // une capture d'écran ferait passer une position fabriquée pour une mesure.
+    renderSheet(run(SIMULATED, { type: 'position', position: position(4.851) }));
+
+    expect(screen.getByRole('status').textContent).toMatch(/Mode simulation/);
+  });
+
+  it('ne peint aucun bandeau sur un guidage réel', () => {
+    renderSheet(run(START, { type: 'position', position: position(4.851) }));
+
+    expect(screen.queryByText(/Mode simulation/)).toBeNull();
+  });
+
+  it('affiche le compteur des grammes déjà émis à côté du total du trajet', () => {
+    // Mi-parcours du bus : le compteur a bougé, et le total reste affiché —
+    // « combien j'ai déjà émis » et « combien coûte ce trajet » sont deux
+    // questions, et l'écran répond aux deux.
+    renderSheet(run(SIMULATED, { type: 'position', position: position(4.854) }));
+
+    expect(screen.getByText(/émis sur/).textContent).toMatch(/g CO₂ émis sur 240 g CO₂/);
+  });
+});
+
+describe('SimulateNavigation — UF-701', () => {
+  it('ne relève aucune violation axe, refus compris', async () => {
+    const { unmount } = render(
+      <SimulateNavigation itinerary={TRIP} preparing={false} error={null} onSimulate={vi.fn()} />,
+    );
+    await expectNoA11yViolations();
+    unmount();
+
+    render(
+      <SimulateNavigation
+        itinerary={TRIP}
+        preparing={false}
+        error="Le mode simulation est réservé aux comptes exploitants."
+        onSimulate={vi.fn()}
+      />,
+    );
+    await expectNoA11yViolations();
+  });
+
+  it('dit dans son libellé accessible qu’il ne s’agit pas d’un départ réel (WCAG 2.4.6)', () => {
+    render(
+      <SimulateNavigation itinerary={TRIP} preparing={false} error={null} onSimulate={vi.fn()} />,
+    );
+
+    screen.getByRole('button', { name: /sans se déplacer réellement/ });
+  });
+
+  it('annonce la préparation plutôt que de rester grisé sans mot', () => {
+    render(<SimulateNavigation itinerary={TRIP} preparing error={null} onSimulate={vi.fn()} />);
+
+    const button = screen.getByRole('button') as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    expect(button.textContent).toBe('Préparation de la simulation…');
+  });
+
+  it('remonte un refus du serveur à l’écran, avec la sortie de secours', () => {
+    // Le `403` n'est pas contourné : le client ne décide pas qui est exploitant.
+    render(
+      <SimulateNavigation
+        itinerary={TRIP}
+        preparing={false}
+        error="Le mode simulation est réservé aux comptes exploitants."
+        onSimulate={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('alert').textContent).toMatch(/réservé aux comptes exploitants/);
+  });
+
+  it('transmet l’itinéraire retenu', () => {
+    const onSimulate = vi.fn();
+    render(
+      <SimulateNavigation
+        itinerary={TRIP}
+        preparing={false}
+        error={null}
+        onSimulate={onSimulate}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button'));
+    expect(onSimulate).toHaveBeenCalledWith(TRIP);
   });
 });

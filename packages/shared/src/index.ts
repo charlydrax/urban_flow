@@ -13,5 +13,7 @@ export * from './transport-status';
 export * from './cycle-path';
 export * from './auth';
 export * from './user';
+export * from './user-role';
 export * from './carbon';
 export * from './privacy';
+export * from './simulation';

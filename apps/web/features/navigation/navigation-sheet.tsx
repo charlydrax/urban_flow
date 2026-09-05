@@ -35,9 +35,13 @@ export interface NavigationSheetProps {
  * │ 🚲 ✓ › (🚲 11 min) › 🚌 6 › 🚶 2               │ ← le fil des étapes
  * │                                                │
  * │ [   ▶ Reprendre le guidage   ]  [ ↗ ]          │ ← l'action, et la caméra
- * │ 🌱 −2,4 kg CO₂                                 │
+ * │ 🌱 84 g CO₂ émis sur 240 g CO₂                 │ ← le compteur qui monte
  * └────────────────────────────────────────────────┘
  * ```
+ *
+ * En mode simulation (UF-701), un bandeau ambre coiffe le panneau : l'écran
+ * est volontairement identique à un guidage réel — c'est ce qui en fait une
+ * démonstration honnête du parcours — donc il doit dire ce qu'il est.
  *
  * Le titre est ce qu'on lit en marchant : il porte **le reste**, pas la durée
  * totale, et il est en `font-display` comme la durée des cartes de résultats.
@@ -81,6 +85,8 @@ export function NavigationSheet({
   const isPaused = state.phase === 'paused';
   const hasArrived = state.phase === 'arrived';
   const carbon = state.itinerary ? formatCarbon(state.itinerary.carbonGrams) : null;
+  const emitted = state.itinerary ? formatCarbon(state.travelledCarbonGrams) : null;
+  const isSimulated = state.source === 'simulation';
 
   return (
     <section
@@ -95,6 +101,31 @@ export function NavigationSheet({
       <p className="sr-only" aria-live="polite">
         {guidanceAnnouncement(state)}
       </p>
+
+      {/*
+        Bandeau du mode simulation (UF-701), en tête du panneau et pas ailleurs.
+
+        Il est là pour une raison de fond : cet écran est **indiscernable** d'un
+        guidage réel — même carte, même progression, même compteur — et c'est
+        exactement ce qui en fait une bonne démonstration. Le dire en toutes
+        lettres est donc la contrepartie obligatoire, sans quoi une capture
+        d'écran ou un regard par-dessus l'épaule ferait passer une position
+        fabriquée pour une mesure.
+
+        `role="status"` et non `alert` : ce n'est pas un incident, c'est un
+        régime de fonctionnement. L'annonce vocale, elle, est déjà portée par
+        `guidanceAnnouncement`, qui préfixe chaque phrase — le bandeau reste
+        donc `aria-hidden` pour ne pas la doubler à chaque changement d'état.
+      */}
+      {isSimulated && (
+        <p
+          role="status"
+          className="rounded-md bg-tint-gold px-3 py-2 text-xs font-semibold text-warning"
+        >
+          <span aria-hidden="true">⏩ </span>
+          Mode simulation — le déplacement est rejoué, votre position réelle n’est pas suivie.
+        </p>
+      )}
 
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
@@ -237,10 +268,27 @@ export function NavigationSheet({
           L'empreinte de l'option suivie, seul chiffre de la ligne de bas de
           panneau que la planche nous permette de tenir (voir « Écarts assumés »).
         */}
-        {carbon ? (
+        {carbon && emitted ? (
+          /*
+            Le compteur monte au fil du trajet (UF-701) — « 84 g CO₂ émis
+            sur 240 g ».
+
+            L'empreinte totale est déjà connue depuis la planification : elle
+            répond à « combien coûte ce trajet ? », question réglée avant le
+            départ. Le premier chiffre répond à celle qu'on se pose en route,
+            « combien ai-je déjà émis ? », et c'est lui qui rend perceptible ce
+            que le produit veut faire voir : l'empreinte ne monte pas au même
+            rythme selon le mode — presque pas pendant les vingt minutes de
+            vélo, d'un coup pendant les six de bus.
+
+            Les deux chiffres sont dans le même `aria-live` que le reste du
+            panneau ? Non : ils changent à chaque mesure, et les annoncer
+            noierait les changements d'étape sous un flot de grammes (C7). Le
+            texte reste lisible à la demande, il n'est pas crié.
+          */
           <span className="font-bold text-primary-dark">
             <span aria-hidden="true">🌱 </span>
-            {carbon} sur ce trajet
+            {emitted} émis sur {carbon}
           </span>
         ) : (
           <span />

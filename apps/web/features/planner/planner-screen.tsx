@@ -1,6 +1,6 @@
 'use client';
 
-import type { Place } from '@urbanflow/shared';
+import { UserRole, type Place } from '@urbanflow/shared';
 import Link from 'next/link';
 import { useCallback, useState } from 'react';
 
@@ -21,6 +21,7 @@ import { describeSearchOptions, isEcoModeActive, type TripOptions } from '../../
 import { useSession } from '../auth/session-provider';
 import { NavigationScreen } from '../navigation/navigation-screen';
 import { NavigationSheet } from '../navigation/navigation-sheet';
+import { SimulateNavigation } from '../navigation/simulate-navigation';
 import { StartNavigation } from '../navigation/start-navigation';
 import { useNavigation } from '../navigation/use-navigation';
 import { CarbonBreakdown } from './carbon-breakdown';
@@ -86,8 +87,17 @@ const LOCATED_ZOOM = 15;
  * Server Component, et MapLibre continue d'arriver en chargement différé.
  */
 export function PlannerScreen() {
-  const { status: sessionStatus } = useSession();
+  const { user, status: sessionStatus } = useSession();
   const isGuest = sessionStatus !== 'authenticated';
+  /*
+    Exploitant (UF-701) : seul un compte `admin` se voit proposer le mode
+    simulation. C'est du **confort d'interface**, pas la protection de la
+    fonctionnalité — celle-ci vit sur `POST /api/simulation/trip`, que le
+    `RolesGuard` réserve en relisant le rôle en base à chaque appel (C4). Un
+    usager qui forcerait l'affichage du bouton obtiendrait un `403`, affiché
+    par le hook.
+  */
+  const isOperator = user?.role === UserRole.ADMIN;
 
   // La session est lue AVANT la géolocalisation : depuis UF-802, « Me
   // localiser » n'emprunte pas le même chemin selon qu'il y a un compte ou non
@@ -375,6 +385,21 @@ export function PlannerScreen() {
                 itinerary={selectedItinerary}
                 awaitingConsent={navigation.awaitingConsent}
                 onStart={navigation.start}
+              />
+            )}
+
+            {/*
+              Le mode simulation (UF-701) vient **sous** « Démarrer » : c'est un
+              outil de démonstration, pas l'action du parcours. Le placer
+              au-dessus mettrait un déplacement fictif avant le vrai, sur
+              l'écran d'un usager qui cherche son bus.
+            */}
+            {selectedItinerary && isOperator && (
+              <SimulateNavigation
+                itinerary={selectedItinerary}
+                preparing={navigation.preparingSimulation}
+                error={navigation.simulationError}
+                onSimulate={navigation.simulate}
               />
             )}
 

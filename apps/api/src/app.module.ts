@@ -8,6 +8,7 @@ import { AppController } from './app.controller';
 import { GlobalExceptionFilter } from './common/filters/global-exception.filter';
 import { IpThrottlerGuard } from './common/guards/ip-throttler.guard';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
+import { RolesGuard } from './common/guards/roles.guard';
 import { THROTTLER_OPTIONS } from './common/throttling';
 import { validateEnv } from './config/env.validation';
 import { AuthModule } from './modules/auth/auth.module';
@@ -15,6 +16,7 @@ import { CarbonModule } from './modules/carbon/carbon.module';
 import { DiagnosticsModule } from './modules/diagnostics/diagnostics.module';
 import { PrivacyModule } from './modules/privacy/privacy.module';
 import { RoutesModule } from './modules/routes/routes.module';
+import { SimulationModule } from './modules/simulation/simulation.module';
 import { SearchHistoryModule } from './modules/search-history/search-history.module';
 import { TransportModule } from './modules/transport/transport.module';
 import { UsersModule } from './modules/users/users.module';
@@ -40,6 +42,15 @@ import { PrismaModule } from './prisma/prisma.module';
  * - `DiagnosticsModule` (UF-607) recueille les erreurs survenues dans le
  *   navigateur : sans lui, une panne d'affichage ne laisse aucune trace côté
  *   serveur, puisque la requête, elle, a réussi.
+ * - Le guard de rôle (UF-701) vient **après** le guard JWT, et l'ordre est ce
+ *   qui produit les deux codes attendus : un appel sans jeton valide est un
+ *   `401` (authentification), un compte valide au rôle insuffisant est un
+ *   `403` (autorisation). Il ne coûte rien aux endpoints non annotés — sans
+ *   `@Roles()`, il rend `true` sans toucher à la base (C5).
+ * - `SimulationModule` (UF-701) est le seul module entièrement réservé à un
+ *   rôle : il rejoue un trajet sur une position fictive, ce qui rend le
+ *   produit démontrable sans déplacement — et ce qu'un usager ne doit pas
+ *   pouvoir faire, sous peine de se fabriquer un bilan carbone.
  */
 @Module({
   imports: [
@@ -56,12 +67,14 @@ import { PrismaModule } from './prisma/prisma.module';
     CarbonModule,
     PrivacyModule,
     DiagnosticsModule,
+    SimulationModule,
   ],
   controllers: [AppController],
   providers: [
     // L'ordre compte : les guards globaux s'exécutent dans l'ordre de déclaration.
     { provide: APP_GUARD, useClass: IpThrottlerGuard },
     { provide: APP_GUARD, useClass: JwtAuthGuard },
+    { provide: APP_GUARD, useClass: RolesGuard },
     { provide: APP_FILTER, useClass: GlobalExceptionFilter },
   ],
 })

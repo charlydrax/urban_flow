@@ -231,6 +231,17 @@ Initialisation PostGIS (à exécuter une fois sur la base) :
 CREATE EXTENSION IF NOT EXISTS postgis;
 ```
 
+Compte de démonstration exploitant (UF-701) — mode « Simuler le déplacement ».
+Les identifiants viennent de l'environnement, jamais du code ; sans eux le seed
+crée les comptes usagers habituels et saute l'admin, en le disant.
+
+```bash
+# apps/api/.env : DEMO_ADMIN_EMAIL=… et DEMO_ADMIN_PASSWORD=… (12 car. minimum)
+make migrate       # démarre la base si besoin, puis applique la colonne `role`
+make seed          # idempotent — relançable sans doublon
+npm run dev        # API sur 3001, PWA sur 3000
+```
+
 ---
 
 ## 9. Rôle de Claude sur ce projet

@@ -3,6 +3,7 @@ import { JwtService } from '@nestjs/jwt';
 import { Prisma } from '@prisma/client';
 import * as argon2 from 'argon2';
 
+import { UserRole } from '../../common/enums/user-role.enum';
 import { PrismaService } from '../../prisma/prisma.service';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
@@ -11,6 +12,12 @@ import { RegisterDto } from './dto/register.dto';
 export interface SessionUser {
   id: string;
   email: string;
+  /**
+   * Rôle du compte (UF-701) — publié pour que l'interface sache quoi peindre,
+   * jamais pour ouvrir un accès. L'autorisation se décide dans `RolesGuard`,
+   * sur le rôle relu en base (C4 / OWASP A01).
+   */
+  role: UserRole;
 }
 
 /** Réponse d'authentification renvoyée par login/register. */
@@ -66,11 +73,16 @@ export class AuthService {
     const passwordHash = await argon2.hash(dto.password);
 
     try {
+      // Aucun `role` écrit : la valeur par défaut de la colonne (`user`)
+      // s'applique. L'accepter depuis le DTO d'inscription laisserait
+      // n'importe qui se déclarer exploitant (élévation de privilège —
+      // OWASP A01) ; le `ValidationPipe` global le refuse déjà en `400`, mais
+      // la meilleure garantie reste de ne pas avoir de champ à falsifier.
       const user = await this.prisma.user.create({
         data: { email, passwordHash },
-        select: { id: true, email: true },
+        select: { id: true, email: true, role: true },
       });
-      return this.issueToken(user.id, user.email);
+      return this.issueToken(user.id, user.email, user.role as UserRole);
     } catch (error) {
       // P2002 = violation de contrainte d'unicité (email déjà pris) : 409, pas 500 (C4).
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
@@ -100,7 +112,7 @@ export class AuthService {
     const email = dto.email.trim().toLowerCase();
     const user = await this.prisma.user.findUnique({
       where: { email },
-      select: { id: true, email: true, passwordHash: true },
+      select: { id: true, email: true, passwordHash: true, role: true },
     });
 
     // Toujours exécuter une vérification argon2, même sans compte, pour un temps
@@ -116,12 +128,19 @@ export class AuthService {
       throw new UnauthorizedException('Invalid credentials');
     }
 
-    return this.issueToken(user.id, user.email);
+    return this.issueToken(user.id, user.email, user.role as UserRole);
   }
 
-  /** Signe un access token JWT pour l'utilisateur donné (expiration courte — C4). */
-  private async issueToken(userId: string, email: string): Promise<AuthResponse> {
-    const accessToken = await this.jwtService.signAsync({ sub: userId, email });
-    return { accessToken, user: { id: userId, email } };
+  /**
+   * Signe un access token JWT pour l'utilisateur donné (expiration courte — C4).
+   *
+   * Le rôle est inscrit dans la charge utile (UF-701) pour que le front
+   * dispose de l'information au premier rendu. Il y est **figé pour la durée
+   * du jeton** : c'est précisément pourquoi le `RolesGuard` ne s'en sert pas
+   * et relit la base à chaque appel réservé.
+   */
+  private async issueToken(userId: string, email: string, role: UserRole): Promise<AuthResponse> {
+    const accessToken = await this.jwtService.signAsync({ sub: userId, email, role });
+    return { accessToken, user: { id: userId, email, role } };
   }
 }

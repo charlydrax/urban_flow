@@ -7,6 +7,7 @@ import { Test } from '@nestjs/testing';
 import cookieParser from 'cookie-parser';
 import type { AddressInfo } from 'net';
 
+import { UserRole } from '../../common/enums/user-role.enum';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { JwtStrategy } from '../../common/strategies/jwt.strategy';
 import { AuthController } from './auth.controller';
@@ -103,7 +104,13 @@ describe('AuthController — session (UF-106)', () => {
 
       expect(res.status).toBe(200);
       // L'identité vient du token vérifié (sub → id), jamais d'un champ client (C4).
-      await expect(res.json()).resolves.toEqual({ id: USER_ID, email: USER_EMAIL });
+      // Le rôle est publié depuis UF-701 ; il vient du jeton, qui n'en porte
+      // pas ici — d'où le repli sur le rôle par défaut.
+      await expect(res.json()).resolves.toEqual({
+        id: USER_ID,
+        email: USER_EMAIL,
+        role: UserRole.USER,
+      });
     });
   });
 

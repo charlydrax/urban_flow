@@ -102,6 +102,12 @@ export class AuthController {
    * L'identité renvoyée provient exclusivement du **token vérifié**, jamais du
    * corps de la requête (anti-usurpation — C4). À distinguer de
    * `GET /api/users/me`, qui exposera le *profil applicatif* lu en base.
+   *
+   * Le `role` publié depuis UF-701 est celui **du jeton**, donc celui du
+   * moment de la connexion. C'est cohérent avec l'usage qu'en fait le front —
+   * il lit déjà la même revendication dans le cookie pour son premier rendu —
+   * et sans conséquence sur les accès : un rôle périmé ici n'ouvre rien, le
+   * `RolesGuard` relisant la base à chaque appel réservé (C4).
    */
   @Get('me')
   @ApiCookieAuth(AUTH_COOKIE)
@@ -109,7 +115,7 @@ export class AuthController {
   @ApiOkResponse({ description: 'Session valide : identité issue du JWT vérifié.' })
   @ApiUnauthorizedResponse({ description: 'Session absente, invalide ou expirée.' })
   me(@CurrentUser() user: AuthenticatedUser): SessionUser {
-    return { id: user.userId, email: user.email };
+    return { id: user.userId, email: user.email, role: user.role };
   }
 
   /**

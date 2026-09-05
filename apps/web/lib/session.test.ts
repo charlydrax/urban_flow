@@ -1,3 +1,4 @@
+import { UserRole } from '@urbanflow/shared';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -62,7 +63,30 @@ describe('readSession', () => {
   it('returns the user while the token is still valid', () => {
     const token = makeToken({ ...USER, exp: NOW / 1000 + 60 });
 
-    expect(readSession(token, NOW)).toEqual({ id: USER.sub, email: USER.email });
+    // `role` absent du jeton : repli sur l'usager, jamais sur un privilège (UF-701).
+    expect(readSession(token, NOW)).toEqual({
+      id: USER.sub,
+      email: USER.email,
+      role: UserRole.USER,
+    });
+  });
+
+  it('carries the admin role when the token claims it (UF-701)', () => {
+    const token = makeToken({ ...USER, role: UserRole.ADMIN, exp: NOW / 1000 + 60 });
+
+    expect(readSession(token, NOW)?.role).toBe(UserRole.ADMIN);
+  });
+
+  it.each([
+    ['unknown', 'superadmin'],
+    ['empty', ''],
+    ['not a string', 42],
+  ])('falls back to the plain user role when the claim is %s', (_label, role) => {
+    // Le décodage ne vérifie **aucune** signature : une revendication fabriquée
+    // à la main dans le cookie ne doit jamais peindre un privilège de plus.
+    const token = makeToken({ ...USER, role, exp: NOW / 1000 + 60 });
+
+    expect(readSession(token, NOW)?.role).toBe(UserRole.USER);
   });
 
   it('returns null once the token is expired (the API would answer 401)', () => {

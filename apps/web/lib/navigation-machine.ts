@@ -5,6 +5,7 @@ import { GEOLOCATION_ERROR_MESSAGES } from './geolocation';
 import { MODE_ICONS, formatClock } from './itinerary-cards';
 import { computeRouteProgress, type RouteProgress } from './route-progress';
 import { MODE_TRACK_STYLES } from './route-map-layers';
+import { travelledCarbonGrams } from './travelled-carbon';
 
 /**
  * Machine à états du guidage (UF-806) — la vie d'une session de navigation, de
@@ -41,9 +42,17 @@ import { MODE_TRACK_STYLES } from './route-map-layers';
  * chaque tronçon, alors que rien du guidage ne change — seul le contenu de
  * l'écran bouge.
  *
+ * Depuis UF-701, une session porte aussi sa **provenance** : les positions
+ * viennent du capteur (`gps`) ou d'une trace fictive servie par l'API
+ * (`simulation`). Le réducteur les traite identiquement — c'est ce qui fait
+ * qu'une démonstration prouve quelque chose du parcours réel — et la
+ * distinction ne sert qu'en dehors du calcul : ne pas ouvrir le GPS, et dire à
+ * l'écran ce qu'il montre.
+ *
  * Couvre : C6 (chaque échec du capteur a son état et son message), C7 (les
- * transitions produisent des annonces `aria-live`, jamais un écran muet),
- * C5 (l'abonnement GPS ne tourne que dans `guiding`).
+ * transitions produisent des annonces `aria-live`, jamais un écran muet ; le
+ * mode simulation est annoncé, pas seulement peint), C5 (l'abonnement GPS ne
+ * tourne que dans `guiding`, et jamais en simulation).
  */
 
 /**
@@ -57,9 +66,28 @@ import { MODE_TRACK_STYLES } from './route-map-layers';
  */
 export type NavigationPhase = 'idle' | 'guiding' | 'paused' | 'signal-lost' | 'arrived';
 
+/**
+ * D'où viennent les positions d'une session de guidage (UF-701).
+ *
+ * - `gps` — le capteur de l'appareil, régime nominal (UF-806)
+ * - `simulation` — une trace fictive servie par `POST /api/simulation/trip`,
+ *   réservée au rôle `admin` : elle rend le parcours démontrable sans se
+ *   déplacer
+ *
+ * La distinction ne change **rien** au calcul : le réducteur traite les deux
+ * de la même façon, et c'est délibéré — si l'arrivée se déclenche en
+ * simulation, elle se déclenchera sur le terrain. Elle change deux choses
+ * seulement, et toutes deux hors du calcul : le GPS ne tourne pas en
+ * simulation (`needsPositionWatch`), et l'écran doit dire ce qu'il montre
+ * (C7 : personne ne doit prendre une démonstration pour un déplacement réel).
+ */
+export type NavigationSource = 'gps' | 'simulation';
+
 /** État complet d'une session de guidage — tout ce que l'écran a besoin de peindre. */
 export interface NavigationState {
   phase: NavigationPhase;
+  /** Provenance des positions de cette session (UF-701). */
+  source: NavigationSource;
   /** Itinéraire suivi, `null` hors session. */
   itinerary: Itinerary | null;
   /** Dernière position mesurée, `null` tant qu'aucune n'est arrivée. */
@@ -74,12 +102,25 @@ export interface NavigationState {
   progress: RouteProgress | null;
   /** Cause du dernier échec du capteur, `null` si le signal est bon. */
   failure: GeolocationFailureReason | null;
+  /**
+   * Grammes de CO₂ **déjà émis** depuis le départ (UF-701).
+   *
+   * Rangé dans l'état plutôt que recalculé à l'affichage : il se déduit de la
+   * progression, donc il change exactement quand elle change, et le poser ici
+   * évite que deux écrans qui le liraient à des instants différents n'en
+   * donnent deux valeurs. `0` tant qu'aucune position n'est arrivée.
+   */
+  travelledCarbonGrams: number;
 }
 
 /** Événements acceptés par le réducteur. */
 export type NavigationEvent =
-  /** Clic sur « Démarrer » : ouvre une session sur l'itinéraire retenu. */
-  | { type: 'start'; itinerary: Itinerary }
+  /**
+   * Clic sur « Démarrer » (ou sur « Simuler le déplacement ») : ouvre une
+   * session sur l'itinéraire retenu. `source` dit d'où viendront les positions
+   * — le capteur, ou une trace fictive (UF-701).
+   */
+  | { type: 'start'; itinerary: Itinerary; source: NavigationSource }
   /** Nouvelle mesure du capteur. */
   | { type: 'position'; position: UserPosition }
   /** Échec du capteur remonté par l'abonnement. */
@@ -94,10 +135,12 @@ export type NavigationEvent =
 /** État de départ — aucune session, rien de mesuré. */
 export const INITIAL_NAVIGATION_STATE: NavigationState = {
   phase: 'idle',
+  source: 'gps',
   itinerary: null,
   position: null,
   progress: null,
   failure: null,
+  travelledCarbonGrams: 0,
 };
 
 /**
@@ -129,12 +172,16 @@ export function navigationReducer(state: NavigationState, event: NavigationEvent
     case 'start':
       return {
         phase: 'guiding',
+        source: event.source,
         itinerary: event.itinerary,
         // La position de la session précédente n'a rien à faire ici : elle
         // ferait afficher une progression sur un trajet qu'elle ne concerne pas.
         position: null,
         progress: null,
         failure: null,
+        // Idem pour le compteur : chaque session repart de zéro, sinon une
+        // démonstration rejouée cumulerait les grammes de la précédente.
+        travelledCarbonGrams: 0,
       };
 
     case 'position': {
@@ -151,6 +198,20 @@ export function navigationReducer(state: NavigationState, event: NavigationEvent
         position: event.position,
         progress,
         failure: null,
+        /*
+          Le compteur ne **redescend** jamais, même si la progression recule.
+
+          `computeRouteProgress` est sans état et accroche la position au
+          segment le plus proche : un voyageur qui rate son arrêt et revient en
+          arrière voit donc, à juste titre, sa progression reculer. Mais du CO₂
+          déjà émis ne se dés-émet pas — un compteur qui redescendrait dirait
+          le contraire de ce que le produit enseigne. Le maximum atteint fait
+          foi (UF-701).
+        */
+        travelledCarbonGrams: Math.max(
+          state.travelledCarbonGrams,
+          travelledCarbonGrams(state.itinerary, progress),
+        ),
       };
     }
 
@@ -183,7 +244,13 @@ export function navigationReducer(state: NavigationState, event: NavigationEvent
  * batterie, et le laisser ouvert pendant une pause ou après l'arrivée serait
  * exactement le « polling inutile » que la contrainte proscrit.
  */
-export function needsPositionWatch(phase: NavigationPhase): boolean {
+export function needsPositionWatch(phase: NavigationPhase, source: NavigationSource): boolean {
+  // Une session simulée ne touche **jamais** au capteur (UF-701) : ses
+  // positions viennent de la trace servie par l'API. Ouvrir un abonnement
+  // haute précision pour les ignorer serait le « polling inutile » que C5
+  // proscrit, et cela redemanderait l'autorisation de géolocalisation à qui
+  // n'en a pas besoin pour démontrer le produit (C8).
+  if (source === 'simulation') return false;
   // `signal-lost` en fait partie : c'est précisément la phase où l'on attend
   // que le capteur reparle.
   return phase === 'guiding' || phase === 'signal-lost';
@@ -347,10 +414,20 @@ export function estimatedArrival(state: NavigationState, now: Date = new Date())
  * du mode, de l'étape et du rang.
  */
 export function guidanceAnnouncement(state: NavigationState): string {
-  if (state.phase === 'arrived') return 'Vous êtes arrivé à destination. Le guidage est terminé.';
-  if (state.phase === 'paused') return 'Guidage en pause. Votre position n’est plus suivie.';
+  // Le mode simulation est annoncé **en tête de chaque phrase** (UF-701 — C7).
+  // Un lecteur d'écran ne voit pas le bandeau posé en haut du panneau : sans
+  // ce préfixe, il entendrait « Étape 2 sur 4, en bus » sans jamais apprendre
+  // que rien de tout cela n'a lieu. Personne ne doit prendre une démonstration
+  // pour un déplacement réel.
+  const prefix = state.source === 'simulation' ? 'Mode simulation. ' : '';
+  if (state.phase === 'arrived') {
+    return `${prefix}Vous êtes arrivé à destination. Le guidage est terminé.`;
+  }
+  if (state.phase === 'paused') {
+    return `${prefix}Guidage en pause. Votre position n’est plus suivie.`;
+  }
   if (state.phase === 'signal-lost' && state.failure) {
-    return `Signal perdu. ${GEOLOCATION_ERROR_MESSAGES[state.failure]}`;
+    return `${prefix}Signal perdu. ${GEOLOCATION_ERROR_MESSAGES[state.failure]}`;
   }
   if (state.phase !== 'guiding' || !state.progress || !state.itinerary) return '';
 
@@ -363,5 +440,5 @@ export function guidanceAnnouncement(state: NavigationState): string {
     ? ` Vous semblez éloigné de l’itinéraire d’environ ${Math.round(state.progress.offRouteMeters)} mètres.`
     : '';
 
-  return `Étape ${step} sur ${total}, en ${mode}. Encore ${remaining} minute${remaining > 1 ? 's' : ''} sur cette étape.${offRoute}`;
+  return `${prefix}Étape ${step} sur ${total}, en ${mode}. Encore ${remaining} minute${remaining > 1 ? 's' : ''} sur cette étape.${offRoute}`;
 }

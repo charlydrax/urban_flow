@@ -1,3 +1,4 @@
+import { UserRole, type SessionUser } from '@urbanflow/shared';
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -32,10 +33,17 @@ vi.mock('next/navigation', () => ({
  * pas une approximation.
  */
 describe('coque commune — WCAG 2.1 AA', () => {
-  function renderNav(user: { id: string; email: string } | null, path = '/') {
+  /**
+   * Le rôle est posé ici, et non par les appelants : la coque de navigation ne
+   * s'en sert pas — aucun de ses liens n'est réservé — et l'exiger à chaque
+   * appel ferait répéter dix fois une donnée sans rapport avec ce que le test
+   * observe. `Omit` plutôt qu'une liste de champs recopiée : le jour où
+   * `SessionUser` en gagne un, c'est ici que la compilation le signalera.
+   */
+  function renderNav(user: Omit<SessionUser, 'role'> | null, path = '/') {
     pathname.current = path;
     return render(
-      <SessionProvider initialUser={user}>
+      <SessionProvider initialUser={user ? { ...user, role: UserRole.USER } : null}>
         <MobileBrandBar />
         <AppNav />
       </SessionProvider>,
