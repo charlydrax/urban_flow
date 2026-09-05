@@ -3,6 +3,7 @@ import type {
   Itinerary,
   ItinerarySortKey,
   LineStringGeometry,
+  RouteGeometrySource,
   RouteSegment,
   SharedMobilityStation,
   TransitJourney,
@@ -15,6 +16,7 @@ import { TransportMode } from '../../../common/enums/transport-mode.enum';
 import { distanceMeters, type LatLng } from '../../transport/gbfs/distance';
 import type { CollectedSources } from '../sources/collected-sources';
 import { cycleCoverage } from './cycle-coverage';
+import { toLineString } from './geometry';
 import {
   bikeDistanceMeters,
   bikeDurationMinutes,
@@ -205,6 +207,19 @@ interface Step {
   arrivalAt?: string;
   /** Tracé du pas, en `[lng, lat]` (GeoJSON — C9). */
   geometry: [number, number][];
+  /**
+   * D'où vient {@link geometry} — UF-702.
+   *
+   * Posé **à la construction du pas**, là où l'information existe encore : le
+   * moteur a fourni un tracé, ou on a replié sur la droite. Plus loin dans la
+   * chaîne, une polyligne de deux points est indiscernable d'un cheminement
+   * dont OTP n'aurait rendu que les extrémités.
+   *
+   * C'est aussi ce qui dit à l'enrichissement (`street-geometry.ts`) quels
+   * segments valent un appel au routeur : ceux qui sont déjà `routed` n'ont
+   * rien à demander.
+   */
+  geometrySource: RouteGeometrySource;
 }
 
 /** Proposition complète avant filtrage, notation et plafonnement. */
@@ -350,18 +365,29 @@ function journeyToSteps(journey: TransitJourney, from: MergeEndpoint, to: MergeE
     ...(leg.line ? { line: leg.line } : {}),
     departureAt: leg.departureAt,
     arrivalAt: leg.arrivalAt,
-    geometry: legGeometry(leg),
+    ...legGeometry(leg),
   }));
 }
 
-/** Tracé d'un segment TC, replié sur une droite si le moteur n'en a pas fourni. */
-function legGeometry(leg: TransitLeg): [number, number][] {
+/**
+ * Tracé d'un segment TC, replié sur une droite si le moteur n'en a pas fourni.
+ *
+ * Le tracé nominal est celui du GTFS (`shapes.txt`), décodé par le connecteur :
+ * un métro y épouse sa ligne au lieu de relier ses arrêts à la règle. Le repli
+ * n'arrive que pour un segment dont le flux ne publie pas de forme — il est
+ * alors marqué `straight`, et l'affichage le dit (UF-702).
+ */
+function legGeometry(leg: TransitLeg): Pick<Step, 'geometry' | 'geometrySource'> {
   const coordinates = leg.geometry?.coordinates ?? [];
-  if (coordinates.length >= 2) return coordinates;
-  return [
-    [leg.from.lng, leg.from.lat],
-    [leg.to.lng, leg.to.lat],
-  ];
+  if (coordinates.length >= 2) return { geometry: coordinates, geometrySource: 'routed' };
+
+  return {
+    geometry: straightLine(
+      { lat: leg.from.lat, lng: leg.from.lng },
+      { lat: leg.to.lat, lng: leg.to.lng },
+    ),
+    geometrySource: 'straight',
+  };
 }
 
 // ------------------------------------------------------ famille vélo seul (VLS)
@@ -674,6 +700,11 @@ function walkStep(fromLabel: string, toLabel: string, fromPoint: LatLng, toPoint
     durationMinutes: walkDurationMinutes(meters),
     distanceMeters: meters,
     geometry: straightLine(fromPoint, toPoint),
+    // La fusion ne route pas : elle synthétise ce pas à partir d'une distance
+    // et d'une vitesse, et n'a donc aucun cheminement à publier. Le tracé réel
+    // est demandé après coup au routeur de voirie (UF-702) — le pas part
+    // `straight`, il ne le reste que si le moteur ne répond pas.
+    geometrySource: 'straight',
   };
 }
 
@@ -703,10 +734,19 @@ function bikeStep(
     durationMinutes: bikeDurationMinutes(meters),
     distanceMeters: meters,
     geometry: straightLine(fromPoint, toPoint),
+    // Même règle que la marche : le cheminement cyclable est demandé au routeur
+    // après la fusion (UF-702).
+    geometrySource: 'straight',
   };
 }
 
-/** Tracé de repli : la droite entre deux points, faute de routeur piéton/cyclable. */
+/**
+ * Tracé de repli : la droite entre deux points.
+ *
+ * C'est le tracé de départ de tout pas que la fusion synthétise. Il est remplacé
+ * par le cheminement réel quand le routeur de voirie répond (UF-702), et
+ * subsiste — marqué `straight` — quand il ne répond pas.
+ */
 function straightLine(from: LatLng, to: LatLng): [number, number][] {
   return [
     [from.lng, from.lat],
@@ -739,6 +779,10 @@ function compactSteps(steps: readonly Step[]): Step[] {
       previous.toLabel = step.toLabel;
       previous.toPoint = step.toPoint;
       previous.geometry = [...previous.geometry, ...step.geometry];
+      // Une portion droite absorbée rend le pas fusionné droit : annoncer
+      // `routed` pour un tracé dont une moitié est à vol d'oiseau reviendrait à
+      // certifier ce qu'on n'a pas calculé (UF-702).
+      if (step.geometrySource === 'straight') previous.geometrySource = 'straight';
       // L'horaire suit la même règle que le libellé : le pas absorbé disparaît,
       // mais le temps qu'il occupait, lui, est bien passé (UF-404).
       if (step.arrivalAt) previous.arrivalAt = step.arrivalAt;
@@ -1002,50 +1046,36 @@ function toRouteSegment(step: Step): RouteSegment {
     ...(step.line ? { line: step.line } : {}),
     ...(step.departureAt ? { departureAt: step.departureAt } : {}),
     ...(step.arrivalAt ? { arrivalAt: step.arrivalAt } : {}),
-    ...(geometry ? { geometry } : {}),
+    ...(geometry ? { geometry, geometrySource: step.geometrySource } : {}),
   };
 }
 
 /**
  * Tracé d'un pas seul, publié pour que la carte puisse colorer par mode (UF-403).
  *
- * Même nettoyage et même exigence de validité que {@link assembleGeometry} : les
- * doublons consécutifs (une jonction absorbée par `compactSteps`) sont écartés,
- * et sous deux points on ne publie rien plutôt qu'une `LineString` invalide
- * (RFC 7946 — C9).
+ * Nettoyage et exigence de validité délégués à {@link toLineString}, partagé
+ * avec l'assemblage d'ensemble et avec l'enrichissement des cheminements
+ * (UF-702) : les trois doivent appliquer la même règle, sinon la carte reçoit
+ * un jour une géométrie que MapLibre refuse.
  */
 function stepGeometry(step: Step): LineStringGeometry | undefined {
-  const coordinates: [number, number][] = [];
-
-  for (const point of step.geometry) {
-    const last = coordinates[coordinates.length - 1];
-    if (last && last[0] === point[0] && last[1] === point[1]) continue;
-    coordinates.push(point);
-  }
-
-  return coordinates.length >= 2 ? { type: 'LineString', coordinates } : undefined;
+  return toLineString(step.geometry);
 }
 
 /**
  * Concatène les tracés des pas en une seule `LineString` (C9).
  *
- * Les points en double à la jonction de deux pas sont supprimés : ils ne
- * changeraient pas le rendu MapLibre mais alourdiraient la réponse pour rien
- * (C5). En dessous de deux points, on ne renvoie **aucune** géométrie plutôt
- * qu'une `LineString` invalide au sens de la RFC 7946.
+ * Les points en double à la jonction de deux pas sont supprimés par
+ * {@link toLineString} : ils ne changeraient pas le rendu MapLibre mais
+ * alourdiraient la réponse pour rien (C5).
+ *
+ * ⚠️ Cette géométrie d'ensemble est **recalculée** après l'enrichissement des
+ * cheminements (UF-702) : remplacer le tracé d'un segment sans reconstruire
+ * celui de l'itinéraire laisserait deux réponses contradictoires dans la même
+ * charge utile.
  */
 function assembleGeometry(steps: readonly Step[]): LineStringGeometry | undefined {
-  const coordinates: [number, number][] = [];
-
-  for (const step of steps) {
-    for (const point of step.geometry) {
-      const last = coordinates[coordinates.length - 1];
-      if (last && last[0] === point[0] && last[1] === point[1]) continue;
-      coordinates.push(point);
-    }
-  }
-
-  return coordinates.length >= 2 ? { type: 'LineString', coordinates } : undefined;
+  return toLineString(...steps.map((step) => step.geometry));
 }
 
 /**

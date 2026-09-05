@@ -600,11 +600,92 @@ approximation une information que le serveur possède exactement.
 
 Les deux appliquent la même règle : les points en double aux jonctions sont
 écartés, et sous deux points **rien** n'est publié plutôt qu'une `LineString`
-invalide au sens de la RFC 7946.
+invalide au sens de la RFC 7946. La règle vit à un seul endroit,
+`merge/geometry.ts`, parce que trois appelants la partagent.
+
+## Tracé réel des segments (UF-702)
+
+Jusqu'à ce ticket, seuls les segments **en transports en commun** suivaient le
+réseau : leur polyligne vient du GTFS (`shapes.txt`), décodée par le connecteur
+OTP. Les segments marche et vélo, eux, ne sont pas planifiés par un moteur — la
+fusion les **synthétise** à partir d'une distance à vol d'oiseau et d'une
+vitesse (`merge/travel-model.ts`). Faute de tracé, ils étaient dessinés en ligne
+droite : à travers les immeubles, et parfois à travers le Rhône.
+
+### Le choix technique : OTP, pas OSRM
+
+Le ticket laissait le choix entre le mode `WALK`/`BICYCLE` d'OpenTripPlanner et
+un routeur dédié (OSRM, Valhalla). **OTP est retenu** :
+
+1. Il est déjà là, et son graphe contient le réseau OSM lyonnais
+   (`docker/otp/data/lyon.osm.pbf`) — celui-là même qui sert aux rabattements
+   piétons des trajets TC. Le cheminement rendu est donc _exactement_ celui
+   qu'emprunte déjà l'itinéraire en transports en commun.
+2. Un routeur de plus, c'est un conteneur, un jeu de données à tenir à jour et
+   un point de panne supplémentaires, pour une capacité déjà disponible (C5).
+3. Une seule panne à gérer : OTP arrêté, la dégradation est cohérente — ni
+   trajets TC, ni cheminements routés.
+
+### Où l'étape se place, et pourquoi là
+
+Après la fusion, jamais pendant. La fusion est une **fonction pure et
+synchrone** : c'est ce qui permet de la tester sans base, sans OTP et sans
+conteneur d'injection. Y faire entrer des appels réseau lui coûterait cette
+propriété.
+
+L'ordre a un second mérite : la fusion produit au plus cinq itinéraires qui
+partagent beaucoup de marches (l'accès à une borne se retrouve dans le trajet
+tout-vélo et dans le rabattement). Interroger après coup permet de dédupliquer
+ce que router pendant la fusion aurait payé autant de fois qu'il y a de
+candidats (C5).
+
+```
+collecte (3 sources)  →  fusion (pure)  →  cheminements de voirie  →  carbone  →  tri
+```
+
+Trois protections encadrent l'étape, parce qu'elle s'ajoute à une latence déjà
+payée :
+
+- **Elle est sautée** si la collecte vient d'établir que la source TC ne répond
+  pas : c'est le même OTP, et le relancer paierait le budget entier pour rien.
+  C'est l'état de la production tant qu'OTP n'y est pas déployé (BUG-002).
+- **Elle est bornée** par un budget de rafale (2 s, plafonné par
+  `OTP_TIMEOUT_MS`) : passé ce délai, les droites restent et la réponse part.
+- **Elle est mémoïsée** une heure, sur une clé arrondie au mètre.
+
+### Ce que le ticket ne change pas
+
+Ni durées, ni distances, ni empreintes. Le cheminement rendu par OTP est
+pourtant plus juste que la distance à vol d'oiseau corrigée d'un facteur de
+détour… mais l'adopter changerait les grammes publiés et l'ordre de la liste,
+c'est-à-dire le **résultat** du planificateur, pour un ticket qui porte sur
+l'**affichage**. Réconcilier le modèle de distance avec le réseau réel est un
+autre travail, et il mérite son propre ticket.
+
+### `geometrySource` : dire d'où vient le trait
+
+| Valeur     | Ce que ça veut dire                                                    |
+| ---------- | ---------------------------------------------------------------------- |
+| `routed`   | la polyligne suit le réseau réel (voirie OSM, ou `shapes.txt` du GTFS) |
+| `straight` | repli à vol d'oiseau : le moteur n'a rien pu dire                      |
+| absent     | réponse antérieure au ticket, servie par un cache — on ne sait pas     |
+
+Le champ existe parce que le client ne peut pas le déduire : un cheminement le
+long d'une rue rectiligne et un repli produisent la même polyligne de deux
+points. Sans le marquage, une droite qui traverse un pâté de maisons aurait
+l'air d'un calcul juste (C6). La carte l'annonce — note dans la légende,
+mention dans l'alternative textuelle.
+
+Un garde-fou complète le repli : un cheminement dont la longueur dépasse cinq
+fois le vol d'oiseau (plus 300 m de marge) est **écarté**. Le cas réel est une
+extrémité raccrochée à un tronçon isolé du réseau OSM, qu'OTP rejoint par un
+immense contournement — un tracé techniquement calculé, et visuellement un
+mensonge. La droite, elle, ne prétend rien.
 
 ## Contraintes couvertes
 
-C4 (validation, anti-IDOR, coordonnées exigées, plus aucun `userId` dans le
+C6 (tracés fidèles au réseau réel, approximations annoncées — UF-702), C4
+(validation, anti-IDOR, coordonnées exigées, plus aucun `userId` dans le
 corps, surface de diagnostic retirée), C8 (l'historique enregistre la recherche,
 pas un choix qui n'a pas eu lieu), C9 (GeoJSON
 LineString, contrats partagés), C10 (appels parallèles, budget borné,

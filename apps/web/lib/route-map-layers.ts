@@ -27,7 +27,15 @@ export type TrackPattern =
   | 'solid'
   /** Tirets larges — on est transporté sur une ligne régulière (bus, tram, métro, covoiturage). */
   | 'dashed'
-  /** Pointillé fin — marche : le tracé est indicatif, pas un cheminement piéton calculé. */
+  /**
+   * Pointillé fin — marche.
+   *
+   * Le motif disait à l'origine « tracé indicatif » : la marche était la seule
+   * portion dessinée à vol d'oiseau. Depuis UF-702 elle suit le réseau piéton
+   * comme les autres, et le pointillé ne dit plus que la marche — c'est
+   * l'usager qui avance à découvert, sans véhicule ni ligne. La provenance du
+   * tracé se lit ailleurs, dans `geometrySource`, et pour tous les modes.
+   */
   | 'dotted';
 
 /** Apparence d'un mode sur la carte : sa couleur de charte et son motif de trait. */
@@ -55,6 +63,10 @@ export interface ModeTrackStyle {
  *   en couleur vive la ferait concurrencer le mode qui, lui, caractérise
  *   l'option. Le pointillé fin demandé par le ticket la rend malgré tout
  *   immédiatement identifiable.
+ *
+ *   UF-702 n'y touche pas : le ticket demande explicitement de réutiliser le
+ *   code couleur en place et de ne pas créer de style. Ce qui change, c'est la
+ *   **géométrie** dessinée sous ces styles, pas les styles.
  * - **Le covoiturage** n'est encore produit par aucune source (F3 couvre GTFS et
  *   GBFS). Il est mappé sur l'ocre « warning » pour que ce tableau reste
  *   exhaustif — ajouter un mode à l'énumération partagée doit casser la
@@ -300,7 +312,52 @@ export function describeRoute(itinerary: Itinerary): string {
     return `${label} de ${segment.from} à ${segment.to} (${segment.durationMinutes} min)`;
   });
 
-  return `Itinéraire tracé sur la carte : ${legs.join(', puis ')}. Durée totale ${itinerary.durationMinutes} minutes.`;
+  // L'avertissement de tracé approché est **dans** l'alternative textuelle, et
+  // pas seulement dans la note visuelle de la légende : qui n'a pas accès à la
+  // carte a la même raison de savoir que le trait ne suit pas les rues
+  // (C7 — WCAG 1.1.1).
+  const approximate = hasApproximateTrack(itinerary) ? ` ${APPROXIMATE_TRACK_NOTICE}` : '';
+
+  return `Itinéraire tracé sur la carte : ${legs.join(', puis ')}. Durée totale ${itinerary.durationMinutes} minutes.${approximate}`;
+}
+
+/**
+ * Avertissement affiché quand au moins un segment est dessiné à vol d'oiseau
+ * (UF-702).
+ *
+ * Une phrase, pas un code d'erreur : ce n'est pas une panne à signaler mais une
+ * limite du tracé à annoncer. Elle est écrite une fois et lue à deux endroits —
+ * la légende de la carte et l'alternative textuelle — pour que les deux ne
+ * divergent jamais.
+ */
+export const APPROXIMATE_TRACK_NOTICE =
+  'Certains segments sont tracés en ligne droite, faute d’itinéraire détaillé disponible.';
+
+/**
+ * L'itinéraire compte-t-il au moins un segment dessiné à vol d'oiseau ?
+ *
+ * ## Pourquoi il faut le dire
+ *
+ * Un tracé routé et un repli produisent le même objet GeoJSON : rien, dans la
+ * géométrie, ne distingue une rue rectiligne d'une droite qui traverse un pâté
+ * de maisons. Laisser les deux se ressembler ferait passer une approximation
+ * pour un cheminement calculé — et un usager qui suit ce trait se retrouverait
+ * devant un mur (C6).
+ *
+ * ## Pourquoi l'absence de marquage ne déclenche rien
+ *
+ * `geometrySource` est absent des réponses antérieures à UF-702, qu'un Service
+ * Worker peut encore servir (C10). L'absence se lit « on ne sait pas », et on
+ * préfère alors ne rien annoncer : afficher un avertissement au hasard le
+ * rendrait insignifiant partout ailleurs.
+ *
+ * @param itinerary Itinéraire mis en avant
+ * @returns `true` si au moins un segment est explicitement marqué `straight`
+ */
+export function hasApproximateTrack(itinerary: Itinerary): boolean {
+  return itinerary.segments.some(
+    (segment) => hasGeometry(segment) && segment.geometrySource === 'straight',
+  );
 }
 
 /** Un segment n'est dessinable qu'avec au moins deux points (RFC 7946 — C9). */

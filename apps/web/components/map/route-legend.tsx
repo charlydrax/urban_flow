@@ -2,7 +2,12 @@
 
 import type { Itinerary } from '@urbanflow/shared';
 
-import { routeLegend, type TrackPattern } from '../../lib/route-map-layers';
+import {
+  APPROXIMATE_TRACK_NOTICE,
+  hasApproximateTrack,
+  routeLegend,
+  type TrackPattern,
+} from '../../lib/route-map-layers';
 
 /**
  * Longueur du trait d'échantillon, en pixels — assez pour montrer deux tirets
@@ -42,6 +47,7 @@ const SAMPLE_DASH: Record<TrackPattern, { dash?: string; cap: 'round' | 'butt' }
  */
 export function RouteLegend({ itinerary }: { itinerary: Itinerary }) {
   const entries = routeLegend(itinerary);
+  const approximate = hasApproximateTrack(itinerary);
   if (entries.length === 0) return null;
 
   return (
@@ -81,6 +87,25 @@ export function RouteLegend({ itinerary }: { itinerary: Itinerary }) {
           );
         })}
       </ul>
+      {/*
+        UF-702 : dire que le trait ne suit pas les rues. Le mot n'est pas
+        « erreur » — un tracé à vol d'oiseau reste juste sur la direction et
+        l'échelle du trajet ; il ne l'est pas sur le chemin. C'est cette nuance
+        que la note porte, et c'est pourquoi elle est discrète plutôt
+        qu'alarmante.
+
+        `aria-hidden` comme le reste de la légende : la même phrase est déjà
+        dans l'alternative textuelle de la carte (`describeRoute`), et la
+        répéter allongerait la lecture sans rien apprendre (C7).
+      */}
+      {approximate && (
+        <p
+          aria-hidden="true"
+          className="mt-1.5 max-w-[14rem] border-t border-ink-200 pt-1.5 text-xs text-ink-700"
+        >
+          {APPROXIMATE_TRACK_NOTICE}
+        </p>
+      )}
     </div>
   );
 }

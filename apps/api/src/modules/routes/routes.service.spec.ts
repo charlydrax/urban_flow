@@ -4,6 +4,11 @@ import { RoutePriority, TransportMode } from '@urbanflow/shared';
 
 import { CarbonService } from '../carbon/carbon.service';
 import { SearchHistoryService } from '../search-history/search-history.service';
+import {
+  StreetRoutingService,
+  streetPathKey,
+  type StreetPathQuery,
+} from '../transport/street-routing.service';
 import { DEFAULT_PREFERENCES, UsersService } from '../users/users.service';
 import { PlanRouteDto } from './dto/plan-route.dto';
 import { RoutesService } from './routes.service';
@@ -37,6 +42,7 @@ describe('RoutesService', () => {
   let toAvailability: jest.Mock;
   let computeFootprint: jest.Mock;
   let createSearchHistory: jest.Mock;
+  let routePaths: jest.Mock;
 
   const userId = 'user-from-jwt';
 
@@ -191,6 +197,10 @@ describe('RoutesService', () => {
       avoidedGrams: 176,
     }));
     createSearchHistory = jest.fn().mockResolvedValue({ id: 'history-1' });
+    // UF-702 : par défaut le routeur de voirie ne rend aucun cheminement — les
+    // segments gardent alors leur droite, c'est-à-dire le comportement d'avant
+    // le ticket. Les tests qui portent sur le tracé le font parler eux-mêmes.
+    routePaths = jest.fn().mockResolvedValue(new Map());
 
     const moduleRef = await Test.createTestingModule({
       providers: [
@@ -199,6 +209,7 @@ describe('RoutesService', () => {
         { provide: SourceCollectorService, useValue: { collectAllSources, toAvailability } },
         { provide: CarbonService, useValue: { computeFootprint } },
         { provide: SearchHistoryService, useValue: { create: createSearchHistory } },
+        { provide: StreetRoutingService, useValue: { routePaths } },
       ],
     }).compile();
 
@@ -619,6 +630,122 @@ describe('RoutesService', () => {
       const result = await service.plan(dto(), userId);
 
       expect(result.appliedConstraints).toEqual({ reducedMobility: false });
+    });
+  });
+
+  /**
+   * Recette UF-702 : les segments marche et vélo sortent de la fusion en ligne
+   * droite ; l'orchestrateur va chercher leur cheminement réel — sauf quand il
+   * vient d'apprendre que le moteur ne répond pas.
+   */
+  describe('tracés de voirie (UF-702)', () => {
+    /** Le trajet de référence, précédé d'une marche d'accès à l'arrêt. */
+    const withWalkLeg = () => {
+      const transit = collected().transit as unknown as {
+        data: { journeys: Record<string, unknown>[] };
+      };
+      const [journey] = transit.data.journeys;
+      const legs = (journey?.legs ?? []) as Record<string, unknown>[];
+
+      return collected({
+        transit: {
+          ...transit,
+          data: {
+            ...transit.data,
+            journeys: [
+              {
+                ...journey,
+                legs: [
+                  {
+                    mode: TransportMode.WALK,
+                    sourceMode: 'WALK',
+                    transit: false,
+                    from: { name: 'Part-Dieu', lat: 45.760515, lng: 4.859057 },
+                    to: { name: 'Part-Dieu métro', lat: 45.7602, lng: 4.8585 },
+                    durationMinutes: 3,
+                    distanceMeters: 240,
+                    accessible: true,
+                  },
+                  ...legs,
+                ],
+              },
+            ],
+          },
+        },
+      } as unknown as Partial<CollectedSources>);
+    };
+
+    it("n'appelle pas le routeur quand aucun segment n'est à router (C5)", async () => {
+      // La collecte de référence ne rend qu'un métro : sa forme vient du GTFS,
+      // il n'y a rien à demander à la voirie. Un aller-retour à vide serait
+      // payé à chaque recherche.
+      await service.plan(dto(), userId);
+
+      expect(routePaths).not.toHaveBeenCalled();
+    });
+
+    it('demande le cheminement des segments de voirie encore droits', async () => {
+      collectAllSources.mockResolvedValue(withWalkLeg());
+
+      await service.plan(dto(), userId);
+
+      expect(routePaths).toHaveBeenCalledTimes(1);
+      const [queries] = routePaths.mock.calls[0] as [{ mode: TransportMode }[]];
+      expect(queries.length).toBeGreaterThan(0);
+      expect(queries.every((query) => query.mode === TransportMode.WALK)).toBe(true);
+    });
+
+    it("n'interroge pas le routeur quand la source TC vient d'échouer (C10)", async () => {
+      // Le routeur de voirie et le connecteur GTFS parlent au **même** OTP :
+      // le relancer paierait le budget entier pour ne rien obtenir. C'est
+      // l'état de la production tant qu'OTP n'y est pas déployé (BUG-002).
+      collectAllSources.mockResolvedValue(
+        collected({
+          transit: {
+            status: 'failed',
+            data: null,
+            elapsedMs: 2000,
+            failure: { source: 'transit', kind: 'timeout', reason: 'timeout' },
+          },
+        } as Partial<CollectedSources>),
+      );
+      jest.spyOn(service['logger'], 'debug').mockImplementation(() => undefined);
+
+      await service.plan(dto(), userId);
+
+      expect(routePaths).not.toHaveBeenCalled();
+    });
+
+    it('publie le tracé routé et son marquage jusque dans la réponse (C6)', async () => {
+      collectAllSources.mockResolvedValue(withWalkLeg());
+      routePaths.mockImplementation((queries: StreetPathQuery[]) =>
+        Promise.resolve(
+          new Map(
+            queries.map((query) => [
+              streetPathKey(query),
+              {
+                type: 'LineString' as const,
+                coordinates: [
+                  [4.859057, 45.760515],
+                  [4.8588, 45.7604],
+                  [4.8585, 45.7602],
+                ] as [number, number][],
+              },
+            ]),
+          ),
+        ),
+      );
+
+      const result = await service.plan(dto(), userId);
+      const segments = result.itineraries.flatMap((itinerary) => itinerary.segments);
+      const walk = segments.find((segment) => segment.mode === TransportMode.WALK);
+
+      expect(walk?.geometrySource).toBe('routed');
+      expect(walk?.geometry?.coordinates.length).toBeGreaterThan(2);
+      // Le métro n'a pas de forme GTFS dans ce faux : il reste droit, et le dit.
+      expect(segments.find((segment) => segment.mode === TransportMode.METRO)?.geometrySource).toBe(
+        'straight',
+      );
     });
   });
 });

@@ -8,10 +8,12 @@ import {
 
 import { CarbonService } from '../carbon/carbon.service';
 import { SearchHistoryService } from '../search-history/search-history.service';
+import { StreetRoutingService } from '../transport/street-routing.service';
 import { DEFAULT_PREFERENCES, UsersService } from '../users/users.service';
 import { ItineraryDto, PlanRoutesResponseDto } from './dto/itinerary.dto';
 import { PlaceDto, PlanRouteDto } from './dto/plan-route.dto';
 import { comparatorFor, mergeIntoItineraries, type MergeEndpoint } from './merge/itinerary-merger';
+import { applyStreetGeometry, collectStreetPathQueries } from './merge/street-geometry';
 import { SourceCollectorService } from './sources/source-collector.service';
 
 /**
@@ -51,6 +53,7 @@ export class RoutesService {
     private readonly collector: SourceCollectorService,
     private readonly carbon: CarbonService,
     private readonly searchHistory: SearchHistoryService,
+    private readonly streetRouting: StreetRoutingService,
   ) {}
 
   /**
@@ -160,13 +163,23 @@ export class RoutesService {
       ...(selectedModes ? { selectedModes } : {}),
     });
 
+    // UF-702 : les segments marche et vélo sortent de la fusion en ligne
+    // droite — elle les synthétise, elle ne les route pas. On demande ici leur
+    // cheminement réel au moteur, une fois la liste arrêtée : au plus cinq
+    // itinéraires, dont les marches se répètent et se dédupliquent (C5).
+    const traced = await this.traceStreetSegments(
+      itineraries,
+      preferences.reducedMobility,
+      collected.transit.status === 'ok',
+    );
+
     // Étapes 16-17 du flux (UF-502) : la valorisation carbone de la liste
     // fusionnée. Mesurée, parce que le ticket exige que le calcul « ne rallonge
     // pas notablement la réponse » — une exigence qu'on ne tient pas en
     // l'affirmant. La durée est journalisée à côté de celle de la collecte,
     // pour que les deux se comparent au même endroit (C10).
     const carbonStartedAt = performance.now();
-    const priced = this.priceItineraries(itineraries, sortedBy);
+    const priced = this.priceItineraries(traced, sortedBy);
     const carbonElapsedMs = performance.now() - carbonStartedAt;
 
     this.logger.log(
@@ -182,6 +195,58 @@ export class RoutesService {
       appliedConstraints,
       searchHistoryId: await recording,
     };
+  }
+
+  /**
+   * Remplace les droites des segments marche et vélo par leur cheminement réel
+   * (UF-702), quand le moteur de routage est en mesure de le fournir.
+   *
+   * ## Pourquoi c'est conditionné à l'état de la source TC
+   *
+   * Le routeur de voirie et le connecteur GTFS interrogent **le même**
+   * OpenTripPlanner. Si la collecte vient d'établir qu'il ne répond pas, lui
+   * redemander cinq cheminements ne rendrait rien et coûterait le budget entier
+   * à chaque recherche — exactement la latence que C10 interdit d'ajouter, et
+   * l'état de la production tant qu'OTP n'y est pas déployé (BUG-002). On
+   * s'abstient donc, et tous les segments restent marqués `straight` : le
+   * client l'annonce, la carte reste juste sur ce qu'elle montre.
+   *
+   * ## Ce que coûte l'étape quand elle a lieu
+   *
+   * Un aller-retour, en parallèle et sous budget (voir `StreetRoutingService`).
+   * Elle ne peut pas échouer : le service ne lève jamais, et un cheminement
+   * manquant laisse simplement sa droite au segment.
+   *
+   * @param itineraries Itinéraires issus de la fusion
+   * @param wheelchair Exigence PMR du profil — elle change le cheminement
+   *   piéton demandé (C12)
+   * @param engineReachable `false` quand la collecte a conclu qu'OTP ne répond pas
+   * @returns Les mêmes itinéraires, tracés au réseau réel là où c'était possible
+   */
+  private async traceStreetSegments(
+    itineraries: readonly ItineraryDto[],
+    wheelchair: boolean,
+    engineReachable: boolean,
+  ): Promise<ItineraryDto[]> {
+    if (!engineReachable) {
+      this.logger.debug(
+        'Moteur de routage indisponible : les segments marche et vélo gardent leur tracé à vol ' +
+          "d'oiseau (UF-702).",
+      );
+      return [...itineraries];
+    }
+
+    const queries = collectStreetPathQueries(itineraries, wheelchair);
+    if (queries.length === 0) return [...itineraries];
+
+    const startedAt = performance.now();
+    const paths = await this.streetRouting.routePaths(queries);
+    this.logger.log(
+      `Tracés de voirie : ${paths.size} cheminement(s) pour ${queries.length} segment(s) ` +
+        `en ${(performance.now() - startedAt).toFixed(1)} ms.`,
+    );
+
+    return applyStreetGeometry(itineraries, paths, wheelchair);
   }
 
   /**
