@@ -52,10 +52,17 @@ const TRIP: Itinerary = {
       [4.85, LAT],
       [4.852, LAT],
     ]),
-    segment(TransportMode.BUS, 6, [
-      [4.852, LAT],
-      [4.856, LAT],
-    ]),
+    // Le bus porte toute l'empreinte du trajet : c'est ce qui rend lisible le
+    // compteur d'UF-701 — il ne bouge pas à vélo, il monte d'un coup en bus.
+    segment(
+      TransportMode.BUS,
+      6,
+      [
+        [4.852, LAT],
+        [4.856, LAT],
+      ],
+      { carbonGrams: 240 },
+    ),
   ],
 };
 
@@ -64,7 +71,7 @@ function run(...events: NavigationEvent[]): NavigationState {
   return events.reduce(navigationReducer, INITIAL_NAVIGATION_STATE);
 }
 
-const START: NavigationEvent = { type: 'start', itinerary: TRIP };
+const START: NavigationEvent = { type: 'start', itinerary: TRIP, source: 'gps' };
 
 describe('navigationReducer — cycle de vie', () => {
   it('part de idle et n’en sort que sur « Démarrer »', () => {
@@ -143,12 +150,85 @@ describe('navigationReducer — pause et reprise', () => {
   });
 
   it('ne relâche le capteur qu’en pause, à l’arrêt et à l’arrivée (C5)', () => {
-    expect(needsPositionWatch('guiding')).toBe(true);
+    expect(needsPositionWatch('guiding', 'gps')).toBe(true);
     // On attend précisément que le capteur reparle : l'abonnement reste ouvert.
-    expect(needsPositionWatch('signal-lost')).toBe(true);
-    expect(needsPositionWatch('paused')).toBe(false);
-    expect(needsPositionWatch('idle')).toBe(false);
-    expect(needsPositionWatch('arrived')).toBe(false);
+    expect(needsPositionWatch('signal-lost', 'gps')).toBe(true);
+    expect(needsPositionWatch('paused', 'gps')).toBe(false);
+    expect(needsPositionWatch('idle', 'gps')).toBe(false);
+    expect(needsPositionWatch('arrived', 'gps')).toBe(false);
+  });
+
+  it('n’ouvre jamais le capteur en mode simulation (UF-701 — C5/C8)', () => {
+    // C'est ce qui rend la géolocalisation réelle facultative : une
+    // démonstration ne demande aucune autorisation et n'allume aucun GPS.
+    expect(needsPositionWatch('guiding', 'simulation')).toBe(false);
+    expect(needsPositionWatch('signal-lost', 'simulation')).toBe(false);
+  });
+});
+
+describe('navigationReducer — mode simulation (UF-701)', () => {
+  const SIMULATED: NavigationEvent = { type: 'start', itinerary: TRIP, source: 'simulation' };
+
+  it('retient la provenance de la session', () => {
+    expect(navigationReducer(INITIAL_NAVIGATION_STATE, SIMULATED).source).toBe('simulation');
+    expect(navigationReducer(INITIAL_NAVIGATION_STATE, START).source).toBe('gps');
+  });
+
+  it('traite une position simulée exactement comme une mesure du capteur', () => {
+    // Le cœur du parti pris : aucun chemin de code à part. Une démonstration
+    // qui n'emprunterait pas la même machine ne prouverait rien du parcours réel.
+    const simulated = run(SIMULATED, { type: 'position', position: at(4.852) });
+    const real = run(START, { type: 'position', position: at(4.852) });
+
+    expect(simulated.progress).toEqual(real.progress);
+    expect(simulated.phase).toBe(real.phase);
+  });
+
+  it('atteint l’arrivée sur le dernier point de la trace', () => {
+    // La propriété dont dépend tout le reste : sans arrivée, le trajet
+    // n'entre pas dans le suivi carbone (UF-807).
+    const state = run(SIMULATED, { type: 'position', position: at(4.856) });
+
+    expect(state.phase).toBe('arrived');
+  });
+
+  it('annonce le mode simulation aux technologies d’assistance (C7)', () => {
+    // Le bandeau visuel ne suffit pas : un lecteur d'écran ne le voit pas, et
+    // personne ne doit prendre une démonstration pour un déplacement réel.
+    const state = run(SIMULATED, { type: 'position', position: at(4.851) });
+
+    expect(guidanceAnnouncement(state)).toMatch(/^Mode simulation\./);
+    expect(guidanceAnnouncement(run(START, { type: 'position', position: at(4.851) }))).not.toMatch(
+      /Mode simulation/,
+    );
+  });
+});
+
+describe('navigationReducer — compteur carbone parcouru (UF-701)', () => {
+  it('part de zéro et monte avec la progression', () => {
+    const start = navigationReducer(INITIAL_NAVIGATION_STATE, START);
+    expect(start.travelledCarbonGrams).toBe(0);
+
+    const midway = run(START, { type: 'position', position: at(4.854) });
+    // À mi-chemin du bus (segment à 240 g), le vélo (0 g) étant fait.
+    expect(midway.travelledCarbonGrams).toBeGreaterThan(0);
+  });
+
+  it('ne redescend jamais, même si la progression recule', () => {
+    // Un voyageur qui rate son arrêt voit sa progression reculer — à juste
+    // titre — mais du CO₂ déjà émis ne se dés-émet pas.
+    const forward = run(START, { type: 'position', position: at(4.855) });
+    const backward = navigationReducer(forward, { type: 'position', position: at(4.8525) });
+
+    expect(backward.progress!.segmentIndex).toBe(1);
+    expect(backward.travelledCarbonGrams).toBe(forward.travelledCarbonGrams);
+  });
+
+  it('repart de zéro à chaque nouvelle session', () => {
+    // Sans cela, une démonstration rejouée cumulerait les grammes de la précédente.
+    const done = run(START, { type: 'position', position: at(4.855) });
+
+    expect(navigationReducer(done, START).travelledCarbonGrams).toBe(0);
   });
 });
 
@@ -239,7 +319,7 @@ describe('libellés du panneau de guidage', () => {
       ],
     };
     const state = run(
-      { type: 'start', itinerary: withSchedule },
+      { type: 'start', itinerary: withSchedule, source: 'gps' },
       { type: 'position', position: at(4.851) },
     );
 
@@ -256,7 +336,7 @@ describe('libellés du panneau de guidage', () => {
       ],
     };
     const state = run(
-      { type: 'start', itinerary: withSchedule },
+      { type: 'start', itinerary: withSchedule, source: 'gps' },
       { type: 'position', position: at(4.851) },
     );
 

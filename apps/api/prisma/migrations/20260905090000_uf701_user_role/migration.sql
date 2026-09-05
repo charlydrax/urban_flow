@@ -1,0 +1,21 @@
+-- UF-701 — rôle de compte, pour réserver l'outillage interne.
+--
+-- Le mode simulation de trajet (« Simuler le déplacement ») rejoue un
+-- déplacement sur une position fictive. C'est ce qui rend le produit
+-- démontrable sans marcher réellement de la Part-Dieu à Bellecour — et c'est
+-- exactement ce qu'un usager ne doit pas pouvoir faire : se fabriquer un
+-- déplacement, c'est se fabriquer un bilan carbone, et un bilan qu'on peut se
+-- fabriquer ne vaut plus rien (même raison qu'UF-505 refuse les grammes
+-- envoyés par le client).
+--
+-- Cette colonne porte la frontière d'autorisation, et elle est **la seule
+-- source de vérité** en la matière : le JWT en transporte une copie pour que
+-- l'interface sache quoi peindre, mais le `RolesGuard` relit toujours ici
+-- avant d'ouvrir `POST /api/simulation/trip`. Un jeton vit quinze minutes ;
+-- un retrait de droits doit prendre effet tout de suite (C4 / OWASP A01).
+--
+-- `NOT NULL DEFAULT 'user'` : tous les comptes existants deviennent des
+-- usagers, ce qu'ils sont. Une colonne nullable aurait laissé un troisième
+-- état — « rôle inconnu » — qu'aucun code ne sait interpréter, et un défaut
+-- 'admin' aurait promu la base entière d'une migration.
+ALTER TABLE "users" ADD COLUMN "role" TEXT NOT NULL DEFAULT 'user';

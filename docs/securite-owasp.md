@@ -21,18 +21,18 @@ Document frère côté données personnelles : [`docs/rgpd.md`](./rgpd.md).
 
 ## 1. Checklist OWASP Top 10 (2021)
 
-| #       | Risque                           | Statut     | Ce qui le couvre                                                                                                                                | Reste à faire                                            |
-| ------- | -------------------------------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------- |
-| **A01** | Broken Access Control            | ✅ Couvert | Guard JWT **global** (privé par défaut, `@Public()` en opt-out) ; identité prise du token seul ; chaque requête de données filtre sur `user_id` | —                                                        |
-| **A02** | Cryptographic Failures           | ✅ Couvert | argon2id pour les mots de passe ; JWT signé HS256, secret ≥ 32 car. validé au boot ; cookie `httpOnly` + `secure` en prod ; HSTS 6 mois         | Rotation du secret JWT à formaliser au déploiement       |
-| **A03** | Injection                        | ✅ Couvert | Prisma paramétré ; SQL brut uniquement en _tagged template_ (`$queryRaw`), **aucun** `queryRawUnsafe` ; CSP anti-XSS avec nonce côté front      | —                                                        |
-| **A04** | Insecure Design                  | ✅ Couvert | Plafonds de requêtes par IP (voir §3) ; dégradation gracieuse des sources ; pas de `userId` accepté dans un corps de requête                    | —                                                        |
-| **A05** | Security Misconfiguration        | ✅ Couvert | helmet avec CSP/HSTS/`frame-ancestors` explicites ; CORS sur une origine unique ; env validée au démarrage (fail-fast) ; `X-Powered-By` retiré  | —                                                        |
-| **A06** | Vulnerable & Outdated Components | ⚠️ Partiel | `npm audit` : **17 → 6** vulnérabilités, **0 critique** (voir §4)                                                                               | 4 résiduelles dev/build, levées par la montée en Next 16 |
-| **A07** | Identification & Auth Failures   | ✅ Couvert | 5 tentatives/min sur `login` et `register` ; 401 générique ; vérification argon2 factice à temps constant ; expiration de token appliquée       | MFA hors périmètre MVP                                   |
-| **A08** | Software & Data Integrity        | ✅ Couvert | Lockfile committé, CI sur `npm ci` ; aucun script distant chargé (`script-src 'self' 'nonce-…'`) ; pas de CDN                                   | Signature des artefacts au déploiement                   |
-| **A09** | Logging & Monitoring Failures    | ⚠️ Partiel | Filtre d'exceptions global : logs `méthode/chemin/statut`, jamais de corps ni de coordonnées (C11) ; `/api/health`                              | Pas d'alerte sur rafale de 429 (mono-instance, hors MVP) |
-| **A10** | Server-Side Request Forgery      | ✅ Couvert | Aucune URL fournie par l'utilisateur n'est appelée : OTP, GBFS et BAN sont des origines **fixes**, lues dans l'environnement                    | —                                                        |
+| #       | Risque                           | Statut     | Ce qui le couvre                                                                                                                                                                                                         | Reste à faire                                            |
+| ------- | -------------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------- |
+| **A01** | Broken Access Control            | ✅ Couvert | Guard JWT **global** (privé par défaut, `@Public()` en opt-out) ; identité prise du token seul ; chaque requête de données filtre sur `user_id` ; autorisation par rôle relue **en base**, jamais dans le jeton (UF-701) | —                                                        |
+| **A02** | Cryptographic Failures           | ✅ Couvert | argon2id pour les mots de passe ; JWT signé HS256, secret ≥ 32 car. validé au boot ; cookie `httpOnly` + `secure` en prod ; HSTS 6 mois                                                                                  | Rotation du secret JWT à formaliser au déploiement       |
+| **A03** | Injection                        | ✅ Couvert | Prisma paramétré ; SQL brut uniquement en _tagged template_ (`$queryRaw`), **aucun** `queryRawUnsafe` ; CSP anti-XSS avec nonce côté front                                                                               | —                                                        |
+| **A04** | Insecure Design                  | ✅ Couvert | Plafonds de requêtes par IP (voir §3) ; dégradation gracieuse des sources ; pas de `userId` accepté dans un corps de requête                                                                                             | —                                                        |
+| **A05** | Security Misconfiguration        | ✅ Couvert | helmet avec CSP/HSTS/`frame-ancestors` explicites ; CORS sur une origine unique ; env validée au démarrage (fail-fast) ; `X-Powered-By` retiré                                                                           | —                                                        |
+| **A06** | Vulnerable & Outdated Components | ⚠️ Partiel | `npm audit` : **17 → 6** vulnérabilités, **0 critique** (voir §4)                                                                                                                                                        | 4 résiduelles dev/build, levées par la montée en Next 16 |
+| **A07** | Identification & Auth Failures   | ✅ Couvert | 5 tentatives/min sur `login` et `register` ; 401 générique ; vérification argon2 factice à temps constant ; expiration de token appliquée                                                                                | MFA hors périmètre MVP                                   |
+| **A08** | Software & Data Integrity        | ✅ Couvert | Lockfile committé, CI sur `npm ci` ; aucun script distant chargé (`script-src 'self' 'nonce-…'`) ; pas de CDN                                                                                                            | Signature des artefacts au déploiement                   |
+| **A09** | Logging & Monitoring Failures    | ⚠️ Partiel | Filtre d'exceptions global : logs `méthode/chemin/statut`, jamais de corps ni de coordonnées (C11) ; `/api/health`                                                                                                       | Pas d'alerte sur rafale de 429 (mono-instance, hors MVP) |
+| **A10** | Server-Side Request Forgery      | ✅ Couvert | Aucune URL fournie par l'utilisateur n'est appelée : OTP, GBFS et BAN sont des origines **fixes**, lues dans l'environnement                                                                                             | —                                                        |
 
 ---
 
@@ -242,6 +242,44 @@ Le contrat de `POST /routes/plan` n'accepte **plus** de `userId` dans le corps d
 UF-402 (écart assumé au diagramme de séquence, documenté dans `CLAUDE.md` §4) : accepter
 un identifiant de compte depuis une requête est un défaut de conception même quand le
 serveur l'ignore.
+
+### Autorisation par rôle (UF-701)
+
+Le cloisonnement ci-dessus répond à « chacun ne voit que ses données ». UF-701
+ajoute la question voisine : « qui a le droit d'utiliser cette fonction ? ».
+
+| Étape            | Guard          | Question          | Refus |
+| ---------------- | -------------- | ----------------- | ----- |
+| Authentification | `JwtAuthGuard` | qui est-ce ?      | `401` |
+| Autorisation     | `RolesGuard`   | a-t-il le droit ? | `403` |
+
+Un seul endpoint est aujourd'hui réservé : `POST /api/simulation/trip`, l'outil
+de démonstration qui rejoue un trajet sur une position fictive. Il est réservé
+parce que simuler un déplacement, c'est le faire **compter** dans le suivi
+carbone (UF-807) : ouvrir cette porte à tout le monde reviendrait à laisser
+chacun se composer un bilan, exactement ce qu'UF-505 refuse en n'acceptant
+aucun gramme venu du navigateur.
+
+Trois points de conception, et ce sont ceux qui rendent la mesure défendable :
+
+1. **La décision se prend en base, pas dans le jeton.** Le JWT porte bien une
+   revendication `role`, mais elle ne sert qu'à l'interface (peindre ou non le
+   bouton « Simuler le déplacement »). Le guard relit le rôle à chaque appel :
+   un jeton vit quinze minutes, et un droit accordé sur une revendication de
+   quinze minutes est un droit qu'on ne peut pas révoquer. Le test
+   `apps/api/src/common/guards/roles.guard.spec.ts` fige le cas décisif — un
+   jeton qui revendique `admin` alors que la base dit `user` reçoit un `403`.
+2. **Le repli est toujours le moins-disant.** Jeton sans `role`, rôle inconnu,
+   compte supprimé entre-temps (droit à l'effacement — C8) : tout se traduit
+   par un refus, jamais par un privilège.
+3. **`403` et non `401`.** Le compte est authentifié ; le renvoyer vers l'écran
+   de connexion l'enverrait chercher une solution là où il n'y en a pas.
+
+Le rôle ne s'obtient pas par l'inscription : `RegisterDto` n'a pas de champ, et
+le `ValidationPipe` global (`forbidNonWhitelisted`) refuse en `400` une requête
+qui en enverrait un. Un compte `admin` se crée par le seed, à partir de
+`DEMO_ADMIN_EMAIL` / `DEMO_ADMIN_PASSWORD` — jamais d'identifiants en dur dans
+le dépôt, et le seed ne journalise que l'email et le rôle (C11).
 
 ---
 

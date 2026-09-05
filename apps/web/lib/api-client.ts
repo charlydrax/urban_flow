@@ -12,7 +12,9 @@ import type {
   SearchHistoryList,
   SelectItineraryPayload,
   SessionUser,
+  SimulateTripRequest,
   TransportSourceStatus,
+  TripSimulation,
   UpdateUserProfilePayload,
   UserProfile,
 } from '@urbanflow/shared';
@@ -276,6 +278,38 @@ export const apiClient = {
   ): Promise<SearchHistoryEntry> {
     return request(`/search-history/${searchHistoryId}/selection`, {
       method: 'PATCH',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  /**
+   * Demande la trace de simulation d'un trajet (UF-701) — **outil interne**.
+   *
+   * ## Ce que l'appel rend, et ce qu'il ne rend pas
+   *
+   * Une trentaine de positions fictives réparties sur le **temps** du trajet,
+   * que le guidage rejoue toutes les deux secondes comme s'il s'agissait de
+   * mesures GPS. Aucune empreinte : le compteur CO₂ se déduit de la
+   * progression, à partir des grammes que le Service Carbone a déjà publiés
+   * sur chaque segment (`lib/travelled-carbon.ts`).
+   *
+   * **Une seule requête pour toute la démonstration** (C5) : la trace arrive
+   * entière et le client l'anime lui-même. Le guidage réel n'émet, lui non
+   * plus, aucune requête entre le départ et l'arrivée.
+   *
+   * ## Un `403` n'est pas une panne
+   *
+   * L'endpoint est réservé au rôle `admin` (C4). Un compte usager reçoit un
+   * `403` — pas un `401` : sa session est parfaitement valide, il lui manque
+   * un droit. L'appelant doit donc le traiter comme un refus à afficher, pas
+   * comme une session à purger ; l'intercepteur de session, lui, ne réagit
+   * qu'aux `401` et ne s'en mêle pas.
+   *
+   * @param payload Segments de l'itinéraire à rejouer (durée + tracé)
+   */
+  simulateTrip(payload: SimulateTripRequest): Promise<TripSimulation> {
+    return request('/simulation/trip', {
+      method: 'POST',
       body: JSON.stringify(payload),
     });
   },

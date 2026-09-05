@@ -1,4 +1,4 @@
-import type { SessionUser } from '@urbanflow/shared';
+import { UserRole, type SessionUser } from '@urbanflow/shared';
 
 /**
  * Primitives de session côté front (UF-106) — sans dépendance à Next ni au DOM,
@@ -83,6 +83,22 @@ interface TokenClaims {
   email: string;
   /** Expiration, en **secondes** epoch (standard JWT — attention au ×1000). */
   exp?: number;
+  /**
+   * Rôle du compte (UF-701) — **affichage seul**.
+   *
+   * Il est lu ici pour que le premier rendu serveur sache s'il doit peindre le
+   * bouton « Simuler le déplacement » : sans lui, il faudrait attendre un
+   * aller-retour réseau, et le bouton clignoterait à chaque chargement de page.
+   *
+   * ⚠️ Ces revendications sont décodées **sans vérifier la signature** (voir
+   * `readTokenClaims`). Un rôle lu ici n'ouvre donc strictement rien : la
+   * décision d'accès est prise par l'API, qui relit le rôle en base à chaque
+   * appel réservé (`RolesGuard`) et refuse en `403`. Peindre un bouton de plus
+   * ne donne aucun droit de plus.
+   *
+   * Facultatif : un jeton émis avant UF-701 n'en porte pas.
+   */
+  role?: string;
 }
 
 /** Indique si un chemin est accessible **sans** session (aucune redirection vers /login). */
@@ -135,7 +151,12 @@ export function readTokenClaims(token: string | undefined | null): TokenClaims |
   try {
     const claims = JSON.parse(json) as Partial<TokenClaims>;
     if (typeof claims.sub !== 'string' || typeof claims.email !== 'string') return null;
-    return { sub: claims.sub, email: claims.email, exp: claims.exp };
+    return {
+      sub: claims.sub,
+      email: claims.email,
+      exp: claims.exp,
+      role: typeof claims.role === 'string' ? claims.role : undefined,
+    };
   } catch {
     return null;
   }
@@ -155,7 +176,20 @@ export function readSession(
   // `exp` est en secondes (RFC 7519) ; un token sans exp est traité comme expiré,
   // l'API en émet toujours une (JWT_EXPIRES_IN).
   if (typeof claims.exp !== 'number' || claims.exp * 1000 <= now) return null;
-  return { id: claims.sub, email: claims.email };
+  return { id: claims.sub, email: claims.email, role: toUserRole(claims.role) };
+}
+
+/**
+ * Traduit la revendication `role` en valeur du domaine (UF-701).
+ *
+ * Toute valeur inattendue — jeton d'avant UF-701, rôle ajouté plus tard, chaîne
+ * fabriquée à la main dans le cookie — retombe sur {@link UserRole.USER}. Le
+ * repli est toujours le **moins-disant** : le décodage n'est pas une
+ * vérification (la signature n'est pas contrôlée ici), et une valeur inconnue
+ * ne doit jamais se traduire par un privilège de plus à l'écran.
+ */
+function toUserRole(raw: string | undefined): UserRole {
+  return raw === UserRole.ADMIN ? UserRole.ADMIN : UserRole.USER;
 }
 
 /**

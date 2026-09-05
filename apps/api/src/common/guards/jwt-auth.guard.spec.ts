@@ -11,6 +11,7 @@ import { CurrentUser } from '../decorators/current-user.decorator';
 import { OptionalAuth } from '../decorators/optional-auth.decorator';
 import { OptionalUser } from '../decorators/optional-user.decorator';
 import { Public } from '../decorators/public.decorator';
+import { UserRole } from '../enums/user-role.enum';
 import { AuthenticatedUser, JwtStrategy } from '../strategies/jwt.strategy';
 import { JwtAuthGuard } from './jwt-auth.guard';
 
@@ -148,7 +149,13 @@ describe('JwtAuthGuard (global) — UF-104', () => {
 
     expect(res.status).toBe(200);
     // L'identité provient du token vérifié (sub → userId), pas du corps de requête.
-    await expect(res.json()).resolves.toEqual({ userId: USER_ID, email: USER_EMAIL });
+    // `role` absent du jeton (émis sans revendication) : la stratégie retombe
+    // sur le rôle par défaut, jamais sur un privilège (UF-701).
+    await expect(res.json()).resolves.toEqual({
+      userId: USER_ID,
+      email: USER_EMAIL,
+      role: UserRole.USER,
+    });
   });
 
   it('lets a @Public() route through without any token', async () => {
@@ -176,7 +183,7 @@ describe('JwtAuthGuard (global) — UF-104', () => {
       // C'est LA différence avec `@Public()` : le parcours connecté survit à
       // l'ouverture de la route aux invités.
       await expect(res.json()).resolves.toEqual({
-        user: { userId: USER_ID, email: USER_EMAIL },
+        user: { userId: USER_ID, email: USER_EMAIL, role: UserRole.USER },
       });
     });
 
@@ -211,7 +218,7 @@ describe('JwtAuthGuard (global) — UF-104', () => {
 
       expect(res.status).toBe(200);
       await expect(res.json()).resolves.toEqual({
-        user: { userId: USER_ID, email: USER_EMAIL },
+        user: { userId: USER_ID, email: USER_EMAIL, role: UserRole.USER },
       });
     });
 

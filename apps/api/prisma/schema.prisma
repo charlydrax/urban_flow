@@ -27,6 +27,23 @@ model User {
   email        String    @unique
   /// Hash argon2 du mot de passe (C4) — jamais le mot de passe en clair.
   passwordHash String    @map("password_hash")
+  /// Rôle du compte (UF-701) : valeurs de l'enum `UserRole` côté API — `user`
+  /// (défaut) ou `admin`.
+  ///
+  /// **Colonne d'autorisation, et seule source de vérité en la matière.** Le
+  /// JWT en porte une copie pour que l'interface sache quoi peindre, mais le
+  /// `RolesGuard` relit toujours ici avant d'ouvrir un endpoint réservé : un
+  /// jeton vit quinze minutes, un retrait de droits doit prendre effet tout de
+  /// suite (C4 / OWASP A01).
+  ///
+  /// `String` et non un `enum` Postgres : les deux autres vocabulaires du
+  /// schéma (`preferredModes`, `priority`) sont déjà stockés ainsi, et un enum
+  /// en base impose une migration pour chaque valeur ajoutée alors que la
+  /// validation se fait déjà côté API. Un rôle inconnu lu en base n'ouvre rien
+  /// — le guard compare à une liste, il ne fait pas confiance à la chaîne.
+  ///
+  /// RGPD (C8) : donnée de compte, pas de donnée personnelle nouvelle.
+  role         String    @default("user")
   /// RGPD (C8) : horodatage du consentement explicite (géolocalisation, CGU).
   consentAt    DateTime? @map("consent_at")
   createdAt    DateTime  @default(now()) @map("created_at")

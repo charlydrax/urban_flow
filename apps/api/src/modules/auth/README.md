@@ -61,6 +61,37 @@ définie une seule fois, dans `src/common/access-token.ts`, et sert à la fois �
 la stratégie et au guard — deux lectures divergentes du même en-tête finiraient
 par ne plus s'accorder sur qui a le droit d'entrer.
 
+## Authentifier n'est pas autoriser (UF-701)
+
+Le guard JWT répond à « **qui** est-ce ? ». Depuis UF-701, une seconde question
+peut suivre — « **a-t-il le droit ?** » — et c'est le `RolesGuard`
+(`src/common/guards/roles.guard.ts`) qui y répond, déclaré juste après dans
+`AppModule`. L'ordre produit les deux codes attendus : `401` quand
+l'authentification manque, `403` quand c'est l'autorisation.
+
+Le jeton porte désormais une revendication `role`, et il faut être précis sur
+ce qu'elle fait :
+
+| Qui la lit             | Ce qu'il en fait                                     |
+| ---------------------- | ---------------------------------------------------- |
+| La PWA (`readSession`) | décide s'il faut **peindre** le bouton de simulation |
+| Le `RolesGuard`        | **rien** — il relit le rôle en base à chaque appel   |
+
+C'est délibéré. Un jeton vit quinze minutes : accorder un accès sur une
+revendication vieille de quinze minutes serait accorder un accès qu'on ne peut
+pas révoquer (OWASP A01). Le rôle en base est la seule source de vérité en
+matière d'autorisation ; celui du jeton n'est qu'un raccourci d'affichage, qui
+ne peut au pire que faire apparaître un bouton dont l'action sera refusée.
+
+Une seule règle à retenir en relisant ce code : **le repli est toujours le
+moins-disant**. Jeton sans `role` (émis avant UF-701), valeur inconnue, valeur
+fabriquée à la main dans le cookie — tout retombe sur `user`.
+
+L'inscription, elle, n'accepte aucun rôle : `RegisterDto` n'a pas de champ, et
+le `ValidationPipe` global (`forbidNonWhitelisted`) refuse en `400` une requête
+qui en enverrait un. Un compte `admin` se crée par le seed
+(`DEMO_ADMIN_EMAIL` / `DEMO_ADMIN_PASSWORD`) ou en base, jamais par le formulaire.
+
 ## Dépendances
 
 - `@nestjs/jwt` + `passport-jwt` (stratégie dans `src/common/strategies/jwt.strategy.ts`)
@@ -69,5 +100,6 @@ par ne plus s'accorder sur qui a le droit d'entrer.
 
 ## Contraintes couvertes
 
-C4 (validation DTO, politique de mot de passe, JWT signé/expirant), C8 (minimisation :
-seul l'email est collecté), C11 (cookie httpOnly, SameSite).
+C4 (validation DTO, politique de mot de passe, JWT signé/expirant, autorisation
+décidée en base et non sur une revendication — UF-701), C8 (minimisation :
+seuls l'email et le rôle sont exposés), C11 (cookie httpOnly, SameSite).

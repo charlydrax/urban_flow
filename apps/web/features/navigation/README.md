@@ -6,12 +6,13 @@ jusqu'ici, la sélection d'une option s'arrêtait à la mise en avant du tracé.
 
 ## Rôle
 
-| Fichier                 | Rôle                                                      |
-| ----------------------- | --------------------------------------------------------- |
-| `start-navigation.tsx`  | Bouton « Démarrer » sous la liste de résultats            |
-| `use-navigation.ts`     | Ouvre/ferme l'abonnement GPS et le branche sur la machine |
-| `navigation-screen.tsx` | Carte plein cadre + caméra qui suit la position           |
-| `navigation-sheet.tsx`  | Panneau de guidage d'après la maquette « 6. NAVIGATION »  |
+| Fichier                   | Rôle                                                            |
+| ------------------------- | --------------------------------------------------------------- |
+| `start-navigation.tsx`    | Bouton « Démarrer » sous la liste de résultats                  |
+| `simulate-navigation.tsx` | Bouton « Simuler le déplacement » — exploitants (UF-701)        |
+| `use-navigation.ts`       | Ouvre/ferme la source de positions et la branche sur la machine |
+| `navigation-screen.tsx`   | Carte plein cadre + caméra qui suit la position                 |
+| `navigation-sheet.tsx`    | Panneau de guidage d'après la maquette « 6. NAVIGATION »        |
 
 La logique, elle, ne vit pas ici mais dans deux modules **purs** de `lib/`,
 testables sans navigateur :
@@ -37,6 +38,9 @@ sans DOM, et la recette du ticket se vérifie donc sans GPS.
   ajouté un, `POST /api/search-history/:id/completion`, pour consigner l'arrivée.
 - `features/planner/use-route-plan.ts` — `reportArrival`, branché sur `onArrival`
   (UF-807) : il tient le `searchHistoryId` de la recherche en cours.
+- `POST /api/simulation/trip` (UF-701) — la **seule** requête que le mode
+  simulation ajoute, au tout début. Réservée au rôle `admin` côté serveur ; voir
+  `apps/api/src/modules/simulation/README.md`.
 
 ## L'arrivée, et ce qu'elle déclenche (UF-807)
 
@@ -108,3 +112,59 @@ parcours, et seulement à la fin : l'arrivée (UF-807). Le module ne l'émet mê
 pas lui-même — `useNavigation` appelle `onArrival`, et c'est le planificateur qui
 consigne, parce que lui seul connaît la ligne d'historique de la recherche en
 cours. Le guidage constate, le planificateur enregistre.
+
+## Le mode simulation (UF-701)
+
+Le guidage suit la position réelle du téléphone. Démontrer le produit supposait
+donc de marcher réellement de la Part-Dieu à Bellecour : depuis un poste fixe,
+le trajet ne démarrait jamais, et rien de ce qui dépend de l'arrivée — le suivi
+carbone d'UF-807 — n'était observable.
+
+« Simuler le déplacement » rejoue l'itinéraire retenu sur une position fictive :
+une trentaine de pas, un toutes les deux secondes, du départ à la destination.
+
+### Deux sources, une seule machine
+
+| Source       | Ouverte par | D'où viennent les positions                    |
+| ------------ | ----------- | ---------------------------------------------- |
+| `gps`        | `start`     | `watchUserPosition` — le capteur de l'appareil |
+| `simulation` | `simulate`  | une trace servie par `POST /simulation/trip`   |
+
+Le réducteur ne fait **aucune différence** entre les deux : mêmes transitions,
+même calcul de progression, même détection d'arrivée, même remontée `onArrival`.
+C'est délibéré — une démonstration qui emprunterait un chemin de code à part ne
+prouverait rien du parcours réel. Si l'arrivée se déclenche en simulation, elle
+se déclenchera sur le terrain.
+
+La distinction ne sert qu'en **dehors** du calcul, et pour deux choses :
+
+1. `needsPositionWatch` rend `false` en simulation — le GPS ne s'ouvre jamais,
+   et aucun consentement n'est demandé (C5/C8). C'est ce qui rend la
+   géolocalisation réelle _facultative_ : elle reste l'option terrain, elle
+   n'est plus le péage d'entrée d'une démonstration ;
+2. l'écran **dit ce qu'il montre**. Il est volontairement identique à un guidage
+   réel, donc un bandeau ambre le coiffe, et `guidanceAnnouncement` préfixe
+   chaque phrase de « Mode simulation. » — un lecteur d'écran ne voit pas le
+   bandeau (C7).
+
+### Cacher le bouton n'est pas protéger la fonctionnalité
+
+`SimulateNavigation` n'est monté que pour un compte `admin`. C'est du
+**confort** : cela évite de proposer une action qui serait refusée. La sécurité
+vit ailleurs — sur l'endpoint, que le `RolesGuard` réserve en relisant le rôle
+en base à chaque appel (C4 / OWASP A01). Un usager qui forcerait l'affichage du
+bouton obtiendrait un `403`, que le hook affiche tel quel plutôt que de le
+contourner.
+
+### Le compteur carbone
+
+Le panneau affiche « 84 g CO₂ émis sur 240 g CO₂ ». Le second chiffre existe
+depuis la planification ; le premier est nouveau, et il répond à la question
+qu'on se pose _en route_. Il monte par segment (`lib/travelled-carbon.ts`), il
+**ne redescend jamais** — la progression peut reculer, du CO₂ émis ne se
+dés-émet pas — et il vaut pour les deux sources : ce n'est pas un artifice de
+démonstration.
+
+Les grammes ne sont pas recalculés côté client : ils sont lus sur
+`RouteSegment.carbonGrams`, publié par le Service Carbone à l'étape 6 du flux.
+Un second barème dans le navigateur donnerait deux chiffres pour un même trajet.
