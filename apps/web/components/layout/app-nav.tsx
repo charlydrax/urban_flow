@@ -6,6 +6,7 @@ import { useState } from 'react';
 
 import { useSession } from '../../features/auth/session-provider';
 import { initialsFromEmail } from '../../lib/initials';
+import { BrandLockup } from '../brand/brand-logo';
 import { NavIcon } from './nav-icons';
 import { isNavItemActive, visibleNavItems } from './nav-items';
 
@@ -96,20 +97,25 @@ export function AppNav() {
         Bloc marque du rail. Masqué sur mobile, où la même marque est portée par
         la barre fine du haut (`MobileBrandBar`) : la répéter dans la barre
         d'onglets coûterait une colonne pour un élément qui n'est pas une
-        destination. Le monogramme est décoratif — le mot « UrbanFlow » qui suit
-        est déjà le nom accessible du lien (C7, WCAG 1.1.1).
+        destination.
+
+        BUG-004 : le monogramme « U » et le mot « UrbanFlow » composés en CSS ont
+        laissé place au logo officiel. Le rail est le seul endroit de la coque
+        assez large pour le bloc complet (150 px sur une piste de 230), donc le
+        seul où le mot-symbole se lit ; l'image porte alors seule le nom
+        accessible du lien (C7, WCAG 1.1.1) et le texte devient superflu.
+
+        La plaque blanche n'est pas une fantaisie : le fichier fourni a un fond
+        blanc opaque et le mot « Urban » y est écrit en blanc filet gris. Posé
+        à même le rail sombre, il apparaîtrait comme un rectangle blanc mal
+        détouré. Le poser sur une plaque arrondie assume ce fond et lui donne
+        l'air d'une carte.
       */}
-      <Link
-        href="/"
-        className="mb-6 hidden items-center gap-2 rounded-md px-1.5 font-display text-[17px] font-extrabold text-white lg:flex"
-      >
-        <span
-          aria-hidden="true"
-          className="flex size-[26px] items-center justify-center rounded-[7px] bg-primary text-[13px] text-white"
-        >
-          U
-        </span>
-        UrbanFlow
+      <Link href="/" className="mb-6 hidden rounded-lg px-1.5 lg:block">
+        <BrandLockup
+          alt="UrbanFlow Mobility — accueil"
+          className="w-[150px] rounded-lg bg-white p-2"
+        />
       </Link>
 
       <nav aria-label="Navigation principale">

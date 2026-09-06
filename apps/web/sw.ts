@@ -19,9 +19,14 @@
 declare const self: ServiceWorkerGlobalScope & typeof globalThis;
 export {};
 
-// v2 : le shell précache désormais le manifest et les icônes (UF-601), le
-// contenu de la v1 n'est plus représentatif de ce que la PWA attend hors-ligne.
-const SHELL_CACHE = 'urbanflow-shell-v2';
+// v3 (BUG-004) : le logo a changé. Les icônes sont servies **cache-first** sous
+// un nom de fichier inchangé — sans changer de nom de cache, un visiteur déjà
+// venu continuerait de voir l'ancienne marque tant que son navigateur n'évince
+// pas l'entrée, c'est-à-dire potentiellement jamais. Renommer le cache force
+// `activate` à supprimer l'ancien et à reprécacher les nouveaux fichiers.
+// v2 : le shell précache le manifest et les icônes (UF-601), le contenu de la
+// v1 n'était plus représentatif de ce que la PWA attend hors-ligne.
+const SHELL_CACHE = 'urbanflow-shell-v3';
 // v2 : purge les caches d'assets constitués quand le worker tournait aussi en
 // développement, où les chunks Next ne sont pas hashés (cf. ServiceWorkerRegister).
 const ASSETS_CACHE = 'urbanflow-assets-v2';
@@ -39,7 +44,18 @@ const LAST_ROUTE_KEY = '/__offline/last-route';
  * 404 ferait échouer l'installation entière du worker et laisserait la PWA
  * sans aucun repli hors-ligne. Un asset manquant doit dégrader, pas casser.
  */
-const PRECACHED_SHELL = ['/', '/manifest.json', '/icons/icon-192.png', '/icons/icon-512.png'];
+const PRECACHED_SHELL = [
+  '/',
+  '/manifest.json',
+  '/favicon.ico',
+  '/icons/icon-192.png',
+  '/icons/icon-512.png',
+  // Le bloc marque et l'emblème sont rendus par la coque, donc par **toutes**
+  // les pages : les précacher évite deux requêtes réseau au premier écran et
+  // laisse la marque s'afficher hors-ligne (BUG-004, C1/C10).
+  '/brand/logo-urbanflow.png',
+  '/brand/logo-urbanflow-mark.png',
+];
 
 /**
  * Plafond du cache de fond de carte (éco-conception C5, et quota navigateur).

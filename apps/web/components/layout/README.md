@@ -14,6 +14,10 @@ basse sur mobile**, **rail latéral sombre sur desktop** (UF-803, ticket #92).
 | `nav-items.test.ts`    | Recette du modèle — suite `unit`, environnement node                            |
 | `layout.a11y.test.tsx` | Audit axe-core de la coque — suite `a11y`, jsdom                                |
 
+Les deux surfaces de marque tirent leur image de `components/brand/brand-logo.tsx`
+(BUG-004) : `BrandLockup` (emblème + mot-symbole) dans le rail desktop, où il y a
+la place de le lire, `BrandMark` (emblème seul) dans la barre mobile de 40 px.
+
 `lib/initials.ts` complète l'ensemble : le helper d'initiales du bloc de compte,
 sorti de `features/profile/` pour ne pas tirer les énumérations de
 `@urbanflow/shared` dans le lot commun de toutes les pages (voir

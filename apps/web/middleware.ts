@@ -148,12 +148,16 @@ export const config = {
    * - `manifest.json`, `sw.js`, `icons/*` : la PWA doit pouvoir s'installer et
    *   enregistrer son service worker sans session (C1) — sinon le navigateur
    *   récupère une redirection HTML à la place du manifeste ;
-   * - `favicon.ico`.
+   * - `favicon.ico` ;
+   * - `brand/*` (BUG-004) : le logo est rendu par la coque, donc réclamé sur
+   *   **toutes** les pages, y compris l'écran de connexion. Le faire passer par
+   *   le middleware ferait vérifier un JWT pour servir un PNG — un coût par
+   *   requête pour rien (C5), et une image qui dépendrait de l'état de session.
    *
    * Ces réponses-là ne portent donc pas la CSP, et n'en ont pas besoin : une
    * CSP ne s'applique qu'au document qui l'a reçue. Les en-têtes de sécurité
    * qui, eux, comptent partout (nosniff, X-Frame-Options…) sont posés par
    * `next.config.ts` sur toutes les routes (UF-604).
    */
-  matcher: ['/((?!_next/static|_next/image|favicon.ico|icons/|manifest.json|sw.js).*)'],
+  matcher: ['/((?!_next/static|_next/image|favicon.ico|icons/|brand/|manifest.json|sw.js).*)'],
 };

@@ -165,6 +165,11 @@ ressource, dernier itinéraire rejoué sans réseau, fond de carte déjà consul
 indicateur « hors-ligne » — est documenté dans
 [`docs/pwa-offline.md`](docs/pwa-offline.md).
 
+Les **fichiers de marque** (BUG-004) — logo, favicon et icônes PWA : quelle
+déclinaison est employée où, comment chacune est découpée du logo d'origine, et
+comment les regénérer — sont documentés dans
+[`docs/brand-assets.md`](docs/brand-assets.md).
+
 L'**accessibilité WCAG 2.1 AA** (UF-602) — méthode d'audit à trois étages
 (`jsx-a11y` strict, `axe-core` sur composants rendus, contrastes assertés sur les
 tokens), résultats, effet réel de l'option PMR sur les itinéraires et écarts
