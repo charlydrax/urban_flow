@@ -177,6 +177,58 @@ describe('StreetRoutingService', () => {
     expect(Date.now() - startedAt).toBeLessThan(1000);
   });
 
+  /**
+   * Recette BUG-003 : le service décide seul de renoncer, et de reprendre.
+   *
+   * Le Service Itinéraire ne conditionne plus l'appel à l'état de la source TC
+   * — un `plan` GTFS lent ne dit rien du réseau piéton. C'est donc ici que la
+   * latence est protégée quand le moteur est réellement arrêté.
+   */
+  describe('coupe-circuit du moteur (BUG-003)', () => {
+    beforeEach(() => {
+      jest.spyOn(service['logger'], 'warn').mockImplementation(() => undefined);
+    });
+
+    it('cesse d’interroger un moteur qui s’est tu sur toute une rafale (C10)', async () => {
+      query.mockRejectedValue(new OtpUnavailableError('network', 'OTP injoignable.'));
+
+      await service.routePaths([WALK_QUERY]);
+      // Une demande **différente** : le silence n'est pas mémorisé dans le
+      // cache des cheminements, c'est bien le circuit qui l'écarte.
+      await service.routePaths([{ ...WALK_QUERY, mode: TransportMode.BIKE }]);
+
+      expect(query).toHaveBeenCalledTimes(1);
+    });
+
+    it('rouvre le circuit une fois le délai écoulé, sans purge ni redémarrage', async () => {
+      query.mockRejectedValue(new OtpUnavailableError('network', 'OTP injoignable.'));
+      await service.routePaths([WALK_QUERY]);
+
+      // Le moteur est revenu, et la minute est passée.
+      query.mockResolvedValue(planWith(WALK_POINTS));
+      jest.spyOn(Date, 'now').mockReturnValue(Date.now() + 61_000);
+
+      const paths = await service.routePaths([WALK_QUERY]);
+
+      expect(paths.has(streetPathKey(WALK_QUERY))).toBe(true);
+      jest.spyOn(Date, 'now').mockRestore();
+    });
+
+    it('ne coupe rien quand une seule extrémité n’a pas de chemin', async () => {
+      // Un cheminement peut échouer parce qu'il n'existe pas. En conclure que
+      // le moteur est en panne priverait de tracé les segments routables des
+      // recherches suivantes — le défaut même que ce ticket corrige.
+      query
+        .mockRejectedValueOnce(new OtpUnavailableError('network', 'OTP injoignable.'))
+        .mockResolvedValue(planWith(WALK_POINTS));
+
+      await service.routePaths([WALK_QUERY, { ...WALK_QUERY, mode: TransportMode.BIKE }]);
+      await service.routePaths([{ ...WALK_QUERY, mode: TransportMode.SCOOTER }]);
+
+      expect(query).toHaveBeenCalledTimes(3);
+    });
+  });
+
   it("n'envoie ni date ni heure : un trottoir est le même à 8 h et à 22 h", async () => {
     await service.routePaths([WALK_QUERY]);
 

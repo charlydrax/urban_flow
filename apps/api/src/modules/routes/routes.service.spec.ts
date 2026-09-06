@@ -695,10 +695,12 @@ describe('RoutesService', () => {
       expect(queries.every((query) => query.mode === TransportMode.WALK)).toBe(true);
     });
 
-    it("n'interroge pas le routeur quand la source TC vient d'échouer (C10)", async () => {
-      // Le routeur de voirie et le connecteur GTFS parlent au **même** OTP :
-      // le relancer paierait le budget entier pour ne rien obtenir. C'est
-      // l'état de la production tant qu'OTP n'y est pas déployé (BUG-002).
+    it('trace quand même la voirie si la source TC a échoué (BUG-003)', async () => {
+      // Le contraire du comportement d'avant BUG-003. Un `plan` TC qui expire
+      // ne dit rien du réseau piéton : renoncer au tracé pour cette raison
+      // faisait varier l'affichage d'un même trajet au gré de la charge du
+      // moteur. C'est au `StreetRoutingService` de renoncer, s'il constate
+      // lui-même le silence.
       collectAllSources.mockResolvedValue(
         collected({
           transit: {
@@ -709,11 +711,15 @@ describe('RoutesService', () => {
           },
         } as Partial<CollectedSources>),
       );
-      jest.spyOn(service['logger'], 'debug').mockImplementation(() => undefined);
 
-      await service.plan(dto(), userId);
+      // Trajet court : reste la marche seule, entièrement synthétisée par la
+      // fusion — exactement le tracé que la production dessinait à travers les
+      // immeubles.
+      await service.plan(dto({ to: { label: 'Saxe-Gambetta', lat: 45.755, lng: 4.8555 } }), userId);
 
-      expect(routePaths).not.toHaveBeenCalled();
+      expect(routePaths).toHaveBeenCalledTimes(1);
+      const [queries] = routePaths.mock.calls[0] as [{ mode: TransportMode }[]];
+      expect(queries.every((query) => query.mode === TransportMode.WALK)).toBe(true);
     });
 
     it('publie le tracé routé et son marquage jusque dans la réponse (C6)', async () => {

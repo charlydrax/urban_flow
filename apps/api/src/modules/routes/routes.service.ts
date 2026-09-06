@@ -167,11 +167,7 @@ export class RoutesService {
     // droite — elle les synthétise, elle ne les route pas. On demande ici leur
     // cheminement réel au moteur, une fois la liste arrêtée : au plus cinq
     // itinéraires, dont les marches se répètent et se dédupliquent (C5).
-    const traced = await this.traceStreetSegments(
-      itineraries,
-      preferences.reducedMobility,
-      collected.transit.status === 'ok',
-    );
+    const traced = await this.traceStreetSegments(itineraries, preferences.reducedMobility);
 
     // Étapes 16-17 du flux (UF-502) : la valorisation carbone de la liste
     // fusionnée. Mesurée, parce que le ticket exige que le calcul « ne rallonge
@@ -201,17 +197,25 @@ export class RoutesService {
    * Remplace les droites des segments marche et vélo par leur cheminement réel
    * (UF-702), quand le moteur de routage est en mesure de le fournir.
    *
-   * ## Pourquoi c'est conditionné à l'état de la source TC
+   * ## Pourquoi l'état de la source TC n'entre plus en ligne de compte (BUG-003)
    *
-   * Le routeur de voirie et le connecteur GTFS interrogent **le même**
-   * OpenTripPlanner. Si la collecte vient d'établir qu'il ne répond pas, lui
-   * redemander cinq cheminements ne rendrait rien et coûterait le budget entier
-   * à chaque recherche — exactement la latence que C10 interdit d'ajouter, et
-   * l'état de la production tant qu'OTP n'y est pas déployé (BUG-002). On
-   * s'abstient donc, et tous les segments restent marqués `straight` : le
-   * client l'annonce, la carte reste juste sur ce qu'elle montre.
+   * L'étape était conditionnée à `collected.transit.status === 'ok'`, au motif
+   * que le routeur de voirie et le connecteur GTFS interrogent le **même**
+   * OpenTripPlanner : moteur muet, inutile de le relancer. Le raccourci
+   * confondait deux choses. Un `plan` en transports en commun est un calcul
+   * lourd — plusieurs secondes sur un graphe froid — là où un cheminement
+   * piéton se rend en quelques dizaines de millisecondes. Un dépassement de
+   * délai sur le premier ne dit rien du second, et la carte perdait alors ses
+   * tracés **pour une raison sans rapport avec eux** : le même trajet
+   * s'affichait routé ou à vol d'oiseau selon la charge du moteur, sans que
+   * rien dans la requête ne l'explique.
    *
-   * ## Ce que coûte l'étape quand elle a lieu
+   * La décision revient donc au `StreetRoutingService`, seul à observer le
+   * moteur sur les requêtes qu'il lui adresse : son coupe-circuit s'ouvre après
+   * une rafale intégralement muette et protège la latence exactement comme le
+   * faisait ce test, sans en partager l'angle mort.
+   *
+   * ## Ce que coûte l'étape
    *
    * Un aller-retour, en parallèle et sous budget (voir `StreetRoutingService`).
    * Elle ne peut pas échouer : le service ne lève jamais, et un cheminement
@@ -220,22 +224,12 @@ export class RoutesService {
    * @param itineraries Itinéraires issus de la fusion
    * @param wheelchair Exigence PMR du profil — elle change le cheminement
    *   piéton demandé (C12)
-   * @param engineReachable `false` quand la collecte a conclu qu'OTP ne répond pas
    * @returns Les mêmes itinéraires, tracés au réseau réel là où c'était possible
    */
   private async traceStreetSegments(
     itineraries: readonly ItineraryDto[],
     wheelchair: boolean,
-    engineReachable: boolean,
   ): Promise<ItineraryDto[]> {
-    if (!engineReachable) {
-      this.logger.debug(
-        'Moteur de routage indisponible : les segments marche et vélo gardent leur tracé à vol ' +
-          "d'oiseau (UF-702).",
-      );
-      return [...itineraries];
-    }
-
     const queries = collectStreetPathQueries(itineraries, wheelchair);
     if (queries.length === 0) return [...itineraries];
 
