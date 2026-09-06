@@ -1,6 +1,7 @@
 # Environnement de PRODUCTION — UrbanFlow Mobility (BUG-002, #106).
 #
 #   db    : PostgreSQL + PostGIS, volume nommé, JAMAIS exposé sur l'hôte
+#   otp   : OpenTripPlanner, bâti sur place, JAMAIS exposé sur l'hôte (BUG-003)
 #   api   : API Gateway NestJS, image publiée
 #   web   : PWA Next.js, image publiée
 #   caddy : terminaison TLS + routage, seul service exposé (80/443)
@@ -71,6 +72,13 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      # `service_started`, PAS `service_healthy` : le graphe met plusieurs
+      # minutes à se charger, et faire attendre l'API derrière lui rendrait
+      # l'inscription et le suivi carbone indisponibles pendant ce temps — pour
+      # une source dont l'absence est précisément gérée en dégradation
+      # gracieuse (C10). L'API démarre, le mode TC apparaît quand OTP est prêt.
+      otp:
+        condition: service_started
     environment:
       NODE_ENV: production
       # Étiquette des journaux. L'image porte `preproduction` par défaut
@@ -107,16 +115,17 @@ services:
       # facultatif : `validateEnv` les exige, et leur absence empêche l'API de
       # démarrer — même si le mode qu'elles configurent n'est pas déployé.
       #
-      # OpenTripPlanner n'est PAS encore déployé en production (étape 4 du
-      # ticket #106). Le nom `otp` ne résout donc pas : l'appel échoue tout de
-      # suite côté DNS et le mode transports en commun est simplement ignoré
-      # (dégradation gracieuse par `Promise.allSettled` — C10). Le délai est
-      # réglé bas pour que cet échec reste instantané en toute circonstance :
-      # aucune requête de planification ne doit attendre douze secondes une
-      # réponse qui ne viendra pas (C5/C10). À remonter à 12000 le jour où OTP
-      # tourne réellement.
+      # OpenTripPlanner est déployé depuis BUG-003 (service `otp` ci-dessous).
+      #
+      # Le délai repasse à 12000, la valeur du développement. Les 2000 posés par
+      # BUG-002 avaient un sens tant que le moteur était absent — faire échouer
+      # l'appel instantanément plutôt que de faire attendre l'usager. Les garder
+      # une fois OTP en place aurait recréé le défaut sous une autre forme : un
+      # `plan` sur graphe froid demande plusieurs secondes, il aurait expiré à
+      # chaque fois, et la production serait restée sans transports en commun ET
+      # sans tracé de voirie — avec, cette fois, un moteur qui tourne.
       OTP_BASE_URL: ${OTP_BASE_URL:-http://otp:8080}
-      OTP_TIMEOUT_MS: ${OTP_TIMEOUT_MS:-2000}
+      OTP_TIMEOUT_MS: ${OTP_TIMEOUT_MS:-12000}
 
       # Flux Vélo'v de la Métropole de Lyon — ouvert, sans clé d'API.
       GBFS_DISCOVERY_URL: ${GBFS_DISCOVERY_URL:-https://download.data.grandlyon.com/files/rdata/jcd_jcdecaux.jcdvelov/gbfs.json}
@@ -133,6 +142,74 @@ services:
       timeout: 5s
       retries: 3
       start_period: 20s
+
+  # ------------------------------------------------- moteur de routage (BUG-003)
+  # OpenTripPlanner : itinéraires en transports en commun (F3) **et**
+  # cheminements piétons/cyclables de la carte (UF-702).
+  #
+  # ## Pourquoi ce service manquait, et ce que son absence coûtait
+  #
+  # BUG-002 a rétabli l'API sans déployer OTP : la pile répondait, mais le
+  # planificateur ne rendait que marche, vélo et trottinette — et tous les
+  # tracés en ligne droite, à travers les immeubles et le Rhône, puisque le même
+  # moteur route les cheminements de voirie. Le scénario de référence (Marie,
+  # Part-Dieu → Bellecour) n'était pas jouable en production.
+  #
+  # ## Bâti sur le serveur, à la différence de l'API et de la PWA
+  #
+  # Les deux autres services tirent une image publiée : un VPS n'a pas à
+  # compiler pour servir. OTP fait exception parce que son image n'est pas le
+  # livrable — le **graphe** l'est, et il se construit à partir de données
+  # (`docker/otp/data/`) qui pèsent 85 Mo, ne sont pas versionnées et changent à
+  # un tout autre rythme que le code. Publier une image de 300 Mo par mise à
+  # jour du GTFS pour un contenu que le volume conserve déjà serait payer cher
+  # une reproductibilité que le volume assure.
+  #
+  # ## Avant le premier démarrage
+  #
+  # Les données doivent être présentes sur le serveur (`make prod-otp-data`), et
+  # la première construction du graphe prend plusieurs minutes en occupant
+  # `OTP_MAX_MEMORY`. Voir docs/production.md.
+  otp:
+    build:
+      context: ./docker/otp
+      args:
+        OTP_VERSION: ${OTP_VERSION:-2.7.0}
+    image: urbanflow-otp:${OTP_VERSION:-2.7.0}
+    restart: unless-stopped
+    environment:
+      # 4 Go par défaut et non les 6 du développement : le serveur en a 11 au
+      # total, et la base, l'API, la PWA et Caddy doivent tenir à côté. À
+      # relever dans .env.prod si la construction du graphe est tuée par l'OOM
+      # killer — le symptôme est un conteneur qui disparaît sans message.
+      JAVA_OPTS: -Xmx${OTP_MAX_MEMORY:-4g}
+      OTP_FORCE_REBUILD: ${OTP_FORCE_REBUILD:-0}
+    volumes:
+      # Le graphe survit aux redémarrages et aux mises à jour d'image : sans ce
+      # volume, chaque `up -d` rendrait le site sans transports en commun le
+      # temps d'une reconstruction.
+      - urbanflow_otp_graph:/var/opentripplanner
+      - ./docker/otp/data:/var/otp-seed/data:ro
+      - ./docker/otp/config:/var/otp-seed/config:ro
+    # AUCUN `ports:` — volontaire, comme pour la base. OTP n'a ni
+    # authentification ni limitation de débit : son API GraphQL exposée sur
+    # l'internet serait un moteur de calcul offert à qui le trouve (C4/OWASP
+    # A05). Seule l'API le joint, sur le réseau interne du projet.
+    healthcheck:
+      # Cette build n'expose pas d'endpoint actuator : on interroge l'API
+      # GraphQL, qui ne répond qu'une fois le graphe chargé — un signal de
+      # disponibilité, pas un simple ping.
+      test:
+        [
+          'CMD-SHELL',
+          'curl -fsS -X POST -H "Content-Type: application/json" -d "{\"query\":\"{serviceTimeRange{start}}\"}" http://localhost:8080/otp/gtfs/v1 | grep -q serviceTimeRange',
+        ]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      # La première construction du graphe prend plusieurs minutes : sans cette
+      # fenêtre, Docker déclarerait le conteneur « unhealthy » avant la fin.
+      start_period: 20m
 
   # ----------------------------------------------------------------- PWA
   web:
@@ -179,5 +256,8 @@ services:
 
 volumes:
   urbanflow_pgdata:
+  # Graphe OTP construit sur le serveur — plusieurs minutes de calcul, à ne
+  # jamais perdre sur un simple redémarrage.
+  urbanflow_otp_graph:
   caddy_data:
   caddy_config:

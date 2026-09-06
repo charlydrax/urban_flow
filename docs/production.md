@@ -15,12 +15,13 @@ production (`https://urbanflow-lyon.com`).
 
 ## 1. Ce qui tourne, et où
 
-| Service | Image                            | Exposé   | Rôle                               |
-| ------- | -------------------------------- | -------- | ---------------------------------- |
-| `caddy` | `caddy:2`                        | 80 / 443 | TLS (Let's Encrypt), routage       |
-| `web`   | `charlydrax/urbanflow-web:<tag>` | non      | PWA Next.js (sortie autonome)      |
-| `api`   | `charlydrax/urbanflow-api:<tag>` | non      | API Gateway NestJS                 |
-| `db`    | `postgis/postgis:16-3.4`         | non      | PostgreSQL + PostGIS, volume nommé |
+| Service | Image                            | Exposé   | Rôle                                                   |
+| ------- | -------------------------------- | -------- | ------------------------------------------------------ |
+| `caddy` | `caddy:2`                        | 80 / 443 | TLS (Let's Encrypt), routage                           |
+| `web`   | `charlydrax/urbanflow-web:<tag>` | non      | PWA Next.js (sortie autonome)                          |
+| `api`   | `charlydrax/urbanflow-api:<tag>` | non      | API Gateway NestJS                                     |
+| `db`    | `postgis/postgis:16-3.4`         | non      | PostgreSQL + PostGIS, volume nommé                     |
+| `otp`   | `urbanflow-otp:<version>`        | non      | OpenTripPlanner — TC **et** tracés de voirie (BUG-003) |
 
 **Un seul service est joignable depuis l'internet.** L'API, la PWA et la base
 ne publient aucun port sur l'hôte : tout passe par Caddy (C4/C11). C'est
@@ -43,7 +44,13 @@ tout le reste ->  web:3000
 ├── .env.prod                    <- secrets, chmod 600, JAMAIS versionné
 └── docker/
     ├── caddy/Caddyfile          <- copié depuis le dépôt
-    └── initdb/01-init-postgis.sql
+    ├── initdb/01-init-postgis.sql
+    └── otp/                     <- copié depuis le dépôt (BUG-003)
+        ├── Dockerfile
+        ├── entrypoint.sh
+        ├── fetch-data.sh
+        ├── config/              <- build-config.json, router-config.json
+        └── data/                <- gtfs-tcl.zip + lyon.osm.pbf, NON versionnés
 ```
 
 Les trois fichiers versionnés sont **copiés depuis le dépôt**, jamais édités
@@ -59,21 +66,27 @@ modification que personne ne relira.
 scp docker-compose.prod.yml    root@<serveur>:/home/debian/urbanflow/
 scp docker/caddy/Caddyfile     root@<serveur>:/home/debian/urbanflow/docker/caddy/
 scp docker/initdb/*.sql        root@<serveur>:/home/debian/urbanflow/docker/initdb/
+scp -r docker/otp              root@<serveur>:/home/debian/urbanflow/docker/   # BUG-003
 
 # 2. Créer les secrets (une seule fois)
 cp .env.production.example .env.prod
 chmod 600 .env.prod
 $EDITOR .env.prod        # DOMAIN, ACME_EMAIL, POSTGRES_PASSWORD, JWT_SECRET
 
-# 3. Démarrer
+# 3. Récupérer les données du moteur de routage (85 Mo, une seule fois)
 cd /home/debian/urbanflow
+make prod-otp-data       # GTFS TCL + réseau OSM lyonnais
+
+# 4. Démarrer
+docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build otp
 docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
 
-# 4. Appliquer le schéma
+# 5. Appliquer le schéma
 make prod-migrate        # ou la commande complète, section 4
 
-# 5. Vérifier
+# 6. Vérifier
 curl -fsS https://<domaine>/api/health
+make prod-otp-test       # le moteur répond-il depuis l'API ?
 ```
 
 ### La vérification qui compte
@@ -249,14 +262,69 @@ Voir [`bug-process.md`](bug-process.md).
 
 ---
 
-## 8. Écarts assumés, à ce jour
+## 8. Le moteur de routage (BUG-003)
 
-| Écart                                    | Conséquence                                                                                                                                                                                                                                                     |
-| ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **OpenTripPlanner non déployé**          | Pas de transports en commun en production. Le planificateur dégrade gracieusement (C10) et ne rend que marche, vélo et trottinette — soit la moitié de F2/F3. Le serveur a la mémoire nécessaire (11 Go) : c'est un déploiement à faire, pas une impossibilité. |
-| **Nœud unique, sans redondance**         | Toute maintenance est une interruption de service.                                                                                                                                                                                                              |
-| **Sauvegarde manuelle**                  | Aucune restauration n'a encore été rejouée — une sauvegarde jamais restaurée n'est pas une sauvegarde.                                                                                                                                                          |
-| **Déploiement manuel (`scp` + `up -d`)** | Aucune trace de qui a déployé quoi, ni quand. Une chaîne d'intégration continue le corrigerait.                                                                                                                                                                 |
+OTP rend **deux** services, et c'est ce qui explique l'ampleur de son absence :
+
+1. les itinéraires en transports en commun (F3) ;
+2. le cheminement piéton et cyclable de **tous** les segments dessinés sur la
+   carte (UF-702). Sans lui, la marche et le vélo sont tracés à vol d'oiseau —
+   des droites qui traversent les immeubles et le Rhône.
+
+Tant qu'il manquait, la production affichait donc une carte fausse à tout le
+monde, connecté ou non : c'est le symptôme qui a fait ouvrir BUG-003.
+
+### Ce qu'il faut savoir avant d'y toucher
+
+| Point                   | Conséquence pratique                                                                                                         |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| Bâti **sur le serveur** | Seul service dans ce cas : le livrable est le graphe, pas l'image. `make prod-otp-up` construit puis démarre.                |
+| Données non versionnées | `docker/otp/data/` (85 Mo) vient de `make prod-otp-data`, jamais du dépôt.                                                   |
+| Premier démarrage lent  | La construction du graphe prend plusieurs minutes et occupe `OTP_MAX_MEMORY` (4 Go par défaut). Suivre `make prod-otp-logs`. |
+| Volume nommé            | `urbanflow_otp_graph` conserve le graphe : un `up -d` ne le reconstruit pas.                                                 |
+| `OTP_FORCE_REBUILD=1`   | Force la reconstruction (mise à jour du GTFS). **À remettre à 0 ensuite**, sinon chaque redémarrage recommence.              |
+| Jamais exposé           | Aucun `ports:` : OTP n'a ni authentification ni limitation de débit (C4/OWASP A05).                                          |
+
+### Vérifier qu'il sert vraiment
+
+`make prod-ps` dit `healthy` dès que le graphe est chargé, mais la question
+utile est posée depuis l'API, sur le réseau interne :
+
+```bash
+make prod-otp-test        # doit rendre serviceTimeRange, pas une erreur DNS
+```
+
+Puis, de l'extérieur, sur le scénario de référence :
+
+```bash
+curl -s -X POST https://<domaine>/api/routes/plan -H 'Content-Type: application/json'   -d '{"from":{"label":"Part-Dieu","lat":45.760696,"lng":4.859402},
+       "to":{"label":"Bellecour","lat":45.757814,"lng":4.832011}}'   | grep -o '"geometrySource":"[a-z]*"' | sort | uniq -c
+```
+
+`"routed"` doit apparaître. **Un `"straight"` partout signifie que le moteur ne
+répond pas** — quelle qu'en soit la raison, et quel que soit le compte utilisé.
+C'est la mesure qui distingue « la carte s'affiche » de « la carte est juste ».
+
+### Si les tracés restent droits
+
+| Symptôme                                          | Cause probable                                                     |
+| ------------------------------------------------- | ------------------------------------------------------------------ |
+| `sources.transit.available: false`, `timeout`     | Graphe pas encore chargé, ou `OTP_TIMEOUT_MS` trop bas             |
+| Conteneur `otp` disparu sans message              | Tué par l'OOM killer — relever `OTP_MAX_MEMORY`, ou libérer la RAM |
+| `Moteur de voirie muet` dans `make prod-logs-api` | Le coupe-circuit s'est ouvert : OTP est injoignable depuis l'API   |
+
+Le journal de l'API est la source de vérité : il compte les cheminements
+obtenus sans jamais dire où ils mènent (C11).
+
+---
+
+## 9. Écarts assumés, à ce jour
+
+| Écart                                    | Conséquence                                                                                            |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| **Nœud unique, sans redondance**         | Toute maintenance est une interruption de service.                                                     |
+| **Sauvegarde manuelle**                  | Aucune restauration n'a encore été rejouée — une sauvegarde jamais restaurée n'est pas une sauvegarde. |
+| **Déploiement manuel (`scp` + `up -d`)** | Aucune trace de qui a déployé quoi, ni quand. Une chaîne d'intégration continue le corrigerait.        |
 
 Ces écarts sont **connus et écrits**, ce qui les distingue de BUG-002 : un
 écart documenté est un choix, un écart ignoré est une panne à retardement.

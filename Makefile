@@ -30,7 +30,8 @@ PROD_COMPOSE := $(COMPOSE) -f docker-compose.prod.yml --env-file .env.prod
         otp-data otp-data-force otp-up otp-logs otp-wait otp-test otp-rebuild otp-reset \
         cycle-import cycle-import-dry cycle-check \
         prod-config prod-up prod-ps prod-logs-api prod-pull prod-migrate \
-        prod-migrate-status prod-health prod-backup
+        prod-migrate-status prod-health prod-backup \
+        prod-otp-data prod-otp-up prod-otp-logs prod-otp-test
 
 ## help: Affiche la liste des cibles disponibles.
 help:
@@ -268,6 +269,29 @@ prod-migrate-status:
 ## prod-health: Sonde de santé de l'API de production (API + base).
 prod-health:
 	@$(PROD_COMPOSE) exec api wget -q -O - http://localhost:3001/api/health && echo ""
+
+# ------------------------------- moteur de routage en production (BUG-003) --
+# OTP est le seul service de production bâti sur place : le livrable n'est pas
+# l'image mais le graphe, construit à partir de 85 Mo de données non versionnées.
+
+## prod-otp-data: Télécharge GTFS + OSM sur le serveur (prérequis au graphe).
+prod-otp-data:
+	./docker/otp/fetch-data.sh
+
+## prod-otp-up: Bâtit l'image OTP et démarre le moteur (1er lancement : plusieurs minutes).
+prod-otp-up:
+	$(PROD_COMPOSE) up -d --build $(OTP_SERVICE)
+	@echo "Construction du graphe en cours : make prod-otp-logs"
+
+## prod-otp-logs: Suit les journaux d'OTP (construction puis chargement du graphe).
+prod-otp-logs:
+	$(PROD_COMPOSE) logs -f --tail=100 $(OTP_SERVICE)
+
+## prod-otp-test: Vérifie depuis l'API que le moteur répond (recette BUG-003).
+prod-otp-test:
+	@$(PROD_COMPOSE) exec api wget -q -O - --header='Content-Type: application/json' \
+		--post-data='{"query":"{serviceTimeRange{start end}}"}' \
+		http://otp:8080/otp/gtfs/v1 && echo ""
 
 ## prod-backup: Sauvegarde compressée de la base (données personnelles — C8/C11).
 prod-backup:

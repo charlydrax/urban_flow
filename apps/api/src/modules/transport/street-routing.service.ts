@@ -136,6 +136,38 @@ const BATCH_BUDGET_MS = 2000;
 /** Sentinelle interne : la rafale a dépassé son budget avant d'obtenir ce tracé. */
 const BUDGET_EXCEEDED = Symbol('street-path-budget-exceeded');
 
+/** Sentinelle interne : le moteur n'a pas répondu — panne, délai, réseau. */
+const ENGINE_SILENT = Symbol('street-path-engine-silent');
+
+/**
+ * Durée pendant laquelle on cesse d'interroger un moteur qui vient de se taire
+ * sur **toute** une rafale, en millisecondes.
+ *
+ * ## Pourquoi un coupe-circuit ici, et plus dans l'appelant
+ *
+ * Jusqu'à ce ticket, le Service Itinéraire décidait à la place de ce service :
+ * il ne l'appelait que si la source TC venait de répondre, au motif que les
+ * deux parlent au même OpenTripPlanner. Le raccourci a un angle mort — un
+ * `plan` TC est un calcul lourd qui peut expirer sur un moteur parfaitement
+ * vivant, alors qu'un cheminement piéton se rend en quelques dizaines de
+ * millisecondes. Le tracé de la marche et du vélo était alors perdu **parce
+ * que le calcul des transports en commun avait été lent**, ce qui donnait des
+ * itinéraires tantôt routés, tantôt à vol d'oiseau, sans que rien dans la
+ * requête ne l'explique.
+ *
+ * La règle est donc rendue à ce service, qui seul observe le moteur sur les
+ * requêtes qu'il lui adresse réellement : une rafale intégralement muette
+ * ouvre le circuit, et les suivantes rendent la main sans payer le budget.
+ *
+ * ## Pourquoi une minute
+ *
+ * Assez long pour qu'un moteur arrêté ne coûte qu'une rafale perdue par minute
+ * (C5/C10 — la production tourne sans OTP tant que BUG-003 n'est pas déployé),
+ * assez court pour qu'un redémarrage soit repris sans intervention ni purge de
+ * cache. Une seule rafale de sondage : la première qui suit le délai.
+ */
+const ENGINE_COOLDOWN_MS = 60 * 1000;
+
 /**
  * Clé d'identité d'un cheminement — mode, extrémités arrondies, exigence PMR.
  *
@@ -189,8 +221,8 @@ export function streetPathKey(query: StreetPathQuery): string {
  *    à distinguer et à afficher.
  *
  * Le prix à payer est assumé et visible en production aujourd'hui : sans OTP
- * déployé (BUG-002), tous les tracés restent des droites. C'est précisément ce
- * que `geometrySource: 'straight'` sert à dire.
+ * déployé (BUG-002, puis BUG-003), tous les tracés restent des droites. C'est
+ * précisément ce que `geometrySource: 'straight'` sert à dire.
  *
  * ## Contrat de résilience
  *
@@ -198,6 +230,12 @@ export function streetPathKey(query: StreetPathQuery): string {
  * tous donnent l'absence de tracé pour ce cheminement, et l'appelant garde sa
  * ligne droite. Le tracé est un confort ; le perdre ne doit pas coûter un
  * itinéraire (C10).
+ *
+ * **Décide seul s'il faut interroger le moteur.** Depuis BUG-003, l'appelant
+ * n'a plus à savoir si OTP répond : le coupe-circuit de ce service
+ * ({@link ENGINE_COOLDOWN_MS}) protège la latence quand le moteur est arrêté,
+ * et rend le tracé dès qu'il revient. C'est ce qui garantit qu'un même trajet
+ * s'affiche de la même façon d'une recherche à l'autre, pour tout le monde.
  *
  * Couvre : C6 (tracés fidèles au réseau réel), C5 (mémoïsation, jeu de champs
  * minimal, budget borné), C10 (dégradation gracieuse), C11 (les journaux
@@ -216,6 +254,14 @@ export class StreetRoutingService {
 
   /** Budget effectif d'une rafale, borné par le délai propre d'OTP. */
   private readonly budgetMs: number;
+
+  /**
+   * Instant (epoch ms) jusqu'auquel le moteur est tenu pour muet.
+   *
+   * `0` — la valeur de départ — signifie « circuit fermé » : toute date passée
+   * laisse partir la rafale suivante. Voir {@link ENGINE_COOLDOWN_MS}.
+   */
+  private engineSilentUntil = 0;
 
   constructor(
     private readonly otp: OtpClient,
@@ -271,6 +317,18 @@ export class StreetRoutingService {
       return routed;
     }
 
+    // Coupe-circuit : le moteur s'est tu sur toute une rafale il y a moins
+    // d'une minute. On garde les droites sans payer le budget une seconde fois
+    // (C10) — et sans que l'appelant ait à savoir pourquoi.
+    if (Date.now() < this.engineSilentUntil) {
+      this.logger.debug(
+        `Cheminements : moteur tenu pour muet encore ` +
+          `${Math.ceil((this.engineSilentUntil - Date.now()) / 1000)} s, ` +
+          `${pending.size} tracé(s) laissé(s) à vol d'oiseau.`,
+      );
+      return routed;
+    }
+
     const startedAt = Date.now();
     let timer: NodeJS.Timeout | undefined;
     const budget = new Promise<typeof BUDGET_EXCEEDED>((resolve) => {
@@ -288,16 +346,26 @@ export class StreetRoutingService {
         }),
       );
 
+      // Compté pour le coupe-circuit : une rafale dont AUCUNE requête n'a été
+      // honorée dit quelque chose du moteur, là où un échec isolé ne dit rien.
+      let silent = 0;
+
       for (const { key, geometry } of settled) {
-        // `typeof` plutôt qu'une comparaison à la sentinelle : `Promise.race`
-        // élargit le symbole unique en `symbol`, et le compilateur ne
+        // `typeof` plutôt qu'une comparaison aux sentinelles : `Promise.race`
+        // élargit les symboles uniques en `symbol`, et le compilateur ne
         // rétrécirait pas l'union sur l'égalité.
-        if (typeof geometry === 'symbol') continue;
-        // Le budget dépassé n'est pas mis en cache : la prochaine recherche
-        // doit pouvoir retenter, le moteur ayant pu se remettre entre-temps.
+        if (typeof geometry === 'symbol') {
+          // Ni le budget dépassé ni le silence du moteur ne sont mis en cache :
+          // la prochaine recherche doit pouvoir retenter, le moteur ayant pu se
+          // remettre entre-temps.
+          silent += 1;
+          continue;
+        }
         this.writeCache(key, geometry);
         if (geometry) routed.set(key, geometry);
       }
+
+      this.updateBreaker(silent, pending.size);
     } finally {
       if (timer) clearTimeout(timer);
     }
@@ -311,12 +379,45 @@ export class StreetRoutingService {
   }
 
   /**
+   * Ouvre ou referme le coupe-circuit au vu de la rafale qui vient de finir.
+   *
+   * Le critère est **l'unanimité**, pas la proportion : un cheminement isolé
+   * peut échouer parce qu'il n'existe pas (une extrémité au milieu du Rhône),
+   * et en conclure que le moteur est en panne priverait de tracé les segments
+   * parfaitement routables des recherches suivantes.
+   *
+   * @param silent Nombre de requêtes restées sans réponse exploitable
+   * @param attempted Nombre de requêtes effectivement parties sur le réseau
+   */
+  private updateBreaker(silent: number, attempted: number): void {
+    if (attempted > 0 && silent === attempted) {
+      this.engineSilentUntil = Date.now() + ENGINE_COOLDOWN_MS;
+      // `warn` et non `debug` : contrairement à l'échec d'un cheminement isolé,
+      // un moteur muet se voit sur la carte de tous les usagers — c'est le
+      // symptôme que BUG-003 demande de pouvoir lire dans les journaux. Aucune
+      // coordonnée n'y figure (C11).
+      this.logger.warn(
+        `Moteur de voirie muet sur ${attempted} cheminement(s) : tracés à vol d'oiseau ` +
+          `pendant ${ENGINE_COOLDOWN_MS / 1000} s.`,
+      );
+      return;
+    }
+
+    // Une seule réponse suffit à refermer le circuit : le moteur est là.
+    this.engineSilentUntil = 0;
+  }
+
+  /**
    * Interroge le moteur pour **un** cheminement.
    *
-   * @returns Le tracé, ou `null` si le moteur n'a rien pu proposer — panne
-   *   comprise. Ne lève jamais : voir le contrat de résilience de la classe.
+   * @returns Le tracé ; `null` si le moteur a répondu qu'il n'y a pas de chemin
+   *   (une réponse, qu'il est légitime de mémoriser) ; {@link ENGINE_SILENT}
+   *   s'il n'a pas répondu du tout. Ne lève jamais : voir le contrat de
+   *   résilience de la classe.
    */
-  private async fetchPath(query: StreetPathQuery): Promise<LineStringGeometry | null> {
+  private async fetchPath(
+    query: StreetPathQuery,
+  ): Promise<LineStringGeometry | null | typeof ENGINE_SILENT> {
     const profile = OTP_STREET_MODES[query.mode];
     if (!profile) return null;
 
@@ -341,7 +442,7 @@ export class StreetRoutingService {
       this.logger.debug(
         `Cheminement ${query.mode} indisponible : ${error instanceof Error ? error.message : String(error)}`,
       );
-      return null;
+      return ENGINE_SILENT;
     }
   }
 

@@ -290,17 +290,8 @@ racine, et elle est corrigée par `docker-compose.prod.yml`,
 
 **Ce qui reste ouvert, et qu'il ne faut pas oublier :**
 
-1. **OpenTripPlanner n'est pas déployé en production.** Le planificateur
-   dégrade gracieusement (C10) et ne rend donc que marche, vélo et trottinette
-   — soit la moitié de F2/F3, et pas le scénario de référence (Marie,
-   Part-Dieu → Bellecour). Le serveur a la mémoire nécessaire (11 Go) : c'est
-   un déploiement à faire, pas une impossibilité. Tant qu'il n'est pas fait,
-   `OTP_TIMEOUT_MS` reste bas (2000) pour que l'échec soit instantané.
-   **Depuis UF-702, une seconde conséquence** : le même moteur route les
-   cheminements piétons et cyclables. Sans lui, tous les segments restent
-   tracés à vol d'oiseau — l'application le dit (note de légende et
-   alternative textuelle), et n'appelle même pas le routeur, mais la carte de
-   production reste faite de droites.
+1. **OpenTripPlanner n'est pas déployé en production.** → repris par
+   **BUG-003** ci-dessous, qui en fait son objet principal.
 2. **`cycle_paths` est créée vide** par la migration `uf304`. Sans
    `npm run db:import:cycle-paths`, la recherche de pistes ne rend jamais rien
    — et le fait **silencieusement**, ce qui est le plus traître.
@@ -310,3 +301,38 @@ racine, et elle est corrigée par `docker-compose.prod.yml`,
 **Réflexe à garder.** Une image à jour sur une base en retard est une panne qui
 attend son premier utilisateur : le 03/09, la production ne comptait **qu'une
 migration sur sept**. Vérifier `make prod-migrate-status` à chaque mise en ligne.
+
+### BUG-003 (#112) — itinéraires tracés à travers les immeubles — `P1`
+
+**Le symptôme.** Sur la carte, les segments marche et vélo sont dessinés en
+ligne droite : ils traversent les bâtiments, le Rhône et la Saône au lieu de
+suivre les rues. En production, **pour tout le monde**, y compris le compte de
+démonstration.
+
+**La cause, et pourquoi elle se déguisait en problème de compte.** Le tracé de
+voirie (UF-702) vient d'OpenTripPlanner, qui **n'était pas déployé en
+production** (reliquat n°1 de BUG-002). Le planificateur dégrade alors
+gracieusement : les segments gardent leur droite de repli, marquée
+`geometrySource: 'straight'`. Rien là-dedans ne dépend du compte connecté — ce
+que l'API confirme, à identité près, sur les quatre profils (invité, compte
+ordinaire, profil PMR, admin de démonstration).
+
+Un second défaut, celui-là dans le code, rendait le tracé **intermittent** en
+local et expliquait l'impression d'un lien avec le compte : le Service
+Itinéraire ne demandait les cheminements que si la source TC venait de
+répondre, au motif que les deux parlent au même moteur. Or un `plan` GTFS est
+un calcul lourd qui peut expirer sur un moteur parfaitement vivant, alors qu'un
+cheminement piéton se rend en quelques dizaines de millisecondes. Une recherche
+lente perdait donc ses tracés ; la suivante, servie par le cache, les
+retrouvait.
+
+**Corrigé par :** le service `otp` du `docker-compose.prod.yml`
+(+ `OTP_TIMEOUT_MS` remonté à 12000, cibles `make prod-otp-*`,
+[`docs/production.md` § 8](docs/production.md)) et le coupe-circuit du
+`StreetRoutingService`, qui rend au routeur la décision de renoncer.
+
+**Ce qui reste à faire, et qui ne peut l'être que depuis le serveur :** copier
+`docker/otp/`, lancer `make prod-otp-data` puis `make prod-otp-up`, attendre la
+construction du graphe, et vérifier avec `make prod-otp-test`. Tant que ce
+n'est pas fait, la production continue de dessiner des droites — le code, lui,
+est prêt à les remplacer.
