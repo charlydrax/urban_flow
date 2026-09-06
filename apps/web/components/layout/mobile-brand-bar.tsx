@@ -1,5 +1,7 @@
 import Link from 'next/link';
 
+import { BrandMark } from '../brand/brand-logo';
+
 /**
  * Barre de marque du haut, **mobile uniquement** (UF-803).
  *
@@ -19,22 +21,22 @@ import Link from 'next/link';
  * un Server Component : le HTML est rendu une fois côté serveur et rien n'est
  * envoyé au navigateur.
  *
- * Accessibilité (C7) : le monogramme est décoratif (`aria-hidden`), le nom
- * accessible du lien vient du texte « UrbanFlow Mobility » qui le suit.
+ * Accessibilité (C7) : l'emblème est décoratif (`alt=""`), le nom accessible du
+ * lien vient du texte « UrbanFlow Mobility » qui le suit.
+ *
+ * BUG-004 : le monogramme « U » provisoire a laissé place à l'emblème du logo
+ * officiel. C'est bien `BrandMark` et non `BrandLockup` qui est employé ici —
+ * la barre fait 40 px de haut, où le mot-symbole du bloc complet serait
+ * illisible, et le nom de la marque est de toute façon écrit à côté.
  */
 export function MobileBrandBar() {
   return (
     <header className="border-b border-ink-200 bg-white lg:hidden">
       <Link
         href="/"
-        className="flex items-center gap-2 px-4 py-2.5 font-display text-base font-extrabold text-primary-dark"
+        className="flex items-center gap-2 px-4 py-2 font-display text-base font-extrabold text-primary-dark"
       >
-        <span
-          aria-hidden="true"
-          className="flex size-6 items-center justify-center rounded-[6px] bg-primary text-[12px] text-white"
-        >
-          U
-        </span>
+        <BrandMark alt="" className="h-7 w-auto" />
         UrbanFlow <span className="font-normal">Mobility</span>
       </Link>
     </header>

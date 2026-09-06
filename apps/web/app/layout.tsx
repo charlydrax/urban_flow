@@ -38,10 +38,29 @@ export const metadata: Metadata = {
   manifest: '/manifest.json',
   applicationName: 'UrbanFlow Mobility',
   appleWebApp: { capable: true, title: 'UrbanFlow', statusBarStyle: 'default' },
-  // iOS ignore les icônes du manifest : apple-touch-icon requis pour l'écran d'accueil (C1)
+  /*
+   * Icônes déclarées **toutes ici** (BUG-004), et non par la convention de
+   * fichier `app/favicon.ico` : dès qu'une clé `icons` existe dans les
+   * métadonnées, elle prime sur le fichier magique, et faire cohabiter les deux
+   * mécanismes revient à écrire la même chose à deux endroits pour n'en voir
+   * qu'un seul agir. `public/favicon.ico` reste servi tel quel à la racine —
+   * c'est ce que réclame un navigateur qui ignore les balises `<link>`, ainsi
+   * que les agrégateurs de flux et les moteurs de recherche.
+   *
+   * `favicon.ico` embarque 16/32/48 px carrés ; le fichier fourni pour ce
+   * ticket mesurait 256 × 180, format qu'un onglet aurait étiré.
+   *
+   * iOS ignore les icônes du manifest : `apple-touch-icon` reste requis pour
+   * l'écran d'accueil (C1).
+   */
   icons: {
-    icon: '/icons/icon-192.png',
-    apple: '/icons/icon-192.png',
+    icon: [
+      { url: '/favicon.ico', sizes: '16x16 32x32 48x48', type: 'image/x-icon' },
+      { url: '/icons/icon-192.png', sizes: '192x192', type: 'image/png' },
+      { url: '/icons/icon-512.png', sizes: '512x512', type: 'image/png' },
+    ],
+    apple: [{ url: '/icons/apple-touch-icon-180.png', sizes: '180x180', type: 'image/png' }],
+    shortcut: '/favicon.ico',
   },
 };
 
